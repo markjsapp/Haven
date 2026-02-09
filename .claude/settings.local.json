@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(while read f)",
+      "Bash(do echo \"$f\")",
+      "Bash(done)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx vite build:*)",
+      "Bash(docker:*)",
+      "Bash(cargo --version:*)",
+      "Bash(rustc --version:*)",
+      "Bash(cargo build:*)",
+      "WebFetch(domain:docs.betterdiscord.app)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:getstream.io)",
+      "WebFetch(domain:www.eggradients.com)",
+      "Bash(cargo check:*)"
+    ]
+  }
+}

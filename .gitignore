@@ -1,0 +1,32 @@
+# Rust build artifacts
+/target/
+
+# Environment files
+.env
+.env.*
+
+# Node
+node_modules/
+
+# TypeScript build output
+packages/*/dist/
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip
+
+# Docker overrides
+docker-compose.override.yml
+docs/haven-architecture-plan.md
