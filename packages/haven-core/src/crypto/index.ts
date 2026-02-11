@@ -1,4 +1,5 @@
 export { initSodium, toBase64, fromBase64, randomBytes } from "./utils.js";
+export { encryptFile, decryptFile, type EncryptedFile } from "./file.js";
 export {
   type IdentityKeyPair,
   type DHKeyPair,
@@ -19,3 +20,16 @@ export {
   serializeMessage,
   deserializeMessage,
 } from "./double-ratchet.js";
+export {
+  type SenderKeyState,
+  type ReceivedSenderKey,
+  type SenderKeyDistributionPayload,
+  GROUP_MSG_TYPE,
+  generateSenderKey,
+  createSkdmPayload,
+  parseSkdmPayload,
+  encryptSkdm,
+  decryptSkdm,
+  senderKeyEncrypt,
+  senderKeyDecrypt,
+} from "./sender-keys.js";

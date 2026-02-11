@@ -16,9 +16,20 @@ import type {
   SendMessageRequest,
   MessageResponse,
   MessageQuery,
-  UploadUrlResponse,
-  DownloadUrlResponse,
+  UploadResponse,
+  CreateInviteRequest,
+  InviteResponse,
+  ServerMemberResponse,
   ApiError,
+  DistributeSenderKeyRequest,
+  SenderKeyDistributionResponse,
+  ChannelMemberKeyInfo,
+  PresenceEntry,
+  UpdateKeysRequest,
+  ReactionGroup,
+  UserProfileResponse,
+  UpdateProfileRequest,
+  BlockedUserResponse,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -115,6 +126,10 @@ export class HavenApi {
     return this.get<PreKeyCountResponse>("/api/v1/keys/prekeys/count");
   }
 
+  async updateKeys(req: UpdateKeysRequest): Promise<void> {
+    await this.put("/api/v1/keys/identity", req);
+  }
+
   // ─── Servers ─────────────────────────────────────
 
   async listServers(): Promise<ServerResponse[]> {
@@ -143,6 +158,14 @@ export class HavenApi {
     await this.post(`/api/v1/channels/${channelId}/join`, {});
   }
 
+  async updateChannel(channelId: string, req: { encrypted_meta: string }): Promise<ChannelResponse> {
+    return this.put<ChannelResponse>(`/api/v1/channels/${channelId}`, req);
+  }
+
+  async deleteChannel(channelId: string): Promise<void> {
+    await this.delete(`/api/v1/channels/${channelId}`);
+  }
+
   async listDmChannels(): Promise<ChannelResponse[]> {
     return this.get<ChannelResponse[]>("/api/v1/dm");
   }
@@ -167,14 +190,154 @@ export class HavenApi {
     return this.post<MessageResponse>(`/api/v1/channels/${channelId}/messages`, req);
   }
 
-  // ─── Attachments ─────────────────────────────────
-
-  async requestUpload(): Promise<UploadUrlResponse> {
-    return this.post<UploadUrlResponse>("/api/v1/attachments/upload", {});
+  async getChannelReactions(channelId: string): Promise<ReactionGroup[]> {
+    return this.get<ReactionGroup[]>(`/api/v1/channels/${channelId}/reactions`);
   }
 
-  async requestDownload(attachmentId: string): Promise<DownloadUrlResponse> {
-    return this.get<DownloadUrlResponse>(`/api/v1/attachments/${attachmentId}`);
+  // ─── Attachments ─────────────────────────────────
+
+  /** Upload encrypted blob directly to backend. Returns attachment_id + storage_key. */
+  async uploadAttachment(blob: ArrayBuffer): Promise<UploadResponse> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+
+    const res = await fetch(`${this.baseUrl}/api/v1/attachments/upload`, {
+      method: "POST",
+      headers,
+      body: blob,
+    });
+
+    if (!res.ok) {
+      if (res.status === 401 && this.onTokenExpired) {
+        this.onTokenExpired();
+      }
+      const err: ApiError = await res.json().catch(() => ({
+        error: res.statusText,
+        status: res.status,
+      }));
+      throw new HavenApiError(err.error, err.status);
+    }
+
+    return res.json() as Promise<UploadResponse>;
+  }
+
+  /** Download encrypted blob from backend. Returns raw bytes. */
+  async downloadAttachment(attachmentId: string): Promise<ArrayBuffer> {
+    const headers: Record<string, string> = {};
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+
+    const res = await fetch(`${this.baseUrl}/api/v1/attachments/${attachmentId}`, {
+      method: "GET",
+      headers,
+    });
+
+    if (!res.ok) {
+      if (res.status === 401 && this.onTokenExpired) {
+        this.onTokenExpired();
+      }
+      throw new HavenApiError(`Download failed: ${res.statusText}`, res.status);
+    }
+
+    return res.arrayBuffer();
+  }
+
+  // ─── Invites ───────────────────────────────────────
+
+  async createInvite(serverId: string, req: CreateInviteRequest): Promise<InviteResponse> {
+    return this.post<InviteResponse>(`/api/v1/servers/${serverId}/invites`, req);
+  }
+
+  async listInvites(serverId: string): Promise<InviteResponse[]> {
+    return this.get<InviteResponse[]>(`/api/v1/servers/${serverId}/invites`);
+  }
+
+  async deleteInvite(serverId: string, inviteId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}/invites/${inviteId}`);
+  }
+
+  async joinByInvite(code: string): Promise<ServerResponse> {
+    return this.post<ServerResponse>(`/api/v1/invites/${code}/join`, {});
+  }
+
+  // ─── Server Members ───────────────────────────────
+
+  async listServerMembers(serverId: string): Promise<ServerMemberResponse[]> {
+    return this.get<ServerMemberResponse[]>(`/api/v1/servers/${serverId}/members`);
+  }
+
+  async kickMember(serverId: string, userId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}/members/${userId}`);
+  }
+
+  // ─── Sender Keys ───────────────────────────────────
+
+  async distributeSenderKeys(
+    channelId: string,
+    req: DistributeSenderKeyRequest,
+  ): Promise<void> {
+    await this.post(`/api/v1/channels/${channelId}/sender-keys`, req);
+  }
+
+  async getSenderKeys(
+    channelId: string,
+  ): Promise<SenderKeyDistributionResponse[]> {
+    return this.get<SenderKeyDistributionResponse[]>(
+      `/api/v1/channels/${channelId}/sender-keys`,
+    );
+  }
+
+  async getChannelMemberKeys(
+    channelId: string,
+  ): Promise<ChannelMemberKeyInfo[]> {
+    return this.get<ChannelMemberKeyInfo[]>(
+      `/api/v1/channels/${channelId}/members/keys`,
+    );
+  }
+
+  // ─── Link Previews ──────────────────────────────
+
+  async fetchLinkPreview(
+    url: string,
+  ): Promise<{ url: string; title?: string; description?: string; image?: string; site_name?: string }> {
+    return this.get(`/api/v1/link-preview?url=${encodeURIComponent(url)}`);
+  }
+
+  // ─── Presence ─────────────────────────────────────
+
+  async getPresence(userIds: string[]): Promise<PresenceEntry[]> {
+    return this.get<PresenceEntry[]>(
+      `/api/v1/presence?user_ids=${userIds.join(",")}`,
+    );
+  }
+
+  // ─── User Profiles ──────────────────────────────
+
+  async getUserProfile(userId: string): Promise<UserProfileResponse> {
+    return this.get<UserProfileResponse>(`/api/v1/users/${userId}/profile`);
+  }
+
+  async updateProfile(req: UpdateProfileRequest): Promise<import("../types.js").UserPublic> {
+    return this.put(`/api/v1/users/profile`, req);
+  }
+
+  // ─── Blocked Users ─────────────────────────────
+
+  async blockUser(userId: string): Promise<void> {
+    await this.post(`/api/v1/users/${userId}/block`, {});
+  }
+
+  async unblockUser(userId: string): Promise<void> {
+    await this.delete(`/api/v1/users/${userId}/block`);
+  }
+
+  async getBlockedUsers(): Promise<BlockedUserResponse[]> {
+    return this.get<BlockedUserResponse[]>("/api/v1/users/blocked");
   }
 
   // ─── HTTP Helpers ────────────────────────────────
@@ -185,6 +348,10 @@ export class HavenApi {
 
   private async post<T>(path: string, body: unknown): Promise<T> {
     return this.request<T>("POST", path, body);
+  }
+
+  private async put<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>("PUT", path, body);
   }
 
   private async delete<T>(path: string): Promise<T> {

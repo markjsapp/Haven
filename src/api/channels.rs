@@ -156,9 +156,86 @@ pub async fn list_dm_channels(
     Ok(Json(responses))
 }
 
+/// PUT /api/v1/channels/:channel_id
+/// Rename a channel (update its encrypted_meta). Server owner only.
+pub async fn update_channel(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+    Json(req): Json<UpdateChannelRequest>,
+) -> AppResult<Json<ChannelResponse>> {
+    let channel = queries::find_channel_by_id(&state.db, channel_id)
+        .await?
+        .ok_or(AppError::NotFound("Channel not found".into()))?;
+
+    // Must be a server channel
+    let server_id = channel.server_id
+        .ok_or(AppError::Forbidden("Cannot rename DM channels".into()))?;
+
+    // Verify server ownership
+    let server = queries::find_server_by_id(&state.db, server_id)
+        .await?
+        .ok_or(AppError::NotFound("Server not found".into()))?;
+    if server.owner_id != user_id {
+        return Err(AppError::Forbidden("Only the server owner can rename channels".into()));
+    }
+
+    let encrypted_meta = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &req.encrypted_meta,
+    )
+    .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
+
+    let updated = queries::update_channel_meta(&state.db, channel_id, &encrypted_meta).await?;
+
+    Ok(Json(ChannelResponse {
+        id: updated.id,
+        server_id: updated.server_id,
+        encrypted_meta: base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &updated.encrypted_meta,
+        ),
+        channel_type: updated.channel_type,
+        position: updated.position,
+        created_at: updated.created_at,
+    }))
+}
+
+/// DELETE /api/v1/channels/:channel_id
+/// Delete a channel. Server owner only.
+pub async fn delete_channel(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let channel = queries::find_channel_by_id(&state.db, channel_id)
+        .await?
+        .ok_or(AppError::NotFound("Channel not found".into()))?;
+
+    let server_id = channel.server_id
+        .ok_or(AppError::Forbidden("Cannot delete DM channels".into()))?;
+
+    let server = queries::find_server_by_id(&state.db, server_id)
+        .await?
+        .ok_or(AppError::NotFound("Server not found".into()))?;
+    if server.owner_id != user_id {
+        return Err(AppError::Forbidden("Only the server owner can delete channels".into()));
+    }
+
+    queries::delete_channel(&state.db, channel_id).await?;
+
+    Ok(Json(serde_json::json!({ "message": "Channel deleted" })))
+}
+
 /// Helper request type for DM creation.
 #[derive(Debug, serde::Deserialize)]
 pub struct CreateDmRequest {
     pub target_user_id: Uuid,
+    pub encrypted_meta: String, // base64
+}
+
+/// Request type for channel updates (rename).
+#[derive(Debug, serde::Deserialize)]
+pub struct UpdateChannelRequest {
     pub encrypted_meta: String, // base64
 }

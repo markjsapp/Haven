@@ -80,10 +80,38 @@ export class HavenWs {
     this.ws.send(JSON.stringify(msg));
   }
 
-  sendMessage(channelId: string, senderToken: string, encryptedBody: string, expiresAt?: string): void {
+  sendMessage(channelId: string, senderToken: string, encryptedBody: string, expiresAt?: string, attachmentIds?: string[]): void {
     this.send({
       type: "SendMessage",
-      payload: { channel_id: channelId, sender_token: senderToken, encrypted_body: encryptedBody, expires_at: expiresAt },
+      payload: { channel_id: channelId, sender_token: senderToken, encrypted_body: encryptedBody, expires_at: expiresAt, attachment_ids: attachmentIds },
+    });
+  }
+
+  editMessage(messageId: string, encryptedBody: string): void {
+    this.send({
+      type: "EditMessage",
+      payload: { message_id: messageId, encrypted_body: encryptedBody },
+    });
+  }
+
+  deleteMessage(messageId: string): void {
+    this.send({
+      type: "DeleteMessage",
+      payload: { message_id: messageId },
+    });
+  }
+
+  addReaction(messageId: string, emoji: string): void {
+    this.send({
+      type: "AddReaction",
+      payload: { message_id: messageId, emoji },
+    });
+  }
+
+  removeReaction(messageId: string, emoji: string): void {
+    this.send({
+      type: "RemoveReaction",
+      payload: { message_id: messageId, emoji },
     });
   }
 

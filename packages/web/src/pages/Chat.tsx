@@ -1,30 +1,15 @@
-import { useEffect } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
-import Sidebar from "../components/Sidebar.js";
+import { useUiStore } from "../store/ui.js";
+import ServerBar from "../components/ServerBar.js";
+import ChannelSidebar from "../components/ChannelSidebar.js";
+import MemberSidebar from "../components/MemberSidebar.js";
 import MessageList from "../components/MessageList.js";
 import MessageInput from "../components/MessageInput.js";
-
-function parseChannelDisplay(encryptedMeta: string, myUserId: string): { name: string; isDm: boolean } {
-  try {
-    const json = JSON.parse(atob(encryptedMeta));
-    if (json.type === "dm") {
-      // Show the other participant's name
-      if (json.names) {
-        for (const [id, name] of Object.entries(json.names)) {
-          if (id !== myUserId) return { name: name as string, isDm: true };
-        }
-      }
-      return { name: "DM", isDm: true };
-    }
-    return { name: json.name || "unnamed", isDm: false };
-  } catch {
-    return { name: "unnamed", isDm: false };
-  }
-}
+import { parseChannelDisplay } from "../lib/channel-utils.js";
 
 export default function Chat() {
-  const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
   const connect = useChatStore((s) => s.connect);
   const disconnect = useChatStore((s) => s.disconnect);
@@ -32,6 +17,48 @@ export default function Chat() {
   const wsState = useChatStore((s) => s.wsState);
   const currentChannelId = useChatStore((s) => s.currentChannelId);
   const channels = useChatStore((s) => s.channels);
+  const addFiles = useChatStore((s) => s.addFiles);
+
+  const memberSidebarOpen = useUiStore((s) => s.memberSidebarOpen);
+  const toggleMemberSidebar = useUiStore((s) => s.toggleMemberSidebar);
+
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.types.includes("Files")) {
+      setDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setDragOver(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setDragOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      addFiles(files);
+    }
+  }, [addFiles]);
 
   useEffect(() => {
     connect();
@@ -49,33 +76,89 @@ export default function Chat() {
     ? parseChannelDisplay(currentChannel.encrypted_meta, user?.id ?? "")
     : null;
 
+  const isServerChannel = currentChannel && currentChannel.server_id !== null;
+
+  const typingUsers = useChatStore((s) => s.typingUsers);
+  const typingNames = useMemo(() => {
+    if (!currentChannelId) return [];
+    const entries = (typingUsers[currentChannelId] ?? []).filter(
+      (t) => t.expiry > Date.now(),
+    );
+    return entries.map((t) => t.username);
+  }, [currentChannelId, typingUsers]);
+
+  const inputPlaceholder = channelDisplay
+    ? channelDisplay.isDm
+      ? `Message @${channelDisplay.name}`
+      : `Message #${channelDisplay.name}`
+    : "Type a message...";
+
   return (
     <div className="chat-layout">
-      <Sidebar />
+      <ServerBar />
+      <ChannelSidebar />
 
       <div className="chat-main">
         <header className="chat-header">
           <div className="chat-header-left">
             {channelDisplay ? (
-              <h2>{channelDisplay.isDm ? `@ ${channelDisplay.name}` : `# ${channelDisplay.name}`}</h2>
+              <>
+                <span className="chat-header-icon">{channelDisplay.isDm ? "@" : "#"}</span>
+                <h2>{channelDisplay.name}</h2>
+              </>
             ) : (
               <h2>Select a channel</h2>
             )}
           </div>
           <div className="chat-header-right">
-            <span className={`ws-status ws-${wsState}`}>{wsState}</span>
-            <span className="user-display">{user?.username}</span>
-            <button className="btn-ghost" onClick={logout}>
-              Sign Out
-            </button>
+            {isServerChannel && (
+              <button
+                className={`chat-header-btn ${memberSidebarOpen ? "active" : ""}`}
+                onClick={toggleMemberSidebar}
+                title="Member List"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
+                </svg>
+              </button>
+            )}
+            <span className={`ws-badge ws-${wsState}`} />
           </div>
         </header>
 
-        <div className="chat-body">
+        <div
+          className="chat-body"
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          {dragOver && currentChannelId && (
+            <div className="drop-overlay">
+              <div className="drop-overlay-content">
+                <span className="drop-overlay-icon">+</span>
+                <span>Drop files to upload</span>
+              </div>
+            </div>
+          )}
           {currentChannelId ? (
             <>
               <MessageList />
-              <MessageInput />
+              {typingNames.length > 0 && (
+                <div className="typing-indicator">
+                  <span className="typing-dots">
+                    <span /><span /><span />
+                  </span>
+                  <span className="typing-text">
+                    {typingNames.length === 1
+                      ? `${typingNames[0]} is typing...`
+                      : typingNames.length === 2
+                        ? `${typingNames[0]} and ${typingNames[1]} are typing...`
+                        : `${typingNames[0]} and ${typingNames.length - 1} others are typing...`}
+                  </span>
+                </div>
+              )}
+              <MessageInput placeholder={inputPlaceholder} />
             </>
           ) : (
             <div className="no-channel">
@@ -84,6 +167,10 @@ export default function Chat() {
           )}
         </div>
       </div>
+
+      {memberSidebarOpen && isServerChannel && currentChannel && (
+        <MemberSidebar serverId={currentChannel.server_id!} />
+      )}
     </div>
   );
 }

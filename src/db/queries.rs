@@ -62,6 +62,25 @@ pub async fn find_user_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<User>>
     Ok(user)
 }
 
+pub async fn update_user_keys(
+    pool: &PgPool,
+    user_id: Uuid,
+    identity_key: &[u8],
+    signed_prekey: &[u8],
+    signed_prekey_sig: &[u8],
+) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE users SET identity_key = $1, signed_prekey = $2, signed_prekey_sig = $3, updated_at = NOW() WHERE id = $4",
+    )
+    .bind(identity_key)
+    .bind(signed_prekey)
+    .bind(signed_prekey_sig)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn set_user_totp_secret(pool: &PgPool, user_id: Uuid, secret: &str) -> AppResult<()> {
     sqlx::query("UPDATE users SET totp_secret = $1, updated_at = NOW() WHERE id = $2")
         .bind(secret)
@@ -350,6 +369,42 @@ pub async fn find_channel_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Cha
     Ok(ch)
 }
 
+pub async fn update_channel_meta(
+    pool: &PgPool,
+    channel_id: Uuid,
+    encrypted_meta: &[u8],
+) -> AppResult<Channel> {
+    let ch = sqlx::query_as::<_, Channel>(
+        "UPDATE channels SET encrypted_meta = $1 WHERE id = $2 RETURNING *",
+    )
+    .bind(encrypted_meta)
+    .bind(channel_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(ch)
+}
+
+pub async fn delete_channel(pool: &PgPool, channel_id: Uuid) -> AppResult<()> {
+    // Delete members first (FK), then messages, then the channel
+    sqlx::query("DELETE FROM channel_members WHERE channel_id = $1")
+        .bind(channel_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM messages WHERE channel_id = $1")
+        .bind(channel_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM sender_key_distributions WHERE channel_id = $1")
+        .bind(channel_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // ─── Channel Members ───────────────────────────────────
 
 pub async fn add_channel_member(
@@ -393,7 +448,25 @@ pub async fn get_channel_member_ids(pool: &PgPool, channel_id: Uuid) -> AppResul
     Ok(rows.into_iter().map(|r| r.0).collect())
 }
 
+/// Get all channel IDs a user belongs to (for presence broadcast).
+pub async fn get_user_channel_ids(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Uuid>> {
+    let rows: Vec<(Uuid,)> =
+        sqlx::query_as("SELECT channel_id FROM channel_members WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}
+
 // ─── Messages ──────────────────────────────────────────
+
+pub async fn find_message_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Message>> {
+    let msg = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(msg)
+}
 
 pub async fn insert_message(
     pool: &PgPool,
@@ -402,12 +475,13 @@ pub async fn insert_message(
     encrypted_body: &[u8],
     expires_at: Option<DateTime<Utc>>,
     has_attachments: bool,
+    sender_id: Uuid,
 ) -> AppResult<Message> {
     let msg = sqlx::query_as::<_, Message>(
         r#"
         INSERT INTO messages (id, channel_id, sender_token, encrypted_body,
-                             timestamp, expires_at, has_attachments)
-        VALUES ($1, $2, $3, $4, NOW(), $5, $6)
+                             timestamp, expires_at, has_attachments, sender_id)
+        VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
         RETURNING *
         "#,
     )
@@ -417,9 +491,56 @@ pub async fn insert_message(
     .bind(encrypted_body)
     .bind(expires_at)
     .bind(has_attachments)
+    .bind(sender_id)
     .fetch_one(pool)
     .await?;
     Ok(msg)
+}
+
+/// Update encrypted_body of a message (for editing). Only the original sender can edit.
+pub async fn update_message_body(
+    pool: &PgPool,
+    message_id: Uuid,
+    sender_id: Uuid,
+    new_encrypted_body: &[u8],
+) -> AppResult<Message> {
+    let msg = sqlx::query_as::<_, Message>(
+        r#"
+        UPDATE messages
+        SET encrypted_body = $1, edited_at = NOW()
+        WHERE id = $2 AND sender_id = $3
+        RETURNING *
+        "#,
+    )
+    .bind(new_encrypted_body)
+    .bind(message_id)
+    .bind(sender_id)
+    .fetch_optional(pool)
+    .await?;
+
+    msg.ok_or_else(|| AppError::Forbidden("Cannot edit this message".into()))
+}
+
+/// Delete a message. Only the original sender can delete.
+/// Returns the deleted message (for getting channel_id).
+pub async fn delete_message(
+    pool: &PgPool,
+    message_id: Uuid,
+    sender_id: Uuid,
+) -> AppResult<Message> {
+    let msg = sqlx::query_as::<_, Message>(
+        r#"
+        DELETE FROM messages
+        WHERE id = $1 AND sender_id = $2
+        RETURNING *
+        "#,
+    )
+    .bind(message_id)
+    .bind(sender_id)
+    .fetch_optional(pool)
+    .await?;
+
+    msg.ok_or_else(|| AppError::Forbidden("Cannot delete this message".into()))
 }
 
 pub async fn get_channel_messages(
@@ -471,6 +592,37 @@ pub async fn purge_expired_messages(pool: &PgPool) -> AppResult<u64> {
 
 // ─── Attachments ───────────────────────────────────────
 
+/// Link an attachment (uploaded via presigned URL) to a message.
+pub async fn link_attachment(
+    pool: &PgPool,
+    attachment_id: Uuid,
+    message_id: Uuid,
+    storage_key: &str,
+) -> AppResult<Attachment> {
+    let att = sqlx::query_as::<_, Attachment>(
+        r#"
+        INSERT INTO attachments (id, message_id, storage_key, encrypted_meta, size_bucket, created_at)
+        VALUES ($1, $2, $3, $4, 0, NOW())
+        RETURNING *
+        "#,
+    )
+    .bind(attachment_id)
+    .bind(message_id)
+    .bind(storage_key)
+    .bind(&[] as &[u8])
+    .fetch_one(pool)
+    .await?;
+    Ok(att)
+}
+
+pub async fn find_attachment_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Attachment>> {
+    let att = sqlx::query_as::<_, Attachment>("SELECT * FROM attachments WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(att)
+}
+
 pub async fn insert_attachment(
     pool: &PgPool,
     message_id: Uuid,
@@ -493,4 +645,361 @@ pub async fn insert_attachment(
     .fetch_one(pool)
     .await?;
     Ok(att)
+}
+
+// ─── Invites ──────────────────────────────────────────
+
+pub async fn create_invite(
+    pool: &PgPool,
+    server_id: Uuid,
+    created_by: Uuid,
+    code: &str,
+    max_uses: Option<i32>,
+    expires_at: Option<DateTime<Utc>>,
+) -> AppResult<Invite> {
+    let invite = sqlx::query_as::<_, Invite>(
+        r#"
+        INSERT INTO invites (id, server_id, created_by, code, max_uses, use_count, expires_at, created_at)
+        VALUES ($1, $2, $3, $4, $5, 0, $6, NOW())
+        RETURNING *
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(server_id)
+    .bind(created_by)
+    .bind(code)
+    .bind(max_uses)
+    .bind(expires_at)
+    .fetch_one(pool)
+    .await?;
+    Ok(invite)
+}
+
+pub async fn find_invite_by_code(pool: &PgPool, code: &str) -> AppResult<Option<Invite>> {
+    let invite = sqlx::query_as::<_, Invite>("SELECT * FROM invites WHERE code = $1")
+        .bind(code)
+        .fetch_optional(pool)
+        .await?;
+    Ok(invite)
+}
+
+pub async fn get_server_invites(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<Invite>> {
+    let invites = sqlx::query_as::<_, Invite>(
+        "SELECT * FROM invites WHERE server_id = $1 ORDER BY created_at DESC",
+    )
+    .bind(server_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(invites)
+}
+
+pub async fn increment_invite_uses(pool: &PgPool, invite_id: Uuid) -> AppResult<()> {
+    sqlx::query("UPDATE invites SET use_count = use_count + 1 WHERE id = $1")
+        .bind(invite_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_invite(pool: &PgPool, invite_id: Uuid) -> AppResult<()> {
+    sqlx::query("DELETE FROM invites WHERE id = $1")
+        .bind(invite_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ─── Reactions ────────────────────────────────────────
+
+/// Add a reaction. Returns the reaction (upsert — ignores if already exists).
+pub async fn add_reaction(
+    pool: &PgPool,
+    message_id: Uuid,
+    user_id: Uuid,
+    emoji: &str,
+) -> AppResult<Reaction> {
+    let reaction = sqlx::query_as::<_, Reaction>(
+        r#"
+        INSERT INTO reactions (message_id, user_id, emoji)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (message_id, user_id, emoji) DO UPDATE SET created_at = reactions.created_at
+        RETURNING *
+        "#,
+    )
+    .bind(message_id)
+    .bind(user_id)
+    .bind(emoji)
+    .fetch_one(pool)
+    .await?;
+    Ok(reaction)
+}
+
+/// Remove a reaction. Returns true if a row was deleted.
+pub async fn remove_reaction(
+    pool: &PgPool,
+    message_id: Uuid,
+    user_id: Uuid,
+    emoji: &str,
+) -> AppResult<bool> {
+    let result = sqlx::query(
+        "DELETE FROM reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3",
+    )
+    .bind(message_id)
+    .bind(user_id)
+    .bind(emoji)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Get all reactions for a set of message IDs, grouped by emoji.
+pub async fn get_reactions_for_messages(
+    pool: &PgPool,
+    message_ids: &[Uuid],
+) -> AppResult<Vec<Reaction>> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let reactions = sqlx::query_as::<_, Reaction>(
+        "SELECT * FROM reactions WHERE message_id = ANY($1) ORDER BY created_at ASC",
+    )
+    .bind(message_ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(reactions)
+}
+
+// ─── Sender Key Distributions ─────────────────────────
+
+/// Store a batch of encrypted SKDMs for a channel.
+pub async fn insert_sender_key_distributions(
+    pool: &PgPool,
+    channel_id: Uuid,
+    from_user_id: Uuid,
+    distributions: &[(Uuid, Uuid, Vec<u8>)], // (to_user_id, distribution_id, encrypted_skdm)
+) -> AppResult<()> {
+    let mut tx = pool.begin().await?;
+
+    for (to_user_id, distribution_id, encrypted_skdm) in distributions {
+        sqlx::query(
+            r#"
+            INSERT INTO sender_key_distributions
+                (id, channel_id, from_user_id, to_user_id, distribution_id, encrypted_skdm, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            ON CONFLICT (channel_id, from_user_id, to_user_id, distribution_id)
+            DO UPDATE SET encrypted_skdm = EXCLUDED.encrypted_skdm, created_at = NOW()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(channel_id)
+        .bind(from_user_id)
+        .bind(to_user_id)
+        .bind(distribution_id)
+        .bind(encrypted_skdm)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Fetch all pending SKDMs for a user in a specific channel.
+pub async fn get_sender_key_distributions(
+    pool: &PgPool,
+    channel_id: Uuid,
+    to_user_id: Uuid,
+) -> AppResult<Vec<SenderKeyDistribution>> {
+    let rows = sqlx::query_as::<_, SenderKeyDistribution>(
+        r#"
+        SELECT * FROM sender_key_distributions
+        WHERE channel_id = $1 AND to_user_id = $2
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(channel_id)
+    .bind(to_user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Delete consumed SKDMs (after client has fetched them).
+pub async fn delete_sender_key_distributions(
+    pool: &PgPool,
+    ids: &[Uuid],
+) -> AppResult<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    sqlx::query("DELETE FROM sender_key_distributions WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Get all channel member identity keys (for SKDM encryption).
+/// Returns (user_id, identity_key) pairs for all members except the requester.
+pub async fn get_channel_member_identity_keys(
+    pool: &PgPool,
+    channel_id: Uuid,
+    exclude_user_id: Uuid,
+) -> AppResult<Vec<(Uuid, Vec<u8>)>> {
+    let rows: Vec<(Uuid, Vec<u8>)> = sqlx::query_as(
+        r#"
+        SELECT u.id, u.identity_key
+        FROM channel_members cm
+        INNER JOIN users u ON u.id = cm.user_id
+        WHERE cm.channel_id = $1 AND cm.user_id != $2
+        "#,
+    )
+    .bind(channel_id)
+    .bind(exclude_user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+// ─── Server Members (extended) ────────────────────────
+
+pub async fn get_server_members(
+    pool: &PgPool,
+    server_id: Uuid,
+) -> AppResult<Vec<ServerMemberResponse>> {
+    let members = sqlx::query_as::<_, ServerMemberResponse>(
+        r#"
+        SELECT sm.user_id, u.username, u.display_name, u.avatar_url, sm.joined_at
+        FROM server_members sm
+        INNER JOIN users u ON u.id = sm.user_id
+        WHERE sm.server_id = $1
+        ORDER BY sm.joined_at ASC
+        "#,
+    )
+    .bind(server_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(members)
+}
+
+pub async fn remove_server_member(
+    pool: &PgPool,
+    server_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<()> {
+    // Remove from all server channels
+    sqlx::query(
+        r#"
+        DELETE FROM channel_members
+        WHERE user_id = $1
+          AND channel_id IN (SELECT id FROM channels WHERE server_id = $2)
+        "#,
+    )
+    .bind(user_id)
+    .bind(server_id)
+    .execute(pool)
+    .await?;
+
+    // Remove from server
+    sqlx::query("DELETE FROM server_members WHERE server_id = $1 AND user_id = $2")
+        .bind(server_id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+// ─── User Profiles ───────────────────────────────────
+
+pub async fn update_user_profile(
+    pool: &PgPool,
+    user_id: Uuid,
+    display_name: Option<&str>,
+    about_me: Option<&str>,
+    custom_status: Option<&str>,
+    custom_status_emoji: Option<&str>,
+) -> AppResult<User> {
+    let user = sqlx::query_as::<_, User>(
+        r#"
+        UPDATE users SET
+            display_name = COALESCE($2, display_name),
+            about_me = $3,
+            custom_status = $4,
+            custom_status_emoji = $5,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(user_id)
+    .bind(display_name)
+    .bind(about_me)
+    .bind(custom_status)
+    .bind(custom_status_emoji)
+    .fetch_one(pool)
+    .await?;
+    Ok(user)
+}
+
+// ─── Blocked Users ───────────────────────────────────
+
+pub async fn block_user(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> AppResult<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO blocked_users (blocker_id, blocked_id)
+        VALUES ($1, $2)
+        ON CONFLICT (blocker_id, blocked_id) DO NOTHING
+        "#,
+    )
+    .bind(blocker_id)
+    .bind(blocked_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn unblock_user(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> AppResult<bool> {
+    let result = sqlx::query("DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2")
+        .bind(blocker_id)
+        .bind(blocked_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn is_blocked(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> AppResult<bool> {
+    let row: (bool,) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2)",
+    )
+    .bind(blocker_id)
+    .bind(blocked_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.0)
+}
+
+pub async fn get_blocked_users(pool: &PgPool, blocker_id: Uuid) -> AppResult<Vec<BlockedUserResponse>> {
+    let rows = sqlx::query_as::<_, BlockedUserResponse>(
+        r#"
+        SELECT bu.blocked_id AS user_id, u.username, u.display_name, u.avatar_url, bu.created_at AS blocked_at
+        FROM blocked_users bu
+        INNER JOIN users u ON u.id = bu.blocked_id
+        WHERE bu.blocker_id = $1
+        ORDER BY bu.created_at DESC
+        "#,
+    )
+    .bind(blocker_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn get_blocked_user_ids(pool: &PgPool, blocker_id: Uuid) -> AppResult<Vec<Uuid>> {
+    let rows: Vec<(Uuid,)> =
+        sqlx::query_as("SELECT blocked_id FROM blocked_users WHERE blocker_id = $1")
+            .bind(blocker_id)
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
 }

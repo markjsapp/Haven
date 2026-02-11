@@ -19,6 +19,10 @@ pub struct User {
     pub totp_secret: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub about_me: Option<String>,
+    pub custom_status: Option<String>,
+    pub custom_status_emoji: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -26,6 +30,10 @@ pub struct UserPublic {
     pub id: Uuid,
     pub username: String,
     pub display_name: Option<String>,
+    pub about_me: Option<String>,
+    pub avatar_url: Option<String>,
+    pub custom_status: Option<String>,
+    pub custom_status_emoji: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -35,6 +43,10 @@ impl From<User> for UserPublic {
             id: u.id,
             username: u.username,
             display_name: u.display_name,
+            about_me: u.about_me,
+            avatar_url: u.avatar_url,
+            custom_status: u.custom_status,
+            custom_status_emoji: u.custom_status_emoji,
             created_at: u.created_at,
         }
     }
@@ -116,6 +128,13 @@ pub struct KeyBundle {
 #[derive(Debug, Deserialize)]
 pub struct UploadPreKeysRequest {
     pub prekeys: Vec<String>, // base64-encoded public keys
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateKeysRequest {
+    pub identity_key: String,          // base64
+    pub signed_prekey: String,         // base64
+    pub signed_prekey_signature: String, // base64
 }
 
 // ─── Servers ───────────────────────────────────────────
@@ -200,6 +219,8 @@ pub struct Message {
     pub timestamp: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub has_attachments: bool,
+    pub sender_id: Option<Uuid>,  // for edit authorization; null for legacy messages
+    pub edited_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -220,6 +241,7 @@ pub struct MessageResponse {
     pub timestamp: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub has_attachments: bool,
+    pub edited: bool,
 }
 
 impl From<Message> for MessageResponse {
@@ -238,6 +260,7 @@ impl From<Message> for MessageResponse {
             timestamp: m.timestamp,
             expires_at: m.expires_at,
             has_attachments: m.has_attachments,
+            edited: m.edited_at.is_some(),
         }
     }
 }
@@ -255,10 +278,90 @@ pub struct Attachment {
 }
 
 #[derive(Debug, Serialize)]
-pub struct UploadUrlResponse {
-    pub upload_url: String,
+pub struct UploadResponse {
     pub attachment_id: Uuid,
     pub storage_key: String,
+}
+
+// ─── Sender Key Distributions ─────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SenderKeyDistribution {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub from_user_id: Uuid,
+    pub to_user_id: Uuid,
+    pub distribution_id: Uuid,
+    pub encrypted_skdm: Vec<u8>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DistributeSenderKeyRequest {
+    pub distributions: Vec<SenderKeyDistributionEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SenderKeyDistributionEntry {
+    pub to_user_id: Uuid,
+    pub distribution_id: Uuid,
+    pub encrypted_skdm: String, // base64
+}
+
+#[derive(Debug, Serialize)]
+pub struct SenderKeyDistributionResponse {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub from_user_id: Uuid,
+    pub distribution_id: Uuid,
+    pub encrypted_skdm: String, // base64
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChannelMemberKeyInfo {
+    pub user_id: Uuid,
+    pub identity_key: String, // base64
+}
+
+// ─── Reactions ────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Reaction {
+    pub id: Uuid,
+    pub message_id: Uuid,
+    pub user_id: Uuid,
+    pub emoji: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Aggregated reaction info for a single emoji on a message.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ReactionGroup {
+    pub message_id: Uuid,
+    pub emoji: String,
+    pub count: i64,
+    pub user_ids: Vec<Uuid>,
+}
+
+// ─── Link Previews ────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct LinkPreviewQuery {
+    pub url: String,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct LinkPreviewResponse {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
 }
 
 // ─── WebSocket Messages ────────────────────────────────
@@ -272,11 +375,23 @@ pub enum WsClientMessage {
         sender_token: String,
         encrypted_body: String,
         expires_at: Option<DateTime<Utc>>,
+        attachment_ids: Option<Vec<Uuid>>,
+    },
+    /// Edit a previously sent message
+    EditMessage {
+        message_id: Uuid,
+        encrypted_body: String,
     },
     /// Subscribe to channel events
     Subscribe { channel_id: Uuid },
     /// Unsubscribe from channel events
     Unsubscribe { channel_id: Uuid },
+    /// Delete a previously sent message
+    DeleteMessage { message_id: Uuid },
+    /// Add a reaction to a message
+    AddReaction { message_id: Uuid, emoji: String },
+    /// Remove a reaction from a message
+    RemoveReaction { message_id: Uuid, emoji: String },
     /// Typing indicator
     Typing { channel_id: Uuid },
     /// Ping (keepalive)
@@ -288,11 +403,17 @@ pub enum WsClientMessage {
 pub enum WsServerMessage {
     /// New message in a subscribed channel
     NewMessage(MessageResponse),
+    /// A message was edited
+    MessageEdited {
+        message_id: Uuid,
+        channel_id: Uuid,
+        encrypted_body: String,
+    },
     /// Typing indicator from another user
     UserTyping {
         channel_id: Uuid,
-        /// Ephemeral token so clients can deduplicate without revealing identity to server
-        ephemeral_token: String,
+        user_id: Uuid,
+        username: String,
     },
     /// Acknowledgment of a sent message
     MessageAck { message_id: Uuid },
@@ -302,6 +423,42 @@ pub enum WsServerMessage {
     Pong,
     /// Subscribed confirmation
     Subscribed { channel_id: Uuid },
+    /// New sender key distributions are available for a channel
+    SenderKeysUpdated { channel_id: Uuid },
+    /// A message was deleted
+    MessageDeleted {
+        message_id: Uuid,
+        channel_id: Uuid,
+    },
+    /// A reaction was added to a message
+    ReactionAdded {
+        message_id: Uuid,
+        channel_id: Uuid,
+        user_id: Uuid,
+        emoji: String,
+    },
+    /// A reaction was removed from a message
+    ReactionRemoved {
+        message_id: Uuid,
+        channel_id: Uuid,
+        user_id: Uuid,
+        emoji: String,
+    },
+    /// User presence change (online/offline)
+    PresenceUpdate { user_id: Uuid, status: String },
+}
+
+// ─── Presence ─────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct PresenceQuery {
+    pub user_ids: String, // comma-separated UUIDs
+}
+
+#[derive(Debug, Serialize)]
+pub struct PresenceEntry {
+    pub user_id: Uuid,
+    pub status: String,
 }
 
 // ─── Refresh Tokens ────────────────────────────────────
@@ -313,6 +470,94 @@ pub struct RefreshToken {
     pub token_hash: String,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+}
+
+// ─── Invites ──────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Invite {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub created_by: Uuid,
+    pub code: String,
+    pub max_uses: Option<i32>,
+    pub use_count: i32,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateInviteRequest {
+    pub max_uses: Option<i32>,
+    pub expires_in_hours: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InviteResponse {
+    pub id: Uuid,
+    pub code: String,
+    pub server_id: Uuid,
+    pub max_uses: Option<i32>,
+    pub use_count: i32,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<Invite> for InviteResponse {
+    fn from(i: Invite) -> Self {
+        Self {
+            id: i.id,
+            code: i.code,
+            server_id: i.server_id,
+            max_uses: i.max_uses,
+            use_count: i.use_count,
+            expires_at: i.expires_at,
+            created_at: i.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct ServerMemberResponse {
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub joined_at: DateTime<Utc>,
+}
+
+// ─── User Profiles ───────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct UserProfileResponse {
+    pub id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub about_me: Option<String>,
+    pub avatar_url: Option<String>,
+    pub custom_status: Option<String>,
+    pub custom_status_emoji: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub is_blocked: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateProfileRequest {
+    pub display_name: Option<String>,
+    pub about_me: Option<String>,
+    pub custom_status: Option<String>,
+    pub custom_status_emoji: Option<String>,
+}
+
+// ─── Blocked Users ───────────────────────────────────
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct BlockedUserResponse {
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub blocked_at: DateTime<Utc>,
 }
 
 // ─── Validation helpers ───────────────────────────────

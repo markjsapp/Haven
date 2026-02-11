@@ -1,81 +1,94 @@
+use std::path::Path;
+
 use axum::{
-    extract::{Path, State},
+    body::Bytes,
+    extract::{Path as AxumPath, State},
+    http::{header, StatusCode},
+    response::IntoResponse,
     Json,
 };
 use uuid::Uuid;
 
+use crate::db::queries;
 use crate::errors::{AppError, AppResult};
 use crate::middleware::AuthUser;
 use crate::models::*;
+use crate::storage;
 use crate::AppState;
 
 /// POST /api/v1/attachments/upload
-/// Generate a presigned URL for uploading an encrypted attachment.
-pub async fn request_upload(
+/// Receives encrypted blob bytes, encrypts at rest, and stores locally.
+pub async fn upload(
     State(state): State<AppState>,
     AuthUser(_user_id): AuthUser,
-) -> AppResult<Json<UploadUrlResponse>> {
+    body: Bytes,
+) -> AppResult<Json<UploadResponse>> {
+    // Validate file size
+    if body.len() as u64 > state.config.max_upload_size_bytes {
+        return Err(AppError::BadRequest(format!(
+            "File too large (max {} bytes)",
+            state.config.max_upload_size_bytes
+        )));
+    }
+
+    if body.is_empty() {
+        return Err(AppError::Validation("Empty upload body".into()));
+    }
+
     let attachment_id = Uuid::new_v4();
-    let storage_key = format!("attachments/{}/{}", Uuid::new_v4(), attachment_id);
+    let storage_key = storage::obfuscated_key(&state.storage_key, &attachment_id.to_string());
 
-    // Generate presigned PUT URL
-    let presigned = state
-        .s3_client
-        .put_object()
-        .bucket(&state.config.s3_bucket)
-        .key(&storage_key)
-        .content_type("application/octet-stream") // All uploads are opaque encrypted blobs
-        .presigned(
-            aws_sdk_s3::presigning::PresigningConfig::builder()
-                .expires_in(std::time::Duration::from_secs(3600))
-                .build()
-                .map_err(|e| AppError::Internal(anyhow::anyhow!("Presign config error: {}", e)))?,
-        )
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to generate presigned URL: {}", e)))?;
+    // Encrypt at rest and write to disk
+    storage::store_blob(
+        Path::new(&state.config.storage_dir),
+        &storage_key,
+        &body,
+        &state.storage_key,
+    )
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to store attachment: {}", e)))?;
 
-    Ok(Json(UploadUrlResponse {
-        upload_url: presigned.uri().to_string(),
+    tracing::debug!("Stored attachment {} ({} bytes)", attachment_id, body.len());
+
+    Ok(Json(UploadResponse {
         attachment_id,
         storage_key,
     }))
 }
 
 /// GET /api/v1/attachments/:attachment_id
-/// Generate a presigned URL for downloading an encrypted attachment.
-pub async fn request_download(
+/// Reads encrypted-at-rest blob from disk, decrypts server-side layer, returns raw bytes.
+pub async fn download(
     State(state): State<AppState>,
-    AuthUser(_user_id): AuthUser,
-    Path(attachment_id): Path<Uuid>,
-) -> AppResult<Json<serde_json::Value>> {
+    AuthUser(user_id): AuthUser,
+    AxumPath(attachment_id): AxumPath<Uuid>,
+) -> AppResult<impl IntoResponse> {
     // Look up the attachment
-    let att = sqlx::query_as::<_, crate::models::Attachment>(
-        "SELECT * FROM attachments WHERE id = $1",
+    let att = queries::find_attachment_by_id(&state.db, attachment_id)
+        .await?
+        .ok_or(AppError::NotFound("Attachment not found".into()))?;
+
+    // Verify the user has access to the message's channel
+    let message = queries::find_message_by_id(&state.db, att.message_id)
+        .await?
+        .ok_or(AppError::NotFound("Message not found".into()))?;
+
+    if !queries::is_channel_member(&state.db, message.channel_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
+    }
+
+    // Read and decrypt server-side encryption from disk
+    let data = storage::load_blob(
+        Path::new(&state.config.storage_dir),
+        &att.storage_key,
+        &state.storage_key,
     )
-    .bind(attachment_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound("Attachment not found".into()))?;
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to load attachment: {}", e)))?;
 
-    // TODO: Verify the requesting user has access to the message's channel
-
-    // Generate presigned GET URL
-    let presigned = state
-        .s3_client
-        .get_object()
-        .bucket(&state.config.s3_bucket)
-        .key(&att.storage_key)
-        .presigned(
-            aws_sdk_s3::presigning::PresigningConfig::builder()
-                .expires_in(std::time::Duration::from_secs(3600))
-                .build()
-                .map_err(|e| AppError::Internal(anyhow::anyhow!("Presign config error: {}", e)))?,
-        )
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to generate presigned URL: {}", e)))?;
-
-    Ok(Json(serde_json::json!({
-        "download_url": presigned.uri().to_string(),
-        "attachment_id": att.id,
-    })))
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/octet-stream")],
+        data,
+    ))
 }

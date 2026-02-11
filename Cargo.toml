@@ -45,10 +45,15 @@ dotenvy = "0.15"
 # Validation
 validator = { version = "0.18", features = ["derive"] }
 
-# AWS SDK for MinIO (S3-compatible)
-aws-sdk-s3 = "1"
-aws-config = "1"
-aws-credential-types = "1"
+# AWS SDK for S3 (uncomment when deploying to production)
+# aws-sdk-s3 = "1"
+# aws-config = "1"
+# aws-credential-types = "1"
+
+# Local storage encryption (AES-256-GCM at rest)
+aes-gcm = "0.10"
+hmac = "0.12"
+hex = "0.4"
 
 # Misc
 thiserror = "1"
@@ -59,6 +64,9 @@ lazy_static = "1"
 regex = "1"
 sha2 = "0.10"
 
+# HTTP client (link preview fetching)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+urlencoding = "2"
+
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["json"] }
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }

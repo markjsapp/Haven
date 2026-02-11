@@ -81,14 +81,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { api } = get();
     const res = await api.login({ username, password, totp_code: totpCode });
 
-    // On login, we need to regenerate local keys since MemoryStore is ephemeral.
-    // In production, these would be loaded from persistent encrypted storage.
+    // Regenerate local keys since MemoryStore is ephemeral.
     const identity = generateIdentityKeyPair();
     const signedPre = generateSignedPreKey(identity);
+    const oneTimeKeys = generateOneTimePreKeys(PREKEY_BATCH_SIZE);
 
     const { store } = get();
     await store.saveIdentityKeyPair(identity);
     await store.saveSignedPreKey(signedPre);
+    await store.saveOneTimePreKeys(oneTimeKeys);
+
+    // Upload the new keys to the server so other users can establish sessions
+    const keys = prepareRegistrationKeys(identity, signedPre, oneTimeKeys);
+    await api.updateKeys({
+      identity_key: keys.identity_key,
+      signed_prekey: keys.signed_prekey,
+      signed_prekey_signature: keys.signed_prekey_signature,
+    });
+    // Also upload fresh one-time prekeys
+    await api.uploadPreKeys({ prekeys: keys.one_time_prekeys });
 
     set({
       user: res.user,

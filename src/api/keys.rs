@@ -104,6 +104,37 @@ pub async fn upload_prekeys(
     })))
 }
 
+/// PUT /api/v1/keys/identity
+/// Update the authenticated user's identity key and signed prekey.
+/// Called after login when the client generates new ephemeral keys.
+pub async fn update_identity_keys(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Json(req): Json<UpdateKeysRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    let identity_key = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &req.identity_key,
+    )
+    .map_err(|_| AppError::Validation("Invalid identity_key encoding".into()))?;
+
+    let signed_prekey = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &req.signed_prekey,
+    )
+    .map_err(|_| AppError::Validation("Invalid signed_prekey encoding".into()))?;
+
+    let signed_prekey_sig = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &req.signed_prekey_signature,
+    )
+    .map_err(|_| AppError::Validation("Invalid signed_prekey_signature encoding".into()))?;
+
+    queries::update_user_keys(&state.db, user_id, &identity_key, &signed_prekey, &signed_prekey_sig).await?;
+
+    Ok(Json(serde_json::json!({ "message": "Keys updated" })))
+}
+
 /// GET /api/v1/keys/prekeys/count
 /// Check how many unused prekeys the authenticated user has remaining.
 pub async fn prekey_count(

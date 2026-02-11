@@ -1,6 +1,9 @@
 # Rust build artifacts
 /target/
 
+# Local attachment storage
+/data/
+
 # Environment files
 .env
 .env.*
@@ -30,3 +33,4 @@ Thumbs.db
 # Docker overrides
 docker-compose.override.yml
 docs/haven-architecture-plan.md
+docs/features-deep-research-report.md

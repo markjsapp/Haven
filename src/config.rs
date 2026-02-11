@@ -18,12 +18,16 @@ pub struct AppConfig {
     pub jwt_expiry_hours: i64,
     pub refresh_token_expiry_days: i64,
 
-    // MinIO / S3
-    pub s3_endpoint: String,
-    pub s3_bucket: String,
-    pub s3_access_key: String,
-    pub s3_secret_key: String,
-    pub s3_region: String,
+    // Local file storage
+    pub storage_dir: String,
+    pub storage_encryption_key: String, // 64-char hex → 32-byte AES-256-GCM key
+
+    // S3 (uncomment fields when deploying to production)
+    // pub s3_endpoint: String,
+    // pub s3_bucket: String,
+    // pub s3_access_key: String,
+    // pub s3_secret_key: String,
+    // pub s3_region: String,
 
     // Rate Limiting
     pub max_requests_per_minute: u32,
@@ -63,16 +67,10 @@ impl AppConfig {
                 .parse()
                 .unwrap_or(30),
 
-            s3_endpoint: env::var("S3_ENDPOINT")
-                .unwrap_or_else(|_| "http://localhost:9000".into()),
-            s3_bucket: env::var("S3_BUCKET")
-                .unwrap_or_else(|_| "haven-attachments".into()),
-            s3_access_key: env::var("S3_ACCESS_KEY")
-                .unwrap_or_else(|_| "minioadmin".into()),
-            s3_secret_key: env::var("S3_SECRET_KEY")
-                .unwrap_or_else(|_| "minioadmin".into()),
-            s3_region: env::var("S3_REGION")
-                .unwrap_or_else(|_| "us-east-1".into()),
+            storage_dir: env::var("STORAGE_DIR")
+                .unwrap_or_else(|_| "./data/attachments".into()),
+            storage_encryption_key: env::var("STORAGE_ENCRYPTION_KEY")
+                .expect("STORAGE_ENCRYPTION_KEY must be set (64-char hex string)"),
 
             max_requests_per_minute: env::var("MAX_REQUESTS_PER_MINUTE")
                 .unwrap_or_else(|_| "120".into())
@@ -84,9 +82,9 @@ impl AppConfig {
                 .unwrap_or(5),
 
             max_upload_size_bytes: env::var("MAX_UPLOAD_SIZE_BYTES")
-                .unwrap_or_else(|_| "104857600".into()) // 100MB
+                .unwrap_or_else(|_| "524288000".into()) // 500MB
                 .parse()
-                .unwrap_or(104_857_600),
+                .unwrap_or(524_288_000),
         }
     }
 }

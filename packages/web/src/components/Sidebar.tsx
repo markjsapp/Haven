@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
+import { usePresenceStore } from "../store/presence.js";
 
 function parseChannelName(encryptedMeta: string): string {
   try {
@@ -8,6 +9,18 @@ function parseChannelName(encryptedMeta: string): string {
     return json.name || json.type || "unnamed";
   } catch {
     return "unnamed";
+  }
+}
+
+function parseDmPeerId(encryptedMeta: string, myUserId: string): string | null {
+  try {
+    const json = JSON.parse(atob(encryptedMeta));
+    if (json.participants) {
+      return json.participants.find((p: string) => p !== myUserId) ?? null;
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 
@@ -31,19 +44,59 @@ function parseDmDisplayName(encryptedMeta: string, myUserId: string): string {
   }
 }
 
+function parseServerName(encryptedMeta: string): string {
+  try {
+    const decoded = atob(encryptedMeta);
+    // Try JSON first
+    const json = JSON.parse(decoded);
+    return json.name || "unnamed";
+  } catch {
+    // Fallback: raw string (used in create_server)
+    try {
+      return atob(encryptedMeta) || "unnamed";
+    } catch {
+      return "unnamed";
+    }
+  }
+}
+
 export default function Sidebar() {
   const channels = useChatStore((s) => s.channels);
   const currentChannelId = useChatStore((s) => s.currentChannelId);
   const selectChannel = useChatStore((s) => s.selectChannel);
   const startDm = useChatStore((s) => s.startDm);
+  const loadChannels = useChatStore((s) => s.loadChannels);
   const user = useAuthStore((s) => s.user);
+  const api = useAuthStore((s) => s.api);
 
   const [dmTarget, setDmTarget] = useState("");
   const [showDmInput, setShowDmInput] = useState(false);
   const [dmError, setDmError] = useState("");
 
+  // Server creation
+  const [showCreateServer, setShowCreateServer] = useState(false);
+  const [serverName, setServerName] = useState("");
+  const [createServerError, setCreateServerError] = useState("");
+
+  // Join by invite
+  const [showJoinServer, setShowJoinServer] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
+  const [joinError, setJoinError] = useState("");
+
+  const presenceStatuses = usePresenceStore((s) => s.statuses);
+  const fetchPresence = usePresenceStore((s) => s.fetchPresence);
+
   const serverChannels = channels.filter((ch) => ch.channel_type !== "dm");
   const dmChannels = channels.filter((ch) => ch.channel_type === "dm");
+
+  // Fetch initial presence for all DM peers
+  useEffect(() => {
+    if (!user || dmChannels.length === 0) return;
+    const peerIds = dmChannels
+      .map((ch) => parseDmPeerId(ch.encrypted_meta, user.id))
+      .filter((id): id is string => id !== null);
+    if (peerIds.length > 0) fetchPresence(peerIds);
+  }, [dmChannels.length, user?.id]);
 
   async function handleStartDm() {
     if (!dmTarget.trim()) return;
@@ -57,6 +110,34 @@ export default function Sidebar() {
     }
   }
 
+  async function handleCreateServer() {
+    if (!serverName.trim()) return;
+    setCreateServerError("");
+    try {
+      const meta = JSON.stringify({ name: serverName.trim() });
+      const metaBase64 = btoa(meta);
+      await api.createServer({ encrypted_meta: metaBase64 });
+      await loadChannels();
+      setServerName("");
+      setShowCreateServer(false);
+    } catch (err: any) {
+      setCreateServerError(err.message || "Failed to create server");
+    }
+  }
+
+  async function handleJoinServer() {
+    if (!inviteCode.trim()) return;
+    setJoinError("");
+    try {
+      await api.joinByInvite(inviteCode.trim());
+      await loadChannels();
+      setInviteCode("");
+      setShowJoinServer(false);
+    } catch (err: any) {
+      setJoinError(err.message || "Invalid invite code");
+    }
+  }
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -65,8 +146,57 @@ export default function Sidebar() {
 
       <div className="sidebar-section">
         <div className="sidebar-section-header">
-          <span>Channels</span>
+          <span>Servers</span>
+          <div style={{ display: "flex", gap: 2 }}>
+            <button
+              className="btn-icon"
+              onClick={() => { setShowCreateServer(!showCreateServer); setShowJoinServer(false); }}
+              title="Create Server"
+            >
+              +
+            </button>
+            <button
+              className="btn-icon"
+              onClick={() => { setShowJoinServer(!showJoinServer); setShowCreateServer(false); }}
+              title="Join Server"
+            >
+              &rarr;
+            </button>
+          </div>
         </div>
+
+        {showCreateServer && (
+          <div className="dm-input-row">
+            <input
+              type="text"
+              placeholder="Server name..."
+              value={serverName}
+              onChange={(e) => setServerName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleCreateServer()}
+            />
+            <button className="btn-small" onClick={handleCreateServer}>
+              Create
+            </button>
+            {createServerError && <div className="error-small">{createServerError}</div>}
+          </div>
+        )}
+
+        {showJoinServer && (
+          <div className="dm-input-row">
+            <input
+              type="text"
+              placeholder="Invite code..."
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleJoinServer()}
+            />
+            <button className="btn-small" onClick={handleJoinServer}>
+              Join
+            </button>
+            {joinError && <div className="error-small">{joinError}</div>}
+          </div>
+        )}
+
         <ul className="channel-list">
           {serverChannels.map((ch) => (
             <li key={ch.id}>
@@ -113,16 +243,21 @@ export default function Sidebar() {
         )}
 
         <ul className="channel-list">
-          {dmChannels.map((ch) => (
-            <li key={ch.id}>
-              <button
-                className={`channel-item ${ch.id === currentChannelId ? "active" : ""}`}
-                onClick={() => selectChannel(ch.id)}
-              >
-                {parseDmDisplayName(ch.encrypted_meta, user?.id ?? "")}
-              </button>
-            </li>
-          ))}
+          {dmChannels.map((ch) => {
+            const peerId = parseDmPeerId(ch.encrypted_meta, user?.id ?? "");
+            const isOnline = peerId ? presenceStatuses[peerId] === "online" : false;
+            return (
+              <li key={ch.id}>
+                <button
+                  className={`channel-item ${ch.id === currentChannelId ? "active" : ""}`}
+                  onClick={() => selectChannel(ch.id)}
+                >
+                  <span className={`presence-dot ${isOnline ? "online" : "offline"}`} />
+                  {parseDmDisplayName(ch.encrypted_meta, user?.id ?? "")}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
     </aside>

@@ -41,6 +41,47 @@ pub async fn get_messages(
     Ok(Json(responses))
 }
 
+/// GET /api/v1/channels/:channel_id/reactions
+/// Returns grouped reactions for the most recent messages in a channel.
+pub async fn get_channel_reactions(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+) -> AppResult<Json<Vec<ReactionGroup>>> {
+    // Verify membership
+    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
+    }
+
+    // Get recent message IDs for this channel
+    let messages = queries::get_channel_messages(&state.db, channel_id, None, 50).await?;
+    let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+
+    let reactions = queries::get_reactions_for_messages(&state.db, &message_ids).await?;
+
+    // Group by (message_id, emoji)
+    let mut groups: std::collections::HashMap<(Uuid, String), Vec<Uuid>> = std::collections::HashMap::new();
+    for r in &reactions {
+        groups
+            .entry((r.message_id, r.emoji.clone()))
+            .or_default()
+            .push(r.user_id);
+    }
+
+    // Flatten into a response format that includes message_id
+    let result: Vec<ReactionGroup> = groups
+        .into_iter()
+        .map(|((message_id, emoji), user_ids)| ReactionGroup {
+            message_id,
+            emoji,
+            count: user_ids.len() as i64,
+            user_ids,
+        })
+        .collect();
+
+    Ok(Json(result))
+}
+
 /// POST /api/v1/channels/:channel_id/messages
 /// REST fallback for sending messages (primary path is WebSocket).
 pub async fn send_message(
@@ -73,6 +114,7 @@ pub async fn send_message(
         &encrypted_body,
         req.expires_at,
         req.has_attachments,
+        user_id,
     )
     .await?;
 
