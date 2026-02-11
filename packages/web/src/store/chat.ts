@@ -4,6 +4,8 @@ import {
   encryptFile,
   toBase64,
   type ChannelResponse,
+  type CategoryResponse,
+  type RoleResponse,
   type MessageResponse,
   type ServerResponse,
   type WsServerMessage,
@@ -58,6 +60,10 @@ export interface DecryptedMessage {
 interface ChatState {
   servers: ServerResponse[];
   channels: ChannelResponse[];
+  /** serverId -> categories for that server */
+  categories: Record<string, CategoryResponse[]>;
+  /** serverId -> roles for that server */
+  roles: Record<string, RoleResponse[]>;
   currentChannelId: string | null;
   messages: Record<string, DecryptedMessage[]>;
   pendingUploads: PendingUpload[];
@@ -119,6 +125,8 @@ const ownMessageIds = new Set<string>();
 export const useChatStore = create<ChatState>((set, get) => ({
   servers: [],
   channels: [],
+  categories: {},
+  roles: {},
   currentChannelId: null,
   messages: {},
   pendingUploads: [],
@@ -226,6 +234,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
       usePresenceStore.getState().setStatus(msg.payload.user_id, msg.payload.status);
     });
 
+    // Friend events — dynamically import friends store to avoid circular deps
+    ws.on("FriendRequestReceived", () => {
+      import("./friends.js").then(({ useFriendsStore }) => {
+        useFriendsStore.getState().loadFriends();
+      });
+    });
+    ws.on("FriendRequestAccepted", () => {
+      import("./friends.js").then(({ useFriendsStore }) => {
+        useFriendsStore.getState().loadFriends();
+      });
+    });
+    ws.on("FriendRemoved", () => {
+      import("./friends.js").then(({ useFriendsStore }) => {
+        useFriendsStore.getState().loadFriends();
+      });
+    });
+    ws.on("DmRequestReceived", () => {
+      import("./friends.js").then(({ useFriendsStore }) => {
+        useFriendsStore.getState().loadDmRequests();
+      });
+      // Also reload channels to show the new pending DM
+      get().loadChannels();
+    });
+
     ws.on("UserTyping", (msg: Extract<WsServerMessage, { type: "UserTyping" }>) => {
       const { channel_id, user_id, username } = msg.payload;
       const myId = useAuthStore.getState().user?.id;
@@ -278,12 +310,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
   async loadChannels() {
     const { api } = useAuthStore.getState();
 
-    // Load servers, then channels for each server (in parallel)
+    // Load servers, then channels + categories + roles for each server (in parallel)
     const servers = await api.listServers();
-    const serverChannelArrays = await Promise.all(
-      servers.map((server) => api.listServerChannels(server.id))
-    );
+    const [serverChannelArrays, serverCategoryArrays, serverRoleArrays] = await Promise.all([
+      Promise.all(servers.map((server) => api.listServerChannels(server.id))),
+      Promise.all(servers.map((server) => api.listCategories(server.id))),
+      Promise.all(servers.map((server) => api.listRoles(server.id))),
+    ]);
     const allChannels: ChannelResponse[] = serverChannelArrays.flat();
+
+    // Build categories map: serverId -> CategoryResponse[]
+    const categories: Record<string, CategoryResponse[]> = {};
+    const roles: Record<string, RoleResponse[]> = {};
+    servers.forEach((server, i) => {
+      categories[server.id] = serverCategoryArrays[i];
+      roles[server.id] = serverRoleArrays[i];
+    });
 
     // Also load DM channels
     const dmChannels = await api.listDmChannels();
@@ -308,7 +350,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    set({ servers, channels: allChannels, userNames });
+    set({ servers, channels: allChannels, categories, roles, userNames });
 
     // Load blocked users list
     get().loadBlockedUsers();

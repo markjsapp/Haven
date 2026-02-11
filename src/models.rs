@@ -23,6 +23,7 @@ pub struct User {
     pub custom_status: Option<String>,
     pub custom_status_emoji: Option<String>,
     pub avatar_url: Option<String>,
+    pub dm_privacy: String, // "everyone", "friends_only", "server_members"
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -170,6 +171,8 @@ pub struct Channel {
     pub channel_type: String,    // "text", "dm"
     pub position: i32,
     pub created_at: DateTime<Utc>,
+    pub category_id: Option<Uuid>,
+    pub dm_status: Option<String>, // "active", "pending", "declined" — only for DM channels
 }
 
 #[derive(Debug, Deserialize)]
@@ -177,6 +180,7 @@ pub struct CreateChannelRequest {
     pub encrypted_meta: String, // base64
     pub channel_type: Option<String>,
     pub position: Option<i32>,
+    pub category_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize)]
@@ -187,6 +191,69 @@ pub struct ChannelResponse {
     pub channel_type: String,
     pub position: i32,
     pub created_at: DateTime<Utc>,
+    pub category_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dm_status: Option<String>,
+}
+
+// ─── Channel Categories ──────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ChannelCategory {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub name: String,
+    pub position: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateCategoryRequest {
+    pub name: String,
+    pub position: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateCategoryRequest {
+    pub name: Option<String>,
+    pub position: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReorderCategoriesRequest {
+    pub order: Vec<CategoryPosition>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CategoryPosition {
+    pub id: Uuid,
+    pub position: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CategoryResponse {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub name: String,
+    pub position: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<ChannelCategory> for CategoryResponse {
+    fn from(c: ChannelCategory) -> Self {
+        Self {
+            id: c.id,
+            server_id: c.server_id,
+            name: c.name,
+            position: c.position,
+            created_at: c.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetChannelCategoryRequest {
+    pub category_id: Option<Uuid>,
 }
 
 // ─── Members ───────────────────────────────────────────
@@ -446,6 +513,14 @@ pub enum WsServerMessage {
     },
     /// User presence change (online/offline)
     PresenceUpdate { user_id: Uuid, status: String },
+    /// A friend request was received
+    FriendRequestReceived { from_user_id: Uuid, from_username: String, friendship_id: Uuid },
+    /// A friend request was accepted
+    FriendRequestAccepted { user_id: Uuid, username: String, friendship_id: Uuid },
+    /// A friend was removed
+    FriendRemoved { user_id: Uuid },
+    /// A DM message request was received (pending channel)
+    DmRequestReceived { channel_id: Uuid, from_user_id: Uuid },
 }
 
 // ─── Presence ─────────────────────────────────────────
@@ -558,6 +633,150 @@ pub struct BlockedUserResponse {
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub blocked_at: DateTime<Utc>,
+}
+
+// ─── Roles & Permissions ─────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Role {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub name: String,
+    pub color: Option<String>,
+    pub permissions: i64,
+    pub position: i32,
+    pub is_default: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateRoleRequest {
+    pub name: String,
+    pub color: Option<String>,
+    /// Permissions as string to avoid JS precision loss with i64
+    pub permissions: Option<String>,
+    pub position: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateRoleRequest {
+    pub name: Option<String>,
+    pub color: Option<String>,
+    pub permissions: Option<String>,
+    pub position: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RoleResponse {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub name: String,
+    pub color: Option<String>,
+    /// Permissions as string to avoid JS precision loss
+    pub permissions: String,
+    pub position: i32,
+    pub is_default: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<Role> for RoleResponse {
+    fn from(r: Role) -> Self {
+        Self {
+            id: r.id,
+            server_id: r.server_id,
+            name: r.name,
+            color: r.color,
+            permissions: r.permissions.to_string(),
+            position: r.position,
+            is_default: r.is_default,
+            created_at: r.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AssignRoleRequest {
+    pub role_id: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ChannelPermissionOverwrite {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub target_type: String,
+    pub target_id: Uuid,
+    pub allow_bits: i64,
+    pub deny_bits: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetOverwriteRequest {
+    pub target_type: String,   // "role" or "member"
+    pub target_id: Uuid,
+    pub allow_bits: String,    // string to avoid JS precision loss
+    pub deny_bits: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OverwriteResponse {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub target_type: String,
+    pub target_id: Uuid,
+    pub allow_bits: String,
+    pub deny_bits: String,
+}
+
+impl From<ChannelPermissionOverwrite> for OverwriteResponse {
+    fn from(o: ChannelPermissionOverwrite) -> Self {
+        Self {
+            id: o.id,
+            channel_id: o.channel_id,
+            target_type: o.target_type,
+            target_id: o.target_id,
+            allow_bits: o.allow_bits.to_string(),
+            deny_bits: o.deny_bits.to_string(),
+        }
+    }
+}
+
+// ─── Friends ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Friendship {
+    pub id: Uuid,
+    pub requester_id: Uuid,
+    pub addressee_id: Uuid,
+    pub status: String, // "pending", "accepted"
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct FriendResponse {
+    pub id: Uuid,            // friendship ID
+    pub user_id: Uuid,       // the other user
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub status: String,      // "pending", "accepted"
+    pub is_incoming: bool,   // true if the other user sent the request
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FriendRequestBody {
+    pub username: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DmRequestAction {
+    pub action: String, // "accept" or "decline"
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateDmPrivacyRequest {
+    pub dm_privacy: String, // "everyone", "friends_only", "server_members"
 }
 
 // ─── Validation helpers ───────────────────────────────

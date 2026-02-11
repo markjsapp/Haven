@@ -119,6 +119,7 @@ export interface CreateChannelRequest {
   encrypted_meta: string; // base64
   channel_type?: string;
   position?: number;
+  category_id?: string | null;
 }
 
 export interface ChannelResponse {
@@ -128,6 +129,36 @@ export interface ChannelResponse {
   channel_type: string;
   position: number;
   created_at: string;
+  category_id: string | null;
+  dm_status?: string; // "active", "pending", "declined" — only for DM channels
+}
+
+// ─── Channel Categories ───────────────────────────────
+
+export interface CategoryResponse {
+  id: string;
+  server_id: string;
+  name: string;
+  position: number;
+  created_at: string;
+}
+
+export interface CreateCategoryRequest {
+  name: string;
+  position?: number;
+}
+
+export interface UpdateCategoryRequest {
+  name?: string;
+  position?: number;
+}
+
+export interface ReorderCategoriesRequest {
+  order: Array<{ id: string; position: number }>;
+}
+
+export interface SetChannelCategoryRequest {
+  category_id: string | null;
 }
 
 export interface CreateDmRequest {
@@ -226,7 +257,11 @@ export type WsServerMessage =
   | { type: "MessageDeleted"; payload: { message_id: string; channel_id: string } }
   | { type: "ReactionAdded"; payload: { message_id: string; channel_id: string; user_id: string; emoji: string } }
   | { type: "ReactionRemoved"; payload: { message_id: string; channel_id: string; user_id: string; emoji: string } }
-  | { type: "PresenceUpdate"; payload: { user_id: string; status: string } };
+  | { type: "PresenceUpdate"; payload: { user_id: string; status: string } }
+  | { type: "FriendRequestReceived"; payload: { from_user_id: string; from_username: string; friendship_id: string } }
+  | { type: "FriendRequestAccepted"; payload: { user_id: string; username: string; friendship_id: string } }
+  | { type: "FriendRemoved"; payload: { user_id: string } }
+  | { type: "DmRequestReceived"; payload: { channel_id: string; from_user_id: string } };
 
 // ─── Presence ─────────────────────────────────────────
 
@@ -260,6 +295,96 @@ export interface ServerMemberResponse {
   display_name: string | null;
   avatar_url: string | null;
   joined_at: string;
+}
+
+// ─── Roles & Permissions ─────────────────────────────
+
+export const Permission = {
+  ADMINISTRATOR:        BigInt(1) << BigInt(0),
+  MANAGE_SERVER:        BigInt(1) << BigInt(1),
+  MANAGE_ROLES:         BigInt(1) << BigInt(2),
+  MANAGE_CHANNELS:      BigInt(1) << BigInt(3),
+  KICK_MEMBERS:         BigInt(1) << BigInt(4),
+  BAN_MEMBERS:          BigInt(1) << BigInt(5),
+  MANAGE_MESSAGES:      BigInt(1) << BigInt(6),
+  VIEW_CHANNELS:        BigInt(1) << BigInt(7),
+  SEND_MESSAGES:        BigInt(1) << BigInt(8),
+  CREATE_INVITES:       BigInt(1) << BigInt(9),
+  MANAGE_INVITES:       BigInt(1) << BigInt(10),
+  ADD_REACTIONS:        BigInt(1) << BigInt(11),
+  MENTION_EVERYONE:     BigInt(1) << BigInt(12),
+  ATTACH_FILES:         BigInt(1) << BigInt(13),
+  READ_MESSAGE_HISTORY: BigInt(1) << BigInt(14),
+} as const;
+
+export interface RoleResponse {
+  id: string;
+  server_id: string;
+  name: string;
+  color: string | null;
+  permissions: string; // bigint as string
+  position: number;
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface CreateRoleRequest {
+  name: string;
+  color?: string;
+  permissions?: string;
+  position?: number;
+}
+
+export interface UpdateRoleRequest {
+  name?: string;
+  color?: string;
+  permissions?: string;
+  position?: number;
+}
+
+export interface AssignRoleRequest {
+  role_id: string;
+}
+
+export interface OverwriteResponse {
+  id: string;
+  channel_id: string;
+  target_type: string;
+  target_id: string;
+  allow_bits: string;
+  deny_bits: string;
+}
+
+export interface SetOverwriteRequest {
+  target_type: string;
+  target_id: string;
+  allow_bits: string;
+  deny_bits: string;
+}
+
+// ─── Friends ──────────────────────────────────────────
+
+export interface FriendResponse {
+  id: string;           // friendship ID
+  user_id: string;      // the other user
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  status: string;       // "pending", "accepted"
+  is_incoming: boolean;  // true if the other user sent the request
+  created_at: string;
+}
+
+export interface FriendRequestBody {
+  username: string;
+}
+
+export interface DmRequestAction {
+  action: string; // "accept" or "decline"
+}
+
+export interface UpdateDmPrivacyRequest {
+  dm_privacy: string; // "everyone", "friends_only", "server_members"
 }
 
 // ─── API Error ─────────────────────────────────────────

@@ -28,6 +28,18 @@ pub async fn create_server(
     let owner_role = b"owner"; // In practice, this would be encrypted
     queries::add_server_member(&state.db, server.id, user_id, owner_role).await?;
 
+    // Create @everyone default role
+    queries::create_role(
+        &state.db,
+        server.id,
+        "@everyone",
+        None,
+        crate::permissions::DEFAULT_PERMISSIONS,
+        0,
+        true,
+    )
+    .await?;
+
     // Create a default "general" channel
     let default_channel_meta = b"general"; // Would be encrypted in practice
     let channel = queries::create_channel(
@@ -36,6 +48,7 @@ pub async fn create_server(
         default_channel_meta,
         "text",
         0,
+        None,
     )
     .await?;
 
@@ -127,6 +140,8 @@ pub async fn list_server_channels(
             channel_type: c.channel_type,
             position: c.position,
             created_at: c.created_at,
+            category_id: c.category_id,
+            dm_status: c.dm_status,
         })
         .collect();
 

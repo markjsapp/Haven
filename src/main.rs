@@ -6,6 +6,7 @@ mod db;
 mod errors;
 mod middleware;
 mod models;
+mod permissions;
 mod storage;
 mod ws;
 
@@ -189,6 +190,21 @@ fn build_router(state: AppState) -> Router {
             post(api::channels::create_channel),
         )
         .route(
+            "/:server_id/categories",
+            get(api::categories::list_categories)
+                .post(api::categories::create_category),
+        )
+        // reorder MUST come before /:category_id to avoid param collision
+        .route(
+            "/:server_id/categories/reorder",
+            put(api::categories::reorder_categories),
+        )
+        .route(
+            "/:server_id/categories/:category_id",
+            put(api::categories::update_category)
+                .delete(api::categories::delete_category),
+        )
+        .route(
             "/:server_id/invites",
             get(api::invites::list_invites),
         )
@@ -207,6 +223,22 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/:server_id/members/:user_id",
             delete(api::invites::kick_member),
+        )
+        .route(
+            "/:server_id/roles",
+            get(api::roles::list_roles).post(api::roles::create_role),
+        )
+        .route(
+            "/:server_id/roles/:role_id",
+            put(api::roles::update_role).delete(api::roles::delete_role),
+        )
+        .route(
+            "/:server_id/members/:user_id/roles",
+            put(api::roles::assign_role),
+        )
+        .route(
+            "/:server_id/members/:user_id/roles/:role_id",
+            delete(api::roles::unassign_role),
         );
 
     // Channel routes
@@ -214,6 +246,15 @@ fn build_router(state: AppState) -> Router {
         .route("/:channel_id", put(api::channels::update_channel))
         .route("/:channel_id", delete(api::channels::delete_channel))
         .route("/:channel_id/join", post(api::channels::join_channel))
+        .route("/:channel_id/category", put(api::categories::set_channel_category))
+        .route(
+            "/:channel_id/overwrites",
+            get(api::roles::list_overwrites).put(api::roles::set_overwrite),
+        )
+        .route(
+            "/:channel_id/overwrites/:target_type/:target_id",
+            delete(api::roles::delete_overwrite),
+        )
         .route(
             "/:channel_id/messages",
             get(api::messages::get_messages),
@@ -236,10 +277,20 @@ fn build_router(state: AppState) -> Router {
             get(api::messages::get_channel_reactions),
         );
 
+    // Friend routes
+    let friend_routes = Router::new()
+        .route("/", get(api::friends::list_friends))
+        .route("/request", post(api::friends::send_friend_request))
+        .route("/:friendship_id/accept", post(api::friends::accept_friend_request))
+        .route("/:friendship_id/decline", post(api::friends::decline_friend_request))
+        .route("/:friendship_id", delete(api::friends::remove_friend));
+
     // DM routes
     let dm_routes = Router::new()
         .route("/", get(api::channels::list_dm_channels))
-        .route("/", post(api::channels::create_dm));
+        .route("/", post(api::channels::create_dm))
+        .route("/requests", get(api::friends::list_dm_requests))
+        .route("/:channel_id/request", post(api::friends::handle_dm_request));
 
     // Invite join route (standalone, not nested under servers)
     let invite_routes = Router::new()
@@ -259,6 +310,10 @@ fn build_router(state: AppState) -> Router {
     let presence_routes = Router::new()
         .route("/presence", get(api::presence::get_presence));
 
+    // DM privacy route
+    let dm_privacy_routes = Router::new()
+        .route("/users/dm-privacy", put(api::friends::update_dm_privacy));
+
     // Assemble the full API
     let api = Router::new()
         .nest("/auth", auth_routes.merge(auth_protected))
@@ -267,10 +322,12 @@ fn build_router(state: AppState) -> Router {
         .nest("/servers", server_routes)
         .nest("/channels", channel_routes)
         .nest("/dm", dm_routes)
+        .nest("/friends", friend_routes)
         .nest("/invites", invite_routes)
         .nest("/attachments", attachment_routes)
         .merge(link_preview_routes)
-        .merge(presence_routes);
+        .merge(presence_routes)
+        .merge(dm_privacy_routes);
 
     Router::new()
         .route("/api/v1/ws", get(ws::ws_handler))

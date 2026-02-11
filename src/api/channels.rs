@@ -8,6 +8,7 @@ use crate::db::queries;
 use crate::errors::{AppError, AppResult};
 use crate::middleware::AuthUser;
 use crate::models::*;
+use crate::permissions;
 use crate::AppState;
 
 /// POST /api/v1/servers/:server_id/channels
@@ -17,10 +18,13 @@ pub async fn create_channel(
     Path(server_id): Path<Uuid>,
     Json(req): Json<CreateChannelRequest>,
 ) -> AppResult<Json<ChannelResponse>> {
-    // Verify user is a server member (ideally check admin/owner role)
-    if !queries::is_server_member(&state.db, server_id, user_id).await? {
-        return Err(AppError::Forbidden("Not a member of this server".into()));
-    }
+    queries::require_server_permission(
+        &state.db,
+        server_id,
+        user_id,
+        permissions::MANAGE_CHANNELS,
+    )
+    .await?;
 
     let encrypted_meta = base64::Engine::decode(
         &base64::engine::general_purpose::STANDARD,
@@ -37,6 +41,7 @@ pub async fn create_channel(
         &encrypted_meta,
         channel_type,
         position,
+        req.category_id,
     )
     .await?;
 
@@ -53,6 +58,8 @@ pub async fn create_channel(
         channel_type: channel.channel_type,
         position: channel.position,
         created_at: channel.created_at,
+        category_id: channel.category_id,
+        dm_status: channel.dm_status,
     }))
 }
 
@@ -81,13 +88,14 @@ pub async fn join_channel(
 
 /// POST /api/v1/dm
 /// Create a DM channel between two users, or return existing one.
+/// Enforces DM privacy: if the target has friends_only, creates a pending DM.
 pub async fn create_dm(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Json(req): Json<CreateDmRequest>,
 ) -> AppResult<Json<ChannelResponse>> {
     // Verify target user exists
-    let _target = queries::find_user_by_id(&state.db, req.target_user_id)
+    let target = queries::find_user_by_id(&state.db, req.target_user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
@@ -103,8 +111,32 @@ pub async fn create_dm(
             channel_type: existing.channel_type,
             position: existing.position,
             created_at: existing.created_at,
+            category_id: None,
+            dm_status: existing.dm_status,
         }));
     }
+
+    // Determine DM status based on target's privacy setting
+    let dm_status = match target.dm_privacy.as_str() {
+        "everyone" => "active",
+        "friends_only" => {
+            if queries::are_friends(&state.db, user_id, req.target_user_id).await? {
+                "active"
+            } else {
+                "pending"
+            }
+        }
+        "server_members" => {
+            if queries::are_friends(&state.db, user_id, req.target_user_id).await?
+                || queries::share_server(&state.db, user_id, req.target_user_id).await?
+            {
+                "active"
+            } else {
+                "pending"
+            }
+        }
+        _ => "active",
+    };
 
     // Create a new DM channel (no server association)
     let encrypted_meta = base64::Engine::decode(
@@ -113,11 +145,24 @@ pub async fn create_dm(
     )
     .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
 
-    let channel = queries::create_channel(&state.db, None, &encrypted_meta, "dm", 0).await?;
+    let channel = queries::create_channel(&state.db, None, &encrypted_meta, "dm", 0, None).await?;
+
+    // Set dm_status
+    if dm_status != "active" {
+        queries::set_dm_status(&state.db, channel.id, dm_status).await?;
+    }
 
     // Add both users
     queries::add_channel_member(&state.db, channel.id, user_id).await?;
     queries::add_channel_member(&state.db, channel.id, req.target_user_id).await?;
+
+    // If pending, notify the target user via WS
+    if dm_status == "pending" {
+        send_to_user(&state, req.target_user_id, WsServerMessage::DmRequestReceived {
+            channel_id: channel.id,
+            from_user_id: user_id,
+        });
+    }
 
     Ok(Json(ChannelResponse {
         id: channel.id,
@@ -129,6 +174,8 @@ pub async fn create_dm(
         channel_type: channel.channel_type,
         position: channel.position,
         created_at: channel.created_at,
+        category_id: None,
+        dm_status: Some(dm_status.to_string()),
     }))
 }
 
@@ -151,6 +198,8 @@ pub async fn list_dm_channels(
             channel_type: ch.channel_type,
             position: ch.position,
             created_at: ch.created_at,
+            category_id: ch.category_id,
+            dm_status: ch.dm_status,
         })
         .collect();
     Ok(Json(responses))
@@ -172,13 +221,13 @@ pub async fn update_channel(
     let server_id = channel.server_id
         .ok_or(AppError::Forbidden("Cannot rename DM channels".into()))?;
 
-    // Verify server ownership
-    let server = queries::find_server_by_id(&state.db, server_id)
-        .await?
-        .ok_or(AppError::NotFound("Server not found".into()))?;
-    if server.owner_id != user_id {
-        return Err(AppError::Forbidden("Only the server owner can rename channels".into()));
-    }
+    queries::require_server_permission(
+        &state.db,
+        server_id,
+        user_id,
+        permissions::MANAGE_CHANNELS,
+    )
+    .await?;
 
     let encrypted_meta = base64::Engine::decode(
         &base64::engine::general_purpose::STANDARD,
@@ -198,6 +247,8 @@ pub async fn update_channel(
         channel_type: updated.channel_type,
         position: updated.position,
         created_at: updated.created_at,
+        category_id: updated.category_id,
+        dm_status: updated.dm_status,
     }))
 }
 
@@ -215,12 +266,13 @@ pub async fn delete_channel(
     let server_id = channel.server_id
         .ok_or(AppError::Forbidden("Cannot delete DM channels".into()))?;
 
-    let server = queries::find_server_by_id(&state.db, server_id)
-        .await?
-        .ok_or(AppError::NotFound("Server not found".into()))?;
-    if server.owner_id != user_id {
-        return Err(AppError::Forbidden("Only the server owner can delete channels".into()));
-    }
+    queries::require_server_permission(
+        &state.db,
+        server_id,
+        user_id,
+        permissions::MANAGE_CHANNELS,
+    )
+    .await?;
 
     queries::delete_channel(&state.db, channel_id).await?;
 
@@ -238,4 +290,13 @@ pub struct CreateDmRequest {
 #[derive(Debug, serde::Deserialize)]
 pub struct UpdateChannelRequest {
     pub encrypted_meta: String, // base64
+}
+
+/// Send a WS message to a specific user (all their connections).
+fn send_to_user(state: &AppState, user_id: Uuid, msg: WsServerMessage) {
+    if let Some(conns) = state.connections.get(&user_id) {
+        for tx in conns.iter() {
+            let _ = tx.send(msg.clone());
+        }
+    }
 }

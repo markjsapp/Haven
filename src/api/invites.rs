@@ -10,6 +10,7 @@ use crate::db::queries;
 use crate::errors::{AppError, AppResult};
 use crate::middleware::AuthUser;
 use crate::models::*;
+use crate::permissions;
 use crate::AppState;
 
 /// POST /api/v1/servers/:server_id/invites
@@ -20,15 +21,13 @@ pub async fn create_invite(
     Path(server_id): Path<Uuid>,
     Json(req): Json<CreateInviteRequest>,
 ) -> AppResult<Json<InviteResponse>> {
-    // Verify the server exists
-    let server = queries::find_server_by_id(&state.db, server_id)
-        .await?
-        .ok_or(AppError::NotFound("Server not found".into()))?;
-
-    // Only the owner can create invites (for now)
-    if server.owner_id != user_id {
-        return Err(AppError::Forbidden("Only the server owner can create invites".into()));
-    }
+    queries::require_server_permission(
+        &state.db,
+        server_id,
+        user_id,
+        permissions::CREATE_INVITES,
+    )
+    .await?;
 
     // Generate a random 8-char invite code
     let code = generate_invite_code();
@@ -57,13 +56,13 @@ pub async fn list_invites(
     AuthUser(user_id): AuthUser,
     Path(server_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<InviteResponse>>> {
-    let server = queries::find_server_by_id(&state.db, server_id)
-        .await?
-        .ok_or(AppError::NotFound("Server not found".into()))?;
-
-    if server.owner_id != user_id {
-        return Err(AppError::Forbidden("Only the server owner can view invites".into()));
-    }
+    queries::require_server_permission(
+        &state.db,
+        server_id,
+        user_id,
+        permissions::MANAGE_INVITES,
+    )
+    .await?;
 
     let invites = queries::get_server_invites(&state.db, server_id).await?;
     let responses: Vec<InviteResponse> = invites.into_iter().map(InviteResponse::from).collect();
@@ -78,13 +77,13 @@ pub async fn delete_invite(
     AuthUser(user_id): AuthUser,
     Path((server_id, invite_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let server = queries::find_server_by_id(&state.db, server_id)
-        .await?
-        .ok_or(AppError::NotFound("Server not found".into()))?;
-
-    if server.owner_id != user_id {
-        return Err(AppError::Forbidden("Only the server owner can revoke invites".into()));
-    }
+    queries::require_server_permission(
+        &state.db,
+        server_id,
+        user_id,
+        permissions::MANAGE_INVITES,
+    )
+    .await?;
 
     queries::delete_invite(&state.db, invite_id).await?;
 
@@ -173,13 +172,13 @@ pub async fn kick_member(
     AuthUser(user_id): AuthUser,
     Path((server_id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let server = queries::find_server_by_id(&state.db, server_id)
-        .await?
-        .ok_or(AppError::NotFound("Server not found".into()))?;
-
-    if server.owner_id != user_id {
-        return Err(AppError::Forbidden("Only the server owner can kick members".into()));
-    }
+    queries::require_server_permission(
+        &state.db,
+        server_id,
+        user_id,
+        permissions::KICK_MEMBERS,
+    )
+    .await?;
 
     if target_user_id == user_id {
         return Err(AppError::Validation("Cannot kick yourself".into()));

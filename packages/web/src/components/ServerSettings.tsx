@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
-import type { InviteResponse, ServerMemberResponse } from "@haven/core";
+import { useChatStore } from "../store/chat.js";
+import type { InviteResponse, ServerMemberResponse, CategoryResponse } from "@haven/core";
+import RoleSettings from "./RoleSettings.js";
 
 interface Props {
   serverId: string;
@@ -13,9 +15,13 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
 
   const [invites, setInvites] = useState<InviteResponse[]>([]);
   const [members, setMembers] = useState<ServerMemberResponse[]>([]);
-  const [tab, setTab] = useState<"members" | "invites">("members");
+  const [categories, setCategories] = useState<CategoryResponse[]>([]);
+  const [tab, setTab] = useState<"members" | "invites" | "categories" | "roles">("members");
   const [error, setError] = useState("");
   const [createdCode, setCreatedCode] = useState("");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editingCatName, setEditingCatName] = useState("");
 
   useEffect(() => {
     loadData();
@@ -26,8 +32,12 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
       const m = await api.listServerMembers(serverId);
       setMembers(m);
       if (isOwner) {
-        const inv = await api.listInvites(serverId);
+        const [inv, cats] = await Promise.all([
+          api.listInvites(serverId),
+          api.listCategories(serverId),
+        ]);
         setInvites(inv);
+        setCategories(cats);
       }
     } catch (err: any) {
       setError(err.message || "Failed to load server data");
@@ -64,6 +74,47 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
     }
   }
 
+  async function handleCreateCategory() {
+    if (!newCategoryName.trim()) return;
+    setError("");
+    try {
+      const cat = await api.createCategory(serverId, {
+        name: newCategoryName.trim(),
+        position: categories.length,
+      });
+      setCategories((prev) => [...prev, cat]);
+      setNewCategoryName("");
+      useChatStore.getState().loadChannels();
+    } catch (err: any) {
+      setError(err.message || "Failed to create category");
+    }
+  }
+
+  async function handleRenameCategory(catId: string) {
+    if (!editingCatName.trim()) return;
+    setError("");
+    try {
+      const updated = await api.updateCategory(serverId, catId, { name: editingCatName.trim() });
+      setCategories((prev) => prev.map((c) => (c.id === catId ? updated : c)));
+      setEditingCatId(null);
+      useChatStore.getState().loadChannels();
+    } catch (err: any) {
+      setError(err.message || "Failed to rename category");
+    }
+  }
+
+  async function handleDeleteCategory(catId: string) {
+    if (!confirm("Delete this category? Channels in it will become uncategorized.")) return;
+    setError("");
+    try {
+      await api.deleteCategory(serverId, catId);
+      setCategories((prev) => prev.filter((c) => c.id !== catId));
+      useChatStore.getState().loadChannels();
+    } catch (err: any) {
+      setError(err.message || "Failed to delete category");
+    }
+  }
+
   const user = useAuthStore.getState().user;
 
   return (
@@ -82,12 +133,26 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
             Members ({members.length})
           </button>
           {isOwner && (
-            <button
-              className={`server-settings-tab ${tab === "invites" ? "active" : ""}`}
-              onClick={() => setTab("invites")}
-            >
-              Invites
-            </button>
+            <>
+              <button
+                className={`server-settings-tab ${tab === "invites" ? "active" : ""}`}
+                onClick={() => setTab("invites")}
+              >
+                Invites
+              </button>
+              <button
+                className={`server-settings-tab ${tab === "categories" ? "active" : ""}`}
+                onClick={() => setTab("categories")}
+              >
+                Categories
+              </button>
+              <button
+                className={`server-settings-tab ${tab === "roles" ? "active" : ""}`}
+                onClick={() => setTab("roles")}
+              >
+                Roles
+              </button>
+            </>
           )}
         </div>
 
@@ -161,6 +226,73 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
               </div>
             )}
           </div>
+        )}
+
+        {tab === "categories" && isOwner && (
+          <div className="server-settings-list">
+            <div style={{ padding: "8px 16px" }}>
+              <div className="dm-input-row">
+                <input
+                  type="text"
+                  placeholder="Category name..."
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateCategory()}
+                />
+                <button className="btn-small" onClick={handleCreateCategory}>Create</button>
+              </div>
+            </div>
+
+            {categories.map((cat) => (
+              <div key={cat.id} className="server-member-row">
+                {editingCatId === cat.id ? (
+                  <div className="dm-input-row" style={{ flex: 1 }}>
+                    <input
+                      type="text"
+                      value={editingCatName}
+                      onChange={(e) => setEditingCatName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRenameCategory(cat.id);
+                        if (e.key === "Escape") setEditingCatId(null);
+                      }}
+                      autoFocus
+                    />
+                    <button className="btn-small" onClick={() => handleRenameCategory(cat.id)}>Save</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="server-member-info" style={{ flex: 1 }}>
+                      <span className="server-member-name">{cat.name}</span>
+                    </div>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => {
+                        setEditingCatId(cat.id);
+                        setEditingCatName(cat.name);
+                      }}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      className="btn-ghost server-kick-btn"
+                      onClick={() => handleDeleteCategory(cat.id)}
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+            {categories.length === 0 && (
+              <div style={{ padding: "8px 16px", color: "var(--text-muted)", fontSize: 13 }}>
+                No categories yet. Create one to organize your channels.
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "roles" && isOwner && (
+          <RoleSettings serverId={serverId} />
         )}
       </div>
     </div>

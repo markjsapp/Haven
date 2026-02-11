@@ -30,6 +30,21 @@ import type {
   UserProfileResponse,
   UpdateProfileRequest,
   BlockedUserResponse,
+  CategoryResponse,
+  CreateCategoryRequest,
+  UpdateCategoryRequest,
+  ReorderCategoriesRequest,
+  SetChannelCategoryRequest,
+  RoleResponse,
+  CreateRoleRequest,
+  UpdateRoleRequest,
+  AssignRoleRequest,
+  OverwriteResponse,
+  SetOverwriteRequest,
+  FriendResponse,
+  FriendRequestBody,
+  DmRequestAction,
+  UpdateDmPrivacyRequest,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -172,6 +187,70 @@ export class HavenApi {
 
   async createDm(req: CreateDmRequest): Promise<ChannelResponse> {
     return this.post<ChannelResponse>("/api/v1/dm", req);
+  }
+
+  // ─── Channel Categories ─────────────────────────
+
+  async listCategories(serverId: string): Promise<CategoryResponse[]> {
+    return this.get<CategoryResponse[]>(`/api/v1/servers/${serverId}/categories`);
+  }
+
+  async createCategory(serverId: string, req: CreateCategoryRequest): Promise<CategoryResponse> {
+    return this.post<CategoryResponse>(`/api/v1/servers/${serverId}/categories`, req);
+  }
+
+  async updateCategory(serverId: string, categoryId: string, req: UpdateCategoryRequest): Promise<CategoryResponse> {
+    return this.put<CategoryResponse>(`/api/v1/servers/${serverId}/categories/${categoryId}`, req);
+  }
+
+  async deleteCategory(serverId: string, categoryId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}/categories/${categoryId}`);
+  }
+
+  async reorderCategories(serverId: string, req: ReorderCategoriesRequest): Promise<void> {
+    await this.put(`/api/v1/servers/${serverId}/categories/reorder`, req);
+  }
+
+  async setChannelCategory(channelId: string, req: SetChannelCategoryRequest): Promise<ChannelResponse> {
+    return this.put<ChannelResponse>(`/api/v1/channels/${channelId}/category`, req);
+  }
+
+  // ─── Roles & Permissions ────────────────────────
+
+  async listRoles(serverId: string): Promise<RoleResponse[]> {
+    return this.get<RoleResponse[]>(`/api/v1/servers/${serverId}/roles`);
+  }
+
+  async createRole(serverId: string, req: CreateRoleRequest): Promise<RoleResponse> {
+    return this.post<RoleResponse>(`/api/v1/servers/${serverId}/roles`, req);
+  }
+
+  async updateRole(serverId: string, roleId: string, req: UpdateRoleRequest): Promise<RoleResponse> {
+    return this.put<RoleResponse>(`/api/v1/servers/${serverId}/roles/${roleId}`, req);
+  }
+
+  async deleteRole(serverId: string, roleId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}/roles/${roleId}`);
+  }
+
+  async assignRole(serverId: string, userId: string, req: AssignRoleRequest): Promise<void> {
+    await this.put(`/api/v1/servers/${serverId}/members/${userId}/roles`, req);
+  }
+
+  async unassignRole(serverId: string, userId: string, roleId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}/members/${userId}/roles/${roleId}`);
+  }
+
+  async listOverwrites(channelId: string): Promise<OverwriteResponse[]> {
+    return this.get<OverwriteResponse[]>(`/api/v1/channels/${channelId}/overwrites`);
+  }
+
+  async setOverwrite(channelId: string, req: SetOverwriteRequest): Promise<OverwriteResponse> {
+    return this.put<OverwriteResponse>(`/api/v1/channels/${channelId}/overwrites`, req);
+  }
+
+  async deleteOverwrite(channelId: string, targetType: string, targetId: string): Promise<void> {
+    await this.delete(`/api/v1/channels/${channelId}/overwrites/${targetType}/${targetId}`);
   }
 
   // ─── Messages ────────────────────────────────────
@@ -324,6 +403,42 @@ export class HavenApi {
 
   async updateProfile(req: UpdateProfileRequest): Promise<import("../types.js").UserPublic> {
     return this.put(`/api/v1/users/profile`, req);
+  }
+
+  // ─── Friends ──────────────────────────────────────
+
+  async listFriends(): Promise<FriendResponse[]> {
+    return this.get<FriendResponse[]>("/api/v1/friends");
+  }
+
+  async sendFriendRequest(req: FriendRequestBody): Promise<FriendResponse> {
+    return this.post<FriendResponse>("/api/v1/friends/request", req);
+  }
+
+  async acceptFriendRequest(friendshipId: string): Promise<FriendResponse> {
+    return this.post<FriendResponse>(`/api/v1/friends/${friendshipId}/accept`, {});
+  }
+
+  async declineFriendRequest(friendshipId: string): Promise<void> {
+    await this.post(`/api/v1/friends/${friendshipId}/decline`, {});
+  }
+
+  async removeFriend(friendshipId: string): Promise<void> {
+    await this.delete(`/api/v1/friends/${friendshipId}`);
+  }
+
+  // ─── DM Requests ─────────────────────────────────
+
+  async listDmRequests(): Promise<ChannelResponse[]> {
+    return this.get<ChannelResponse[]>("/api/v1/dm/requests");
+  }
+
+  async handleDmRequest(channelId: string, req: DmRequestAction): Promise<void> {
+    await this.post(`/api/v1/dm/${channelId}/request`, req);
+  }
+
+  async updateDmPrivacy(req: UpdateDmPrivacyRequest): Promise<void> {
+    await this.put("/api/v1/users/dm-privacy", req);
   }
 
   // ─── Blocked Users ─────────────────────────────

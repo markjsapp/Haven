@@ -7,6 +7,8 @@ import ChannelSidebar from "../components/ChannelSidebar.js";
 import MemberSidebar from "../components/MemberSidebar.js";
 import MessageList from "../components/MessageList.js";
 import MessageInput from "../components/MessageInput.js";
+import FriendsList from "../components/FriendsList.js";
+import DmRequestBanner from "../components/DmRequestBanner.js";
 import { parseChannelDisplay } from "../lib/channel-utils.js";
 
 export default function Chat() {
@@ -77,6 +79,8 @@ export default function Chat() {
     : null;
 
   const isServerChannel = currentChannel && currentChannel.server_id !== null;
+  const isDmPending = currentChannel?.dm_status === "pending";
+  const showFriends = useUiStore((s) => s.showFriends);
 
   const typingUsers = useChatStore((s) => s.typingUsers);
   const typingNames = useMemo(() => {
@@ -141,7 +145,9 @@ export default function Chat() {
               </div>
             </div>
           )}
-          {currentChannelId ? (
+          {showFriends && !isServerChannel ? (
+            <FriendsList />
+          ) : currentChannelId ? (
             <>
               <MessageList />
               {typingNames.length > 0 && (
@@ -158,7 +164,11 @@ export default function Chat() {
                   </span>
                 </div>
               )}
-              <MessageInput placeholder={inputPlaceholder} />
+              {isDmPending ? (
+                <DmRequestBanner channelId={currentChannelId} />
+              ) : (
+                <MessageInput placeholder={inputPlaceholder} />
+              )}
             </>
           ) : (
             <div className="no-channel">
