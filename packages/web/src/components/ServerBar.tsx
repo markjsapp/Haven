@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
@@ -6,10 +6,34 @@ import { parseServerName } from "../lib/channel-utils.js";
 
 export default function ServerBar() {
   const servers = useChatStore((s) => s.servers);
+  const channels = useChatStore((s) => s.channels);
   const loadChannels = useChatStore((s) => s.loadChannels);
+  const unreadCounts = useChatStore((s) => s.unreadCounts);
   const selectedServerId = useUiStore((s) => s.selectedServerId);
   const selectServer = useUiStore((s) => s.selectServer);
   const api = useAuthStore((s) => s.api);
+
+  // Compute per-server unread totals
+  const serverUnreads = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const ch of channels) {
+      if (ch.server_id && unreadCounts[ch.id]) {
+        totals[ch.server_id] = (totals[ch.server_id] ?? 0) + unreadCounts[ch.id];
+      }
+    }
+    return totals;
+  }, [channels, unreadCounts]);
+
+  // Compute DM unread total (channels with no server_id)
+  const dmUnread = useMemo(() => {
+    let total = 0;
+    for (const ch of channels) {
+      if (!ch.server_id && unreadCounts[ch.id]) {
+        total += unreadCounts[ch.id];
+      }
+    }
+    return total;
+  }, [channels, unreadCounts]);
 
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
@@ -60,6 +84,7 @@ export default function ServerBar() {
               <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
               <path d="M7 9h10v2H7zm0-3h10v2H7z" />
             </svg>
+            {dmUnread > 0 && <span className="server-unread-dot" />}
           </button>
         </div>
 
@@ -69,6 +94,7 @@ export default function ServerBar() {
         {servers.map((srv) => {
           const name = parseServerName(srv.encrypted_meta);
           const isActive = selectedServerId === srv.id;
+          const srvUnread = serverUnreads[srv.id] ?? 0;
           return (
             <div
               key={srv.id}
@@ -81,6 +107,7 @@ export default function ServerBar() {
                 title={name}
               >
                 {name.charAt(0).toUpperCase()}
+                {srvUnread > 0 && <span className="server-unread-dot" />}
               </button>
             </div>
           );

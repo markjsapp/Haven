@@ -83,6 +83,12 @@ interface ChatState {
   reactions: Record<string, Array<{ emoji: string; userIds: string[] }>>;
   /** IDs of users blocked by the current user */
   blockedUserIds: string[];
+  /** channelId -> unread message count (client-side only) */
+  unreadCounts: Record<string, number>;
+  /** serverId -> effective permission bitfield for current user */
+  myPermissions: Record<string, bigint>;
+  /** userId -> highest-priority role color hex string */
+  userRoleColors: Record<string, string>;
 
   connect(): void;
   disconnect(): void;
@@ -107,6 +113,7 @@ interface ChatState {
   removeReaction(messageId: string, emoji: string): void;
   toggleReaction(messageId: string, emoji: string): void;
   loadBlockedUsers(): Promise<void>;
+  refreshPermissions(serverId: string): Promise<void>;
 }
 
 const TYPING_EXPIRY_MS = 3000;
@@ -149,6 +156,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   userNames: {},
   reactions: {},
   blockedUserIds: [],
+  unreadCounts: {},
+  myPermissions: {},
+  userRoleColors: {},
 
   connect() {
     const { api } = useAuthStore.getState();
@@ -244,6 +254,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     ws.on("PresenceUpdate", (msg: Extract<WsServerMessage, { type: "PresenceUpdate" }>) => {
       usePresenceStore.getState().setStatus(msg.payload.user_id, msg.payload.status);
+    });
+
+    // Voice state events
+    ws.on("VoiceStateUpdate", (msg: Extract<WsServerMessage, { type: "VoiceStateUpdate" }>) => {
+      import("./voice.js").then(({ useVoiceStore }) => {
+        const { channel_id, user_id, username, joined } = msg.payload;
+        useVoiceStore.getState().handleVoiceStateUpdate(
+          channel_id, user_id, username, null, null, joined,
+        );
+      });
     });
 
     // Friend events — dynamically import friends store to avoid circular deps
@@ -352,13 +372,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
   async loadChannels() {
     const { api } = useAuthStore.getState();
 
-    // Load servers, then channels + categories + roles for each server (in parallel)
+    // Load servers first (everything else depends on the server list)
     const servers = await api.listServers();
-    const [serverChannelArrays, serverCategoryArrays, serverRoleArrays] = await Promise.all([
+
+    // Fire ALL independent requests in parallel — DMs, members, and blocked
+    // users no longer wait for server channels/categories/roles to finish
+    const [
+      serverChannelArrays,
+      serverCategoryArrays,
+      serverRoleArrays,
+      dmChannels,
+      memberArrays,
+      blockedUsers,
+    ] = await Promise.all([
       Promise.all(servers.map((server) => api.listServerChannels(server.id))),
       Promise.all(servers.map((server) => api.listCategories(server.id))),
       Promise.all(servers.map((server) => api.listRoles(server.id))),
+      api.listDmChannels(),
+      Promise.all(servers.map((server) => api.listServerMembers(server.id))),
+      api.getBlockedUsers().catch(() => [] as Array<{ user_id: string; username: string; blocked_at: string }>),
     ]);
+
     const allChannels: ChannelResponse[] = serverChannelArrays.flat();
 
     // Build categories map: serverId -> CategoryResponse[]
@@ -369,8 +403,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       roles[server.id] = serverRoleArrays[i];
     });
 
-    // Also load DM channels
-    const dmChannels = await api.listDmChannels();
     allChannels.push(...dmChannels);
 
     // Map DM channels to their peer for E2EE session routing
@@ -395,22 +427,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // Build global userId -> displayName map from server members
-    const memberArrays = await Promise.all(
-      servers.map((server) => api.listServerMembers(server.id))
-    );
     const userNames: Record<string, string> = {};
     for (const members of memberArrays) {
       for (const m of members) {
-        userNames[m.user_id] = m.display_name || m.username;
+        userNames[m.user_id] = m.nickname || m.display_name || m.username;
+      }
+    }
+
+    // Build myPermissions map from server responses
+    const myPermissions: Record<string, bigint> = {};
+    for (const server of servers) {
+      if (server.my_permissions) {
+        myPermissions[server.id] = BigInt(server.my_permissions);
+      }
+    }
+
+    // Build userId -> highest-priority role color map
+    const userRoleColors: Record<string, string> = {};
+    for (let i = 0; i < servers.length; i++) {
+      const srvRoles = serverRoleArrays[i];
+      const members = memberArrays[i];
+      for (const m of members) {
+        if (userRoleColors[m.user_id]) continue; // first server wins
+        const coloredRoles = srvRoles
+          .filter((r) => !r.is_default && r.color && m.role_ids.includes(r.id))
+          .sort((a, b) => b.position - a.position);
+        if (coloredRoles.length > 0) {
+          userRoleColors[m.user_id] = coloredRoles[0].color!;
+        }
       }
     }
 
     // Merge DM/group names (server member names take priority)
     const mergedUserNames = { ...dmUserNames, ...userNames };
-    set({ servers, channels: allChannels, categories, roles, userNames: mergedUserNames });
-
-    // Load blocked users list
-    get().loadBlockedUsers();
+    set({
+      servers,
+      channels: allChannels,
+      categories,
+      roles,
+      userNames: mergedUserNames,
+      blockedUserIds: blockedUsers.map((b) => b.user_id),
+      myPermissions,
+      userRoleColors,
+    });
 
     // Subscribe to all channels via WebSocket
     const { ws } = get();
@@ -422,7 +481,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   async selectChannel(channelId) {
-    set({ currentChannelId: channelId });
+    set((state) => {
+      const { [channelId]: _, ...rest } = state.unreadCounts;
+      return { currentChannelId: channelId, unreadCounts: rest };
+    });
 
     // Fetch any pending sender key distributions for this channel
     try {
@@ -436,15 +498,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { api } = useAuthStore.getState();
       const rawMessages = await api.getMessages(channelId, { limit: 50 });
 
+      // Reverse to process in chronological order (oldest first).
+      // DM initial (X3DH) messages must establish the session before
+      // follow-up messages can decrypt, and sender key fetch is also
+      // more efficient when processed chronologically.
+      rawMessages.reverse();
+
       const decrypted: DecryptedMessage[] = [];
       for (const raw of rawMessages) {
         // System messages are unencrypted — parse directly
         if (raw.message_type === "system") {
+          let sysText: string;
+          try { sysText = atob(raw.encrypted_body); } catch { sysText = raw.encrypted_body; }
           decrypted.push({
             id: raw.id,
             channelId: raw.channel_id,
-            senderId: raw.sender_token, // repurposed for system msgs
-            text: raw.encrypted_body,   // plaintext for system msgs
+            senderId: raw.sender_token,
+            text: sysText,
             timestamp: raw.timestamp,
             messageType: "system",
             raw,
@@ -457,8 +527,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           msg.replyToId = raw.reply_to_id;
           cacheMessage(msg);
           decrypted.push(msg);
-        } catch {
+        } catch (err) {
           // Can't decrypt — try local cache (survives re-login)
+          console.warn("[E2EE] Decryption failed for message", raw.id, err);
           const cached = getCachedMessage(raw.id, raw.channel_id, raw.timestamp, raw.edited, raw);
           if (cached) {
             cached.replyToId = raw.reply_to_id;
@@ -476,9 +547,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
       }
-
-      // Messages come newest-first from API, reverse for display
-      decrypted.reverse();
 
       set((state) => ({
         messages: { ...state.messages, [channelId]: decrypted },
@@ -802,6 +870,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Non-fatal
     }
   },
+
+  async refreshPermissions(serverId) {
+    const { api } = useAuthStore.getState();
+    try {
+      const result = await api.getMyPermissions(serverId);
+      set((state) => ({
+        myPermissions: {
+          ...state.myPermissions,
+          [serverId]: BigInt(result.permissions),
+        },
+      }));
+    } catch {
+      // Non-fatal
+    }
+  },
 }));
 
 const MAX_MESSAGES_PER_CHANNEL = 200;
@@ -833,13 +916,36 @@ async function handleIncomingMessage(raw: MessageResponse) {
     await useChatStore.getState().loadChannels();
   }
 
-  // System messages are unencrypted
+  // Increment unread count if this message is for a non-active channel
+  if (raw.channel_id !== useChatStore.getState().currentChannelId) {
+    useChatStore.setState((state) => ({
+      unreadCounts: {
+        ...state.unreadCounts,
+        [raw.channel_id]: (state.unreadCounts[raw.channel_id] ?? 0) + 1,
+      },
+    }));
+  }
+
+  // System messages are unencrypted (but base64-encoded as bytea)
   if (raw.message_type === "system") {
+    let sysText: string;
+    try { sysText = atob(raw.encrypted_body); } catch { sysText = raw.encrypted_body; }
+
+    // Update userNames from member_joined events so new users show their name
+    try {
+      const data = JSON.parse(sysText);
+      if (data.event === "member_joined" && data.user_id && data.username) {
+        useChatStore.setState((state) => ({
+          userNames: { ...state.userNames, [data.user_id]: data.username },
+        }));
+      }
+    } catch { /* not valid JSON, ignore */ }
+
     const msg: DecryptedMessage = {
       id: raw.id,
       channelId: raw.channel_id,
       senderId: raw.sender_token,
-      text: raw.encrypted_body,
+      text: sysText,
       timestamp: raw.timestamp,
       messageType: "system",
       raw,
@@ -854,7 +960,8 @@ async function handleIncomingMessage(raw: MessageResponse) {
     msg.replyToId = raw.reply_to_id;
     cacheMessage(msg);
     useChatStore.setState((state) => appendMessage(state, raw.channel_id, msg));
-  } catch {
+  } catch (err) {
+    console.warn("[E2EE] WS message decryption failed", raw.id, err);
     // Try local cache first
     const cached = getCachedMessage(raw.id, raw.channel_id, raw.timestamp, raw.edited, raw);
     const fallback: DecryptedMessage = cached ?? {

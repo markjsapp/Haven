@@ -13,6 +13,7 @@ import UserSettings from "../components/UserSettings.js";
 import DmMemberSidebar from "../components/DmMemberSidebar.js";
 import PinnedMessagesPanel from "../components/PinnedMessagesPanel.js";
 import SearchPanel from "../components/SearchPanel.js";
+import VoiceRoom from "../components/VoiceRoom.js";
 import { parseChannelDisplay } from "../lib/channel-utils.js";
 
 export default function Chat() {
@@ -72,16 +73,52 @@ export default function Chat() {
     }
   }, [addFiles]);
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Don't intercept when typing in inputs/textareas/contenteditable
+      const tag = (e.target as HTMLElement).tagName;
+      const isEditable = tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable;
+
+      // Escape — close open panels/modals (works even in inputs)
+      if (e.key === "Escape") {
+        const ui = useUiStore.getState();
+        if (ui.showUserSettings) { ui.setShowUserSettings(false); return; }
+        if (ui.searchPanelOpen) { ui.toggleSearchPanel(); return; }
+        if (ui.pinnedPanelOpen) { ui.togglePinnedPanel(); return; }
+      }
+
+      if (isEditable) return;
+
+      // Ctrl/Cmd+K — toggle search panel
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        useUiStore.getState().toggleSearchPanel();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Start WS connection and HTTP data loading in parallel.
+  // loadChannels() is pure HTTP — no reason to wait for WS handshake.
   useEffect(() => {
     connect();
+    loadChannels();
     return () => disconnect();
-  }, [connect, disconnect]);
+  }, [connect, disconnect, loadChannels]);
 
+  // Once WS connects, subscribe to any channels already loaded via HTTP
   useEffect(() => {
     if (wsState === "connected") {
-      loadChannels();
+      const { channels: chs, ws } = useChatStore.getState();
+      if (ws) {
+        for (const ch of chs) {
+          ws.subscribe(ch.id);
+        }
+      }
     }
-  }, [wsState, loadChannels]);
+  }, [wsState]);
 
   const currentChannel = channels.find((c) => c.id === currentChannelId);
   const channelDisplay = currentChannel
@@ -89,6 +126,7 @@ export default function Chat() {
     : null;
 
   const isServerChannel = currentChannel && currentChannel.server_id !== null;
+  const isVoiceChannel = currentChannel?.channel_type === "voice";
   const isDmOrGroupChannel = currentChannel && (currentChannel.channel_type === "dm" || currentChannel.channel_type === "group");
   const isDmPending = currentChannel?.dm_status === "pending";
   const showFriends = useUiStore((s) => s.showFriends);
@@ -123,9 +161,16 @@ export default function Chat() {
             ) : channelDisplay ? (
               <>
                 <span className="chat-header-icon">
-                  {channelDisplay.isDm ? "@" : channelDisplay.isGroup ? "@" : "#"}
+                  {channelDisplay.isDm ? "@" : channelDisplay.isGroup ? "@" : isVoiceChannel ? (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ verticalAlign: "middle" }}>
+                      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                    </svg>
+                  ) : "#"}
                 </span>
                 <h2>{channelDisplay.name}</h2>
+                {channelDisplay.topic && (
+                  <span className="chat-header-topic">{channelDisplay.topic}</span>
+                )}
               </>
             ) : (
               <h2>Select a channel</h2>
@@ -184,6 +229,8 @@ export default function Chat() {
           )}
           {showFriends && selectedServerId === null ? (
             <FriendsList />
+          ) : currentChannelId && isVoiceChannel ? (
+            <VoiceRoom channelId={currentChannelId} channelName={channelDisplay?.name ?? "Voice"} />
           ) : currentChannelId ? (
             <>
               <MessageList />

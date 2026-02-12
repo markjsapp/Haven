@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useUiStore } from "../ui.js";
 
 beforeEach(() => {
+  // Clear persisted state to prevent cross-test leakage
+  localStorage.clear();
   // Reset store to defaults before each test
   useUiStore.setState({
     selectedServerId: null,

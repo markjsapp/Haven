@@ -264,6 +264,19 @@ pub async fn get_user_servers(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Ser
     Ok(servers)
 }
 
+pub async fn update_system_channel(
+    pool: &PgPool,
+    server_id: Uuid,
+    system_channel_id: Option<Uuid>,
+) -> AppResult<()> {
+    sqlx::query("UPDATE servers SET system_channel_id = $1 WHERE id = $2")
+        .bind(system_channel_id)
+        .bind(server_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // ─── Server Members ────────────────────────────────────
 
 pub async fn add_server_member(
@@ -919,6 +932,18 @@ pub async fn get_sender_key_distributions(
     Ok(rows)
 }
 
+/// Delete all SKDMs targeting a user (used when their identity key changes).
+pub async fn clear_sender_key_distributions_for_user(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> AppResult<()> {
+    sqlx::query("DELETE FROM sender_key_distributions WHERE to_user_id = $1")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Delete consumed SKDMs (after client has fetched them).
 pub async fn delete_sender_key_distributions(
     pool: &PgPool,
@@ -968,19 +993,52 @@ pub async fn get_server_members(
     pool: &PgPool,
     server_id: Uuid,
 ) -> AppResult<Vec<ServerMemberResponse>> {
-    let members = sqlx::query_as::<_, ServerMemberResponse>(
-        r#"
-        SELECT sm.user_id, u.username, u.display_name, u.avatar_url, sm.joined_at
-        FROM server_members sm
-        INNER JOIN users u ON u.id = sm.user_id
-        WHERE sm.server_id = $1
-        ORDER BY sm.joined_at ASC
-        "#,
+    // Step 1: Get members
+    let rows: Vec<(Uuid, String, Option<String>, Option<String>, DateTime<Utc>, Option<String>)> =
+        sqlx::query_as(
+            r#"
+            SELECT sm.user_id, u.username, u.display_name, u.avatar_url, sm.joined_at, sm.nickname
+            FROM server_members sm
+            INNER JOIN users u ON u.id = sm.user_id
+            WHERE sm.server_id = $1
+            ORDER BY sm.joined_at ASC
+            "#,
+        )
+        .bind(server_id)
+        .fetch_all(pool)
+        .await?;
+
+    // Step 2: Get all role assignments for this server in one query
+    let role_assignments: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT user_id, role_id FROM member_roles WHERE server_id = $1",
     )
     .bind(server_id)
     .fetch_all(pool)
     .await?;
-    Ok(members)
+
+    // Build a map: user_id -> Vec<role_id>
+    let mut role_map: std::collections::HashMap<Uuid, Vec<Uuid>> =
+        std::collections::HashMap::new();
+    for (uid, rid) in role_assignments {
+        role_map.entry(uid).or_default().push(rid);
+    }
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(user_id, username, display_name, avatar_url, joined_at, nickname)| {
+                ServerMemberResponse {
+                    user_id,
+                    username,
+                    display_name,
+                    avatar_url,
+                    joined_at,
+                    nickname,
+                    role_ids: role_map.remove(&user_id).unwrap_or_default(),
+                }
+            },
+        )
+        .collect())
 }
 
 pub async fn remove_server_member(
@@ -1202,6 +1260,27 @@ pub async fn reorder_categories(
         )
         .bind(pos)
         .bind(cat_id)
+        .bind(server_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn reorder_channels(
+    pool: &PgPool,
+    server_id: Uuid,
+    order: &[(Uuid, i32, Option<Uuid>)],
+) -> AppResult<()> {
+    let mut tx = pool.begin().await?;
+    for (channel_id, pos, category_id) in order {
+        sqlx::query(
+            "UPDATE channels SET position = $1, category_id = $2 WHERE id = $3 AND server_id = $4",
+        )
+        .bind(pos)
+        .bind(category_id)
+        .bind(channel_id)
         .bind(server_id)
         .execute(&mut *tx)
         .await?;
@@ -1910,4 +1989,48 @@ pub async fn create_report(
     .fetch_one(pool)
     .await?;
     Ok(report)
+}
+
+// ─── System Messages ────────────────────────────────
+
+/// Insert a system message (plaintext, not encrypted).
+pub async fn insert_system_message(
+    pool: &PgPool,
+    channel_id: Uuid,
+    body: &str,
+) -> AppResult<Message> {
+    let msg = sqlx::query_as::<_, Message>(
+        r#"
+        INSERT INTO messages (id, channel_id, sender_token, encrypted_body,
+                             timestamp, has_attachments, message_type)
+        VALUES ($1, $2, $3, $4, NOW(), false, 'system')
+        RETURNING *
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(channel_id)
+    .bind(Vec::<u8>::new()) // empty sender_token
+    .bind(body.as_bytes())
+    .fetch_one(pool)
+    .await?;
+    Ok(msg)
+}
+
+// ─── Server Nicknames ────────────────────────────────
+
+pub async fn update_member_nickname(
+    pool: &PgPool,
+    server_id: Uuid,
+    user_id: Uuid,
+    nickname: Option<&str>,
+) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE server_members SET nickname = $1 WHERE server_id = $2 AND user_id = $3",
+    )
+    .bind(nickname)
+    .bind(server_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }

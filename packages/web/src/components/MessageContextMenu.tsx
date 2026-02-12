@@ -1,12 +1,15 @@
 import { useEffect, useRef } from "react";
 import { useChatStore, type DecryptedMessage } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
+import { Permission } from "@haven/core";
+import { usePermissions } from "../hooks/usePermissions.js";
 
 interface MessageContextMenuProps {
   message: DecryptedMessage;
   x: number;
   y: number;
   isPinned: boolean;
+  serverId?: string | null;
   onClose: () => void;
   onDelete: () => void;
   onReport: () => void;
@@ -17,6 +20,7 @@ export default function MessageContextMenu({
   x,
   y,
   isPinned,
+  serverId,
   onClose,
   onDelete,
   onReport,
@@ -26,9 +30,11 @@ export default function MessageContextMenu({
   const startEditing = useChatStore((s) => s.startEditing);
   const pinMessage = useChatStore((s) => s.pinMessage);
   const unpinMessage = useChatStore((s) => s.unpinMessage);
+  const { can } = usePermissions(serverId);
   const ref = useRef<HTMLDivElement>(null);
 
   const isOwn = message.senderId === user?.id;
+  const canManageMessages = can(Permission.MANAGE_MESSAGES);
 
   // Close on outside click, scroll, or Escape
   useEffect(() => {
@@ -80,23 +86,27 @@ export default function MessageContextMenu({
       >
         Copy Text
       </button>
-      <div className="context-menu-separator" />
-      {isPinned ? (
-        <button
-          type="button"
-          className="context-menu-item"
-          onClick={() => { unpinMessage(message.id); onClose(); }}
-        >
-          Unpin Message
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="context-menu-item"
-          onClick={() => { pinMessage(message.id); onClose(); }}
-        >
-          Pin Message
-        </button>
+      {canManageMessages && (
+        <>
+          <div className="context-menu-separator" />
+          {isPinned ? (
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={() => { unpinMessage(message.id); onClose(); }}
+            >
+              Unpin Message
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={() => { pinMessage(message.id); onClose(); }}
+            >
+              Pin Message
+            </button>
+          )}
+        </>
       )}
       {isOwn && (
         <>
@@ -120,6 +130,15 @@ export default function MessageContextMenu({
       {!isOwn && (
         <>
           <div className="context-menu-separator" />
+          {canManageMessages && (
+            <button
+              type="button"
+              className="context-menu-item context-menu-item-danger"
+              onClick={() => { onDelete(); onClose(); }}
+            >
+              Delete Message
+            </button>
+          )}
           <button
             type="button"
             className="context-menu-item context-menu-item-danger"

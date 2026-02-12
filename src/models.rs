@@ -146,6 +146,7 @@ pub struct Server {
     pub encrypted_meta: Vec<u8>, // name, description, icon — encrypted with server key
     pub owner_id: Uuid,
     pub created_at: DateTime<Utc>,
+    pub system_channel_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,6 +160,12 @@ pub struct ServerResponse {
     pub encrypted_meta: String, // base64
     pub owner_id: Uuid,
     pub created_at: DateTime<Utc>,
+    /// Effective permissions for the requesting user (i64 as string for JS safety).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub my_permissions: Option<String>,
+    /// Channel where system messages (joins, etc.) are posted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_channel_id: Option<Uuid>,
 }
 
 // ─── Channels ──────────────────────────────────────────
@@ -230,6 +237,18 @@ pub struct CategoryPosition {
     pub position: i32,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ReorderChannelsRequest {
+    pub order: Vec<ChannelPosition>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChannelPosition {
+    pub id: Uuid,
+    pub position: i32,
+    pub category_id: Option<Uuid>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CategoryResponse {
     pub id: Uuid,
@@ -265,6 +284,7 @@ pub struct ServerMember {
     pub user_id: Uuid,
     pub encrypted_role: Vec<u8>, // role encrypted with server key
     pub joined_at: DateTime<Utc>,
+    pub nickname: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -289,6 +309,7 @@ pub struct Message {
     pub sender_id: Option<Uuid>,  // for edit authorization; null for legacy messages
     pub edited_at: Option<DateTime<Utc>>,
     pub reply_to_id: Option<Uuid>,
+    pub message_type: String,     // "user" or "system"
 }
 
 #[derive(Debug, Deserialize)]
@@ -313,10 +334,17 @@ pub struct MessageResponse {
     pub edited: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_type: Option<String>,
 }
 
 impl From<Message> for MessageResponse {
     fn from(m: Message) -> Self {
+        let message_type = if m.message_type != "user" {
+            Some(m.message_type.clone())
+        } else {
+            None
+        };
         Self {
             id: m.id,
             channel_id: m.channel_id,
@@ -333,6 +361,7 @@ impl From<Message> for MessageResponse {
             has_attachments: m.has_attachments,
             edited: m.edited_at.is_some(),
             reply_to_id: m.reply_to_id,
+            message_type,
         }
     }
 }
@@ -436,6 +465,23 @@ pub struct LinkPreviewResponse {
     pub site_name: Option<String>,
 }
 
+// ─── Voice ────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct VoiceTokenResponse {
+    pub token: String,
+    pub url: String,
+    pub channel_id: Uuid,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct VoiceParticipantResponse {
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
 // ─── WebSocket Messages ────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -537,6 +583,13 @@ pub enum WsServerMessage {
     MessagePinned { channel_id: Uuid, message_id: Uuid, pinned_by: Uuid },
     /// A message was unpinned
     MessageUnpinned { channel_id: Uuid, message_id: Uuid },
+    /// Voice state change (user joined/left a voice channel)
+    VoiceStateUpdate {
+        channel_id: Uuid,
+        user_id: Uuid,
+        username: String,
+        joined: bool,
+    },
 }
 
 // ─── Presence ─────────────────────────────────────────
@@ -608,13 +661,26 @@ impl From<Invite> for InviteResponse {
     }
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize)]
 pub struct ServerMemberResponse {
     pub user_id: Uuid,
     pub username: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub joined_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+    pub role_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateNicknameRequest {
+    pub nickname: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateServerRequest {
+    pub system_channel_id: Option<Uuid>,
 }
 
 // ─── Channel Member Info ─────────────────────────────

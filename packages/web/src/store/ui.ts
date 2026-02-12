@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 interface UiState {
   selectedServerId: string | null; // null = Home/DMs view
@@ -16,39 +17,50 @@ interface UiState {
   toggleSearchPanel(): void;
 }
 
-export const useUiStore = create<UiState>((set) => ({
-  selectedServerId: null,
-  memberSidebarOpen: true,
-  showFriends: false,
-  showUserSettings: false,
-  pinnedPanelOpen: false,
-  searchPanelOpen: false,
+export const useUiStore = create<UiState>()(
+  persist(
+    (set) => ({
+      selectedServerId: null,
+      memberSidebarOpen: true,
+      showFriends: false,
+      showUserSettings: false,
+      pinnedPanelOpen: false,
+      searchPanelOpen: false,
 
-  selectServer(id) {
-    set({
-      selectedServerId: id,
-      memberSidebarOpen: id !== null,
-      showFriends: id === null ? true : false,
-    });
-  },
+      selectServer(id) {
+        set({
+          selectedServerId: id,
+          memberSidebarOpen: id !== null,
+          showFriends: id === null ? true : false,
+        });
+      },
 
-  toggleMemberSidebar() {
-    set((s) => ({ memberSidebarOpen: !s.memberSidebarOpen }));
-  },
+      toggleMemberSidebar() {
+        set((s) => ({ memberSidebarOpen: !s.memberSidebarOpen }));
+      },
 
-  setShowFriends(show) {
-    set({ showFriends: show });
-  },
+      setShowFriends(show) {
+        set({ showFriends: show });
+      },
 
-  setShowUserSettings(show) {
-    set({ showUserSettings: show });
-  },
+      setShowUserSettings(show) {
+        set({ showUserSettings: show });
+      },
 
-  togglePinnedPanel() {
-    set((s) => ({ pinnedPanelOpen: !s.pinnedPanelOpen, searchPanelOpen: false }));
-  },
+      togglePinnedPanel() {
+        set((s) => ({ pinnedPanelOpen: !s.pinnedPanelOpen, searchPanelOpen: false }));
+      },
 
-  toggleSearchPanel() {
-    set((s) => ({ searchPanelOpen: !s.searchPanelOpen, pinnedPanelOpen: false }));
-  },
-}));
+      toggleSearchPanel() {
+        set((s) => ({ searchPanelOpen: !s.searchPanelOpen, pinnedPanelOpen: false }));
+      },
+    }),
+    {
+      name: "haven:ui",
+      partialize: (state) => ({
+        selectedServerId: state.selectedServerId,
+        memberSidebarOpen: state.memberSidebarOpen,
+      }),
+    },
+  ),
+);

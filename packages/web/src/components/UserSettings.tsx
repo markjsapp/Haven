@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
+import { useVoiceStore } from "../store/voice.js";
 import Avatar from "./Avatar.js";
 import type { BlockedUserResponse } from "@haven/core";
 
-type Tab = "account" | "profile" | "privacy";
+type Tab = "account" | "profile" | "privacy" | "voice";
 
 export default function UserSettings() {
   const user = useAuthStore((s) => s.user);
@@ -45,6 +46,12 @@ export default function UserSettings() {
           >
             Privacy
           </button>
+          <button
+            className={`user-settings-nav-item ${tab === "voice" ? "active" : ""}`}
+            onClick={() => setTab("voice")}
+          >
+            Voice & Audio
+          </button>
           <div className="user-settings-sidebar-divider" />
           <button
             className="user-settings-nav-item danger"
@@ -58,7 +65,7 @@ export default function UserSettings() {
         </nav>
         <div className="user-settings-content">
           <div className="user-settings-content-header">
-            <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : "Privacy"}</h2>
+            <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : tab === "privacy" ? "Privacy" : "Voice & Audio"}</h2>
             <button
               className="user-settings-close"
               onClick={() => setShowUserSettings(false)}
@@ -73,6 +80,7 @@ export default function UserSettings() {
             {tab === "account" && <AccountTab />}
             {tab === "profile" && <ProfileTab />}
             {tab === "privacy" && <PrivacyTab />}
+            {tab === "voice" && <VoiceTab />}
           </div>
         </div>
       </div>
@@ -418,6 +426,180 @@ function PrivacyTab() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Voice & Audio Tab ──────────────────────────────
+
+function VoiceTab() {
+  const {
+    inputDeviceId,
+    outputDeviceId,
+    inputVolume,
+    outputVolume,
+    echoCancellation,
+    noiseSuppression,
+    setInputDevice,
+    setOutputDevice,
+    setInputVolume,
+    setOutputVolume,
+    setEchoCancellation,
+    setNoiseSuppression,
+  } = useVoiceStore();
+
+  const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [testing, setTesting] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const testRef = useRef<{ stream: MediaStream; ctx: AudioContext; raf: number } | null>(null);
+
+  useEffect(() => {
+    navigator.mediaDevices.enumerateDevices().then((devices) => {
+      setInputDevices(devices.filter((d) => d.kind === "audioinput"));
+      setOutputDevices(devices.filter((d) => d.kind === "audiooutput"));
+    });
+  }, []);
+
+  const startMicTest = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: inputDeviceId ? { exact: inputDeviceId } : undefined },
+      });
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      function tick() {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const rms = sum / dataArray.length;
+        setAudioLevel(Math.min(100, (rms / 128) * 100));
+        testRef.current!.raf = requestAnimationFrame(tick);
+      }
+
+      testRef.current = { stream, ctx, raf: requestAnimationFrame(tick) };
+      setTesting(true);
+    } catch {
+      // User denied mic access or device unavailable
+    }
+  }, [inputDeviceId]);
+
+  const stopMicTest = useCallback(() => {
+    if (testRef.current) {
+      cancelAnimationFrame(testRef.current.raf);
+      testRef.current.stream.getTracks().forEach((t) => t.stop());
+      testRef.current.ctx.close();
+      testRef.current = null;
+    }
+    setTesting(false);
+    setAudioLevel(0);
+  }, []);
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (testRef.current) {
+        cancelAnimationFrame(testRef.current.raf);
+        testRef.current.stream.getTracks().forEach((t) => t.stop());
+        testRef.current.ctx.close();
+        testRef.current = null;
+      }
+    };
+  }, []);
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">Input Device</div>
+      <select
+        className="settings-select"
+        value={inputDeviceId}
+        onChange={(e) => setInputDevice(e.target.value)}
+      >
+        <option value="">Default</option>
+        {inputDevices.map((d) => (
+          <option key={d.deviceId} value={d.deviceId}>
+            {d.label || `Microphone (${d.deviceId.slice(0, 8)})`}
+          </option>
+        ))}
+      </select>
+
+      <div className="settings-section-title">Input Volume</div>
+      <div className="settings-slider-row">
+        <input
+          type="range"
+          className="settings-slider"
+          min={0}
+          max={200}
+          value={Math.round(inputVolume * 100)}
+          onChange={(e) => setInputVolume(Number(e.target.value) / 100)}
+        />
+        <span className="settings-slider-value">{Math.round(inputVolume * 100)}%</span>
+      </div>
+
+      <div className="settings-mic-test">
+        <button
+          className="btn-secondary"
+          onClick={testing ? stopMicTest : startMicTest}
+        >
+          {testing ? "Stop Test" : "Test Microphone"}
+        </button>
+        {testing && (
+          <div className="mic-level-bar">
+            <div className="mic-level-fill" style={{ width: `${audioLevel}%` }} />
+          </div>
+        )}
+      </div>
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Output Device</div>
+      <select
+        className="settings-select"
+        value={outputDeviceId}
+        onChange={(e) => setOutputDevice(e.target.value)}
+      >
+        <option value="">Default</option>
+        {outputDevices.map((d) => (
+          <option key={d.deviceId} value={d.deviceId}>
+            {d.label || `Speaker (${d.deviceId.slice(0, 8)})`}
+          </option>
+        ))}
+      </select>
+
+      <div className="settings-section-title">Output Volume</div>
+      <div className="settings-slider-row">
+        <input
+          type="range"
+          className="settings-slider"
+          min={0}
+          max={200}
+          value={Math.round(outputVolume * 100)}
+          onChange={(e) => setOutputVolume(Number(e.target.value) / 100)}
+        />
+        <span className="settings-slider-value">{Math.round(outputVolume * 100)}%</span>
+      </div>
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Voice Processing</div>
+      <label className="settings-toggle-label">
+        <input
+          type="checkbox"
+          checked={echoCancellation}
+          onChange={(e) => setEchoCancellation(e.target.checked)}
+        />
+        <span>Echo Cancellation</span>
+      </label>
+      <label className="settings-toggle-label">
+        <input
+          type="checkbox"
+          checked={noiseSuppression}
+          onChange={(e) => setNoiseSuppression(e.target.checked)}
+        />
+        <span>Noise Suppression</span>
+      </label>
     </div>
   );
 }

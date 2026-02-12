@@ -644,7 +644,7 @@ describe("DMs", () => {
 
     const api = new HavenApi({ baseUrl: "http://localhost:8080" });
     api.setTokens("tok", "rt");
-    await api.createGroupDm({ user_ids: ["u2", "u3"], encrypted_meta: "bWV0YQ==" });
+    await api.createGroupDm({ member_ids: ["u2", "u3"], encrypted_meta: "bWV0YQ==" });
 
     const [url, opts] = fetchMock.mock.calls[0];
     expect(url).toBe("http://localhost:8080/api/v1/dm/group");
@@ -787,8 +787,8 @@ describe("overwrites", () => {
     await api.setOverwrite("ch1", {
       target_type: "role",
       target_id: "r1",
-      allow: "8",
-      deny: "0",
+      allow_bits: "8",
+      deny_bits: "0",
     });
 
     const [url, opts] = fetchMock.mock.calls[0];
@@ -951,7 +951,7 @@ describe("categories", () => {
 
     const api = new HavenApi({ baseUrl: "http://localhost:8080" });
     api.setTokens("tok", "rt");
-    await api.reorderCategories("s1", { order: ["cat2", "cat1"] });
+    await api.reorderCategories("s1", { order: [{ id: "cat2", position: 0 }, { id: "cat1", position: 1 }] });
 
     const [url, opts] = fetchMock.mock.calls[0];
     expect(url).toBe("http://localhost:8080/api/v1/servers/s1/categories/reorder");

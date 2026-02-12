@@ -55,6 +55,10 @@ pub async fn create_server(
     // Add owner to the default channel
     queries::add_channel_member(&state.db, channel.id, user_id).await?;
 
+    // Set the default channel as system channel
+    queries::update_system_channel(&state.db, server.id, Some(channel.id)).await?;
+
+    // Owner always has all permissions
     Ok(Json(ServerResponse {
         id: server.id,
         encrypted_meta: base64::Engine::encode(
@@ -63,6 +67,8 @@ pub async fn create_server(
         ),
         owner_id: server.owner_id,
         created_at: server.created_at,
+        my_permissions: Some(i64::MAX.to_string()),
+        system_channel_id: Some(channel.id),
     }))
 }
 
@@ -81,6 +87,8 @@ pub async fn get_server(
         .await?
         .ok_or(AppError::NotFound("Server not found".into()))?;
 
+    let (_, perms) = queries::get_member_permissions(&state.db, server_id, user_id).await?;
+
     Ok(Json(ServerResponse {
         id: server.id,
         encrypted_meta: base64::Engine::encode(
@@ -89,6 +97,8 @@ pub async fn get_server(
         ),
         owner_id: server.owner_id,
         created_at: server.created_at,
+        my_permissions: Some(perms.to_string()),
+        system_channel_id: server.system_channel_id,
     }))
 }
 
@@ -100,9 +110,10 @@ pub async fn list_servers(
 ) -> AppResult<Json<Vec<ServerResponse>>> {
     let servers = queries::get_user_servers(&state.db, user_id).await?;
 
-    let responses: Vec<ServerResponse> = servers
-        .into_iter()
-        .map(|s| ServerResponse {
+    let mut responses = Vec::with_capacity(servers.len());
+    for s in servers {
+        let (_, perms) = queries::get_member_permissions(&state.db, s.id, user_id).await?;
+        responses.push(ServerResponse {
             id: s.id,
             encrypted_meta: base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
@@ -110,8 +121,10 @@ pub async fn list_servers(
             ),
             owner_id: s.owner_id,
             created_at: s.created_at,
-        })
-        .collect();
+            my_permissions: Some(perms.to_string()),
+            system_channel_id: s.system_channel_id,
+        });
+    }
 
     Ok(Json(responses))
 }
@@ -146,4 +159,77 @@ pub async fn list_server_channels(
         .collect();
 
     Ok(Json(responses))
+}
+
+/// GET /api/v1/servers/:server_id/members/@me/permissions
+/// Get the current user's effective permissions for a server.
+pub async fn get_my_permissions(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(server_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !queries::is_server_member(&state.db, server_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this server".into()));
+    }
+
+    let (is_owner, perms) = queries::get_member_permissions(&state.db, server_id, user_id).await?;
+
+    Ok(Json(serde_json::json!({
+        "permissions": perms.to_string(),
+        "is_owner": is_owner,
+    })))
+}
+
+/// PATCH /api/v1/servers/:server_id
+/// Update server settings (system channel, etc.).
+pub async fn update_server(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(server_id): Path<Uuid>,
+    Json(req): Json<UpdateServerRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !queries::is_server_member(&state.db, server_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this server".into()));
+    }
+
+    // Require MANAGE_SERVER permission
+    let (is_owner, perms) = queries::get_member_permissions(&state.db, server_id, user_id).await?;
+    if !is_owner && !crate::permissions::has_permission(perms, crate::permissions::MANAGE_SERVER) {
+        return Err(AppError::Forbidden("Missing MANAGE_SERVER permission".into()));
+    }
+
+    // Validate channel belongs to server if provided
+    if let Some(channel_id) = req.system_channel_id {
+        let channels = queries::get_server_channels(&state.db, server_id).await?;
+        if !channels.iter().any(|c| c.id == channel_id) {
+            return Err(AppError::Validation("Channel does not belong to this server".into()));
+        }
+    }
+
+    queries::update_system_channel(&state.db, server_id, req.system_channel_id).await?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// PUT /api/v1/servers/:server_id/nickname
+/// Set or clear per-server nickname for the authenticated user.
+pub async fn set_nickname(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(server_id): Path<Uuid>,
+    Json(req): Json<UpdateNicknameRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !queries::is_server_member(&state.db, server_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this server".into()));
+    }
+
+    if let Some(ref nick) = req.nickname {
+        if nick.len() > 32 || nick.trim().is_empty() {
+            return Err(AppError::Validation("Nickname must be 1-32 characters".into()));
+        }
+    }
+
+    queries::update_member_nickname(&state.db, server_id, user_id, req.nickname.as_deref()).await?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }

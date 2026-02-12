@@ -1,17 +1,50 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, Fragment } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
+import { Permission } from "@haven/core";
+import { usePermissions } from "../hooks/usePermissions.js";
 import MessageAttachments from "./MessageAttachments.js";
 import MessageBody from "./MessageBody.js";
 import LinkPreviewCard from "./LinkPreviewCard.js";
 import ConfirmDialog from "./ConfirmDialog.js";
 import ProfilePopup from "./ProfilePopup.js";
 import Avatar from "./Avatar.js";
-import { parseNamesFromMeta } from "../lib/channel-utils.js";
+import { parseNamesFromMeta, parseChannelDisplay } from "../lib/channel-utils.js";
 import EmojiPicker from "./EmojiPicker.js";
 import MessageContextMenu from "./MessageContextMenu.js";
 import ReportModal from "./ReportModal.js";
 import type { DecryptedMessage } from "../store/chat.js";
+
+// ─── Date Divider Helpers ─────────────────────────────
+
+function formatDateDivider(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getTime() - 86400000);
+  const msgDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  if (msgDate.getTime() === today.getTime()) return "Today";
+  if (msgDate.getTime() === yesterday.getTime()) return "Yesterday";
+
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function isDifferentDay(a: string, b: string): boolean {
+  const dA = new Date(a);
+  const dB = new Date(b);
+  return (
+    dA.getFullYear() !== dB.getFullYear() ||
+    dA.getMonth() !== dB.getMonth() ||
+    dA.getDate() !== dB.getDate()
+  );
+}
+
+// ─── Component ────────────────────────────────────────
 
 export default function MessageList() {
   const currentChannelId = useChatStore((s) => s.currentChannelId);
@@ -25,13 +58,22 @@ export default function MessageList() {
   const blockedUserIds = useChatStore((s) => s.blockedUserIds);
   const startReply = useChatStore((s) => s.startReply);
   const pinnedMessageIds = useChatStore((s) => s.pinnedMessageIds);
+  const userRoleColors = useChatStore((s) => s.userRoleColors);
   const user = useAuthStore((s) => s.user);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const channelMessages = currentChannelId ? messages[currentChannelId] ?? [] : [];
   const currentChannel = channels.find((c) => c.id === currentChannelId);
+  const serverId = currentChannel?.server_id ?? null;
+  const { can } = usePermissions(serverId);
+  const canManageMessages = can(Permission.MANAGE_MESSAGES);
   const nameMap = useMemo(() => parseNamesFromMeta(currentChannel?.encrypted_meta), [currentChannel?.encrypted_meta]);
   const pinnedIds = currentChannelId ? pinnedMessageIds[currentChannelId] ?? [] : [];
+
+  const channelDisplay = useMemo(() => {
+    if (!currentChannel?.encrypted_meta) return null;
+    return parseChannelDisplay(currentChannel.encrypted_meta, user?.id ?? "");
+  }, [currentChannel?.encrypted_meta, user?.id]);
 
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
@@ -83,13 +125,49 @@ export default function MessageList() {
 
   return (
     <div className="message-list">
-      {channelMessages.length === 0 && (
-        <div className="message-list-empty">
-          <h3>No messages yet</h3>
-          <p>Send a message to start the conversation!</p>
+      {/* Conversation start marker */}
+      {currentChannel && channelDisplay && (
+        <div className="conversation-start">
+          {channelDisplay.isDm ? (
+            <>
+              <div className="conversation-start-avatar">
+                <Avatar name={channelDisplay.name} size={80} />
+              </div>
+              <h2 className="conversation-start-name">{channelDisplay.name}</h2>
+              <p className="conversation-start-desc">
+                This is the beginning of your direct message history with <strong>{channelDisplay.name}</strong>.
+              </p>
+            </>
+          ) : channelDisplay.isGroup ? (
+            <>
+              <h2 className="conversation-start-name">{channelDisplay.name}</h2>
+              <p className="conversation-start-desc">
+                Welcome to the beginning of the <strong>{channelDisplay.name}</strong> group.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="conversation-start-name">
+                <span className="conversation-start-hash">#</span>
+                {channelDisplay.name}
+              </h2>
+              <p className="conversation-start-desc">
+                This is the start of the <strong>#{channelDisplay.name}</strong> channel.
+              </p>
+            </>
+          )}
         </div>
       )}
       {channelMessages.map((msg, i) => {
+        const prev = channelMessages[i - 1];
+        const showDateDivider = i === 0 || (prev && isDifferentDay(prev.timestamp, msg.timestamp));
+
+        const dateDividerEl = showDateDivider ? (
+          <div className="date-divider" key={`divider-${msg.id}`}>
+            <span className="date-divider-text">{formatDateDivider(msg.timestamp)}</span>
+          </div>
+        ) : null;
+
         // System messages render differently
         if (msg.messageType === "system") {
           let systemText = msg.text;
@@ -98,25 +176,34 @@ export default function MessageList() {
             const name = data.username ?? data.user_id?.slice(0, 8) ?? "Someone";
             if (data.event === "member_joined") systemText = `${name} joined the server`;
             else if (data.event === "member_left") systemText = `${name} left the group`;
+            else if (data.event === "member_kicked") systemText = `${name} was kicked from the server`;
+            else if (data.event === "message_pinned") systemText = `${name} pinned a message`;
+            else if (data.event === "message_unpinned") systemText = `${name} unpinned a message`;
             else systemText = `${name} — ${data.event}`;
           } catch { /* use raw text */ }
 
           return (
-            <div key={msg.id} className="system-message" id={`msg-${msg.id}`}>
-              <span className="system-message-text">{systemText}</span>
-              <span className="system-message-time">
-                {new Date(msg.timestamp).toLocaleString([], {
-                  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                })}
-              </span>
-            </div>
+            <Fragment key={msg.id}>
+              {dateDividerEl}
+              <div className="system-message" id={`msg-${msg.id}`}>
+                <span className="system-message-text">{systemText}</span>
+                <span className="system-message-time">
+                  {new Date(msg.timestamp).toLocaleString([], {
+                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                  })}
+                </span>
+              </div>
+            </Fragment>
           );
         }
 
         const isOwn = msg.senderId === user?.id;
         const isBlocked = blockedUserIds.includes(msg.senderId);
-        const prev = channelMessages[i - 1];
-        const isGrouped = prev && prev.senderId === msg.senderId && prev.messageType !== "system";
+        // Break grouping at date boundaries
+        const isGrouped = prev
+          && prev.senderId === msg.senderId
+          && prev.messageType !== "system"
+          && !isDifferentDay(prev.timestamp, msg.timestamp);
         const senderName = getSenderName(msg.senderId);
         const isPinned = pinnedIds.includes(msg.id);
 
@@ -129,156 +216,160 @@ export default function MessageList() {
 
         if (isBlocked) {
           return (
-            <div key={msg.id} id={`msg-${msg.id}`} className="message message-first message-blocked">
-              <div className="message-avatar">?</div>
-              <div className="message-content">
-                <div className="message-meta">
-                  <span className="message-sender">Blocked User</span>
-                  <span className="message-time">
-                    {new Date(msg.timestamp).toLocaleString([], {
-                      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                    })}
-                  </span>
+            <Fragment key={msg.id}>
+              {dateDividerEl}
+              <div id={`msg-${msg.id}`} className="message message-first message-blocked">
+                <div className="message-avatar">?</div>
+                <div className="message-content">
+                  <div className="message-meta">
+                    <span className="message-sender">Blocked User</span>
+                    <span className="message-time">
+                      {new Date(msg.timestamp).toLocaleString([], {
+                        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  <div className="message-text">Message from a blocked user</div>
                 </div>
-                <div className="message-text">Message from a blocked user</div>
               </div>
-            </div>
+            </Fragment>
           );
         }
 
         return (
-          <div
-            key={msg.id}
-            id={`msg-${msg.id}`}
-            className={`message ${isGrouped ? "message-grouped" : "message-first"} ${highlightedMsgId === msg.id ? "message-highlight" : ""}`}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setContextMenu({ message: msg, x: e.clientX, y: e.clientY });
-            }}
-          >
-            {!isGrouped && (
-              <div
-                className="message-avatar message-avatar-clickable"
-                onClick={(e) => handleAvatarClick(msg.senderId, e)}
-              >
-                <Avatar
-                  name={senderName}
-                  size={40}
-                />
-              </div>
-            )}
-            <div className="message-content">
-              {/* Reply preview */}
-              {repliedMsg && (
-                <div
-                  className="reply-preview"
-                  onClick={() => scrollToMessage(repliedMsg.id)}
-                >
-                  <span className="reply-preview-bar" />
-                  <span className="reply-preview-sender">{getSenderName(repliedMsg.senderId)}</span>
-                  <span className="reply-preview-text">
-                    {repliedMsg.text.length > 80 ? repliedMsg.text.slice(0, 80) + "..." : repliedMsg.text}
-                  </span>
-                </div>
-              )}
-              {msg.replyToId && !repliedMsg && (
-                <div className="reply-preview reply-preview-unknown">
-                  <span className="reply-preview-bar" />
-                  <span className="reply-preview-text">Original message not loaded</span>
-                </div>
-              )}
+          <Fragment key={msg.id}>
+            {dateDividerEl}
+            <div
+              id={`msg-${msg.id}`}
+              className={`message ${isGrouped ? "message-grouped" : "message-first"} ${highlightedMsgId === msg.id ? "message-highlight" : ""}`}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({ message: msg, x: e.clientX, y: e.clientY });
+              }}
+            >
               {!isGrouped && (
-                <div className="message-meta">
-                  <span
-                    className="message-sender message-sender-clickable"
-                    onClick={(e) => handleAvatarClick(msg.senderId, e)}
+                <div
+                  className="message-avatar message-avatar-clickable"
+                  onClick={(e) => handleAvatarClick(msg.senderId, e)}
+                >
+                  <Avatar
+                    name={senderName}
+                    size={40}
+                  />
+                </div>
+              )}
+              <div className="message-content">
+                {/* Reply preview */}
+                {repliedMsg && (
+                  <div
+                    className="reply-preview"
+                    onClick={() => scrollToMessage(repliedMsg.id)}
                   >
-                    {senderName}
-                  </span>
-                  <span className="message-time">
-                    {new Date(msg.timestamp).toLocaleString([], {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                  {msg.edited && <span className="message-edited">(edited)</span>}
-                  {isPinned && (
-                    <span className="message-pin-indicator" title="Pinned">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
-                      </svg>
+                    <span className="reply-preview-bar" />
+                    <span className="reply-preview-sender">{getSenderName(repliedMsg.senderId)}</span>
+                    <span className="reply-preview-text">
+                      {repliedMsg.text.length > 80 ? repliedMsg.text.slice(0, 80) + "..." : repliedMsg.text}
                     </span>
-                  )}
-                </div>
-              )}
-              <MessageBody text={msg.text} contentType={msg.contentType} formatting={msg.formatting} />
-              {msg.attachments && msg.attachments.length > 0 && (
-                <MessageAttachments attachments={msg.attachments} />
-              )}
-              {msg.linkPreviews && msg.linkPreviews.length > 0 && (
-                <div className="link-preview-list">
-                  {msg.linkPreviews.map((lp) => (
-                    <LinkPreviewCard key={lp.url} preview={lp} />
-                  ))}
-                </div>
-              )}
-              {msgReactions.length > 0 && (
-                <div className="reaction-pills">
-                  {msgReactions.map((r) => {
-                    const isMine = user ? r.userIds.includes(user.id) : false;
-                    return (
-                      <button
-                        key={r.emoji}
-                        type="button"
-                        className={`reaction-pill ${isMine ? "reaction-pill-active" : ""}`}
-                        onClick={() => toggleReaction(msg.id, r.emoji)}
-                        title={r.userIds.map((id) => userNames[id] ?? nameMap[id] ?? id.slice(0, 8)).join(", ")}
-                      >
-                        <span className="reaction-emoji">{r.emoji}</span>
-                        <span className="reaction-count">{r.userIds.length}</span>
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    className="reaction-pill reaction-add-btn"
-                    onClick={() => setReactionPickerMsgId(msg.id)}
-                    title="Add Reaction"
-                  >
-                    +
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="message-actions">
-              {/* Reply button */}
-              <button
-                type="button"
-                className="message-action-btn"
-                onClick={() => startReply(msg.id)}
-                title="Reply"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
-                </svg>
-              </button>
-              {/* Reaction button */}
-              <button
-                type="button"
-                className="message-action-btn"
-                onClick={() => setReactionPickerMsgId(
-                  reactionPickerMsgId === msg.id ? null : msg.id
+                  </div>
                 )}
-                title="Add Reaction"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
-                </svg>
-              </button>
-              {isOwn && (
-                <>
+                {msg.replyToId && !repliedMsg && (
+                  <div className="reply-preview reply-preview-unknown">
+                    <span className="reply-preview-bar" />
+                    <span className="reply-preview-text">Original message not loaded</span>
+                  </div>
+                )}
+                {!isGrouped && (
+                  <div className="message-meta">
+                    <span
+                      className="message-sender message-sender-clickable"
+                      onClick={(e) => handleAvatarClick(msg.senderId, e)}
+                      style={userRoleColors[msg.senderId] ? { color: userRoleColors[msg.senderId] } : undefined}
+                    >
+                      {senderName}
+                    </span>
+                    <span className="message-time">
+                      {new Date(msg.timestamp).toLocaleString([], {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    {msg.edited && <span className="message-edited">(edited)</span>}
+                    {isPinned && (
+                      <span className="message-pin-indicator" title="Pinned">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                        </svg>
+                      </span>
+                    )}
+                  </div>
+                )}
+                <MessageBody text={msg.text} contentType={msg.contentType} formatting={msg.formatting} />
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <MessageAttachments attachments={msg.attachments} />
+                )}
+                {msg.linkPreviews && msg.linkPreviews.length > 0 && (
+                  <div className="link-preview-list">
+                    {msg.linkPreviews.map((lp) => (
+                      <LinkPreviewCard key={lp.url} preview={lp} />
+                    ))}
+                  </div>
+                )}
+                {msgReactions.length > 0 && (
+                  <div className="reaction-pills">
+                    {msgReactions.map((r) => {
+                      const isMine = user ? r.userIds.includes(user.id) : false;
+                      return (
+                        <button
+                          key={r.emoji}
+                          type="button"
+                          className={`reaction-pill ${isMine ? "reaction-pill-active" : ""}`}
+                          onClick={() => toggleReaction(msg.id, r.emoji)}
+                          title={r.userIds.map((id) => userNames[id] ?? nameMap[id] ?? id.slice(0, 8)).join(", ")}
+                        >
+                          <span className="reaction-emoji">{r.emoji}</span>
+                          <span className="reaction-count">{r.userIds.length}</span>
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      className="reaction-pill reaction-add-btn"
+                      onClick={() => setReactionPickerMsgId(msg.id)}
+                      title="Add Reaction"
+                    >
+                      +
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="message-actions">
+                {/* Reply button */}
+                <button
+                  type="button"
+                  className="message-action-btn"
+                  onClick={() => startReply(msg.id)}
+                  title="Reply"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
+                  </svg>
+                </button>
+                {/* Reaction button */}
+                <button
+                  type="button"
+                  className="message-action-btn"
+                  onClick={() => setReactionPickerMsgId(
+                    reactionPickerMsgId === msg.id ? null : msg.id
+                  )}
+                  title="Add Reaction"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
+                  </svg>
+                </button>
+                {isOwn && (
                   <button
                     type="button"
                     className="message-action-btn"
@@ -289,6 +380,8 @@ export default function MessageList() {
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 000-1.42l-2.34-2.34a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" />
                     </svg>
                   </button>
+                )}
+                {(isOwn || canManageMessages) && (
                   <button
                     type="button"
                     className="message-action-btn message-action-danger"
@@ -299,19 +392,19 @@ export default function MessageList() {
                       <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
                     </svg>
                   </button>
-                </>
-              )}
-              {/* Reaction emoji picker */}
-              {reactionPickerMsgId === msg.id && (
-                <div className="reaction-picker-wrap" ref={reactionPickerRef}>
-                  <EmojiPicker
-                    onSelect={(emoji) => handleReactionSelect(msg.id, emoji)}
-                    onClose={() => setReactionPickerMsgId(null)}
-                  />
-                </div>
-              )}
+                )}
+                {/* Reaction emoji picker */}
+                {reactionPickerMsgId === msg.id && (
+                  <div className="reaction-picker-wrap" ref={reactionPickerRef}>
+                    <EmojiPicker
+                      onSelect={(emoji) => handleReactionSelect(msg.id, emoji)}
+                      onClose={() => setReactionPickerMsgId(null)}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          </Fragment>
         );
       })}
       <div ref={bottomRef} />
@@ -342,6 +435,7 @@ export default function MessageList() {
           x={contextMenu.x}
           y={contextMenu.y}
           isPinned={pinnedIds.includes(contextMenu.message.id)}
+          serverId={serverId}
           onClose={() => setContextMenu(null)}
           onDelete={() => setDeletingMessageId(contextMenu.message.id)}
           onReport={() => setReportingMessageId(contextMenu.message.id)}

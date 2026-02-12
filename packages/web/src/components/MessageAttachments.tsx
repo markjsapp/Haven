@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { decryptFile, fromBase64 } from "@haven/core";
 import { useAuthStore } from "../store/auth.js";
+import ImageLightbox from "./ImageLightbox.js";
 import type { AttachmentMeta } from "../store/chat.js";
 
 // Cache decrypted blob URLs to avoid re-downloading
@@ -30,6 +31,7 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const isMedia = isImage(attachment.mime_type) || isVideo(attachment.mime_type);
 
@@ -103,6 +105,14 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
             src={blobUrl}
             alt={attachment.filename}
             loading="lazy"
+            onClick={() => setLightboxOpen(true)}
+          />
+        )}
+        {lightboxOpen && blobUrl && (
+          <ImageLightbox
+            src={blobUrl}
+            alt={attachment.filename}
+            onClose={() => setLightboxOpen(false)}
           />
         )}
       </div>

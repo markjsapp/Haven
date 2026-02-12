@@ -1,26 +1,46 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
-import type { InviteResponse, ServerMemberResponse, CategoryResponse, BanResponse } from "@haven/core";
+import { Permission, type InviteResponse, type ServerMemberResponse, type CategoryResponse, type BanResponse, type ChannelResponse } from "@haven/core";
+import { usePermissions } from "../hooks/usePermissions.js";
 import RoleSettings from "./RoleSettings.js";
 import ConfirmDialog from "./ConfirmDialog.js";
 import BanMemberModal from "./BanMemberModal.js";
 import EditMemberRolesModal from "./EditMemberRolesModal.js";
+import { parseChannelDisplay } from "../lib/channel-utils.js";
 
 interface Props {
   serverId: string;
-  isOwner: boolean;
   onClose: () => void;
 }
 
-export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
+export default function ServerSettings({ serverId, onClose }: Props) {
   const api = useAuthStore((s) => s.api);
+  const { can } = usePermissions(serverId);
+
+  const canManageServer = can(Permission.MANAGE_SERVER);
+  const canManageInvites = can(Permission.MANAGE_INVITES);
+  const canCreateInvites = can(Permission.CREATE_INVITES);
+  const canManageChannels = can(Permission.MANAGE_CHANNELS);
+  const canManageRoles = can(Permission.MANAGE_ROLES);
+  const canBanMembers = can(Permission.BAN_MEMBERS);
+  const canKickMembers = can(Permission.KICK_MEMBERS);
+
+  const server = useChatStore((s) => s.servers.find((sv) => sv.id === serverId));
+  const allChannels = useChatStore((s) => s.channels);
+  const serverChannels = useMemo(
+    () => allChannels.filter((ch) => ch.server_id === serverId && ch.channel_type === "text"),
+    [allChannels, serverId],
+  );
 
   const [invites, setInvites] = useState<InviteResponse[]>([]);
   const [members, setMembers] = useState<ServerMemberResponse[]>([]);
   const [categories, setCategories] = useState<CategoryResponse[]>([]);
   const [bans, setBans] = useState<BanResponse[]>([]);
-  const [tab, setTab] = useState<"members" | "invites" | "categories" | "roles" | "bans">("members");
+  const [systemChannelId, setSystemChannelId] = useState<string | null>(null);
+  const [tab, setTab] = useState<"overview" | "members" | "invites" | "categories" | "roles" | "bans">(
+    canManageServer ? "overview" : "members"
+  );
   const [error, setError] = useState("");
   const [createdCode, setCreatedCode] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -37,20 +57,26 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
     loadData();
   }, [serverId]);
 
+  useEffect(() => {
+    setSystemChannelId(server?.system_channel_id ?? null);
+  }, [server?.system_channel_id]);
+
   async function loadData() {
     try {
       const m = await api.listServerMembers(serverId);
       setMembers(m);
-      if (isOwner) {
-        const [inv, cats, b] = await Promise.all([
-          api.listInvites(serverId),
-          api.listCategories(serverId),
-          api.listBans(serverId),
-        ]);
-        setInvites(inv);
-        setCategories(cats);
-        setBans(b);
-      }
+
+      const [inv, cats, b] = await Promise.all([
+        (canManageInvites || canCreateInvites)
+          ? api.listInvites(serverId) : Promise.resolve([] as InviteResponse[]),
+        canManageChannels
+          ? api.listCategories(serverId) : Promise.resolve([] as CategoryResponse[]),
+        canBanMembers
+          ? api.listBans(serverId) : Promise.resolve([] as BanResponse[]),
+      ]);
+      setInvites(inv);
+      setCategories(cats);
+      setBans(b);
     } catch (err: any) {
       setError(err.message || "Failed to load server data");
     }
@@ -148,43 +174,95 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
         </div>
 
         <div className="server-settings-tabs">
+          {canManageServer && (
+            <button
+              className={`server-settings-tab ${tab === "overview" ? "active" : ""}`}
+              onClick={() => setTab("overview")}
+            >
+              Overview
+            </button>
+          )}
           <button
             className={`server-settings-tab ${tab === "members" ? "active" : ""}`}
             onClick={() => setTab("members")}
           >
             Members ({members.length})
           </button>
-          {isOwner && (
-            <>
-              <button
-                className={`server-settings-tab ${tab === "invites" ? "active" : ""}`}
-                onClick={() => setTab("invites")}
-              >
-                Invites
-              </button>
-              <button
-                className={`server-settings-tab ${tab === "categories" ? "active" : ""}`}
-                onClick={() => setTab("categories")}
-              >
-                Categories
-              </button>
-              <button
-                className={`server-settings-tab ${tab === "roles" ? "active" : ""}`}
-                onClick={() => setTab("roles")}
-              >
-                Roles
-              </button>
-              <button
-                className={`server-settings-tab ${tab === "bans" ? "active" : ""}`}
-                onClick={() => setTab("bans")}
-              >
-                Bans ({bans.length})
-              </button>
-            </>
+          {(canManageInvites || canCreateInvites) && (
+            <button
+              className={`server-settings-tab ${tab === "invites" ? "active" : ""}`}
+              onClick={() => setTab("invites")}
+            >
+              Invites
+            </button>
+          )}
+          {canManageChannels && (
+            <button
+              className={`server-settings-tab ${tab === "categories" ? "active" : ""}`}
+              onClick={() => setTab("categories")}
+            >
+              Categories
+            </button>
+          )}
+          {canManageRoles && (
+            <button
+              className={`server-settings-tab ${tab === "roles" ? "active" : ""}`}
+              onClick={() => setTab("roles")}
+            >
+              Roles
+            </button>
+          )}
+          {canBanMembers && (
+            <button
+              className={`server-settings-tab ${tab === "bans" ? "active" : ""}`}
+              onClick={() => setTab("bans")}
+            >
+              Bans ({bans.length})
+            </button>
           )}
         </div>
 
         {error && <div className="error-small" style={{ padding: "8px 16px" }}>{error}</div>}
+
+        {tab === "overview" && canManageServer && (
+          <div className="server-settings-list" style={{ padding: 16 }}>
+            <label className="profile-edit-label">
+              System Messages Channel
+              <select
+                className="profile-edit-input"
+                value={systemChannelId ?? ""}
+                onChange={(e) => setSystemChannelId(e.target.value || null)}
+              >
+                <option value="">None</option>
+                {serverChannels.map((ch) => {
+                  const display = parseChannelDisplay(ch.encrypted_meta, "");
+                  return (
+                    <option key={ch.id} value={ch.id}>
+                      #{display?.name ?? ch.id.slice(0, 8)}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "4px 0 12px" }}>
+              New member join messages will be posted in this channel.
+            </p>
+            <button
+              className="btn-primary"
+              onClick={async () => {
+                setError("");
+                try {
+                  await api.updateServer(serverId, { system_channel_id: systemChannelId });
+                  await useChatStore.getState().loadChannels();
+                } catch (err: any) {
+                  setError(err.message || "Failed to update server");
+                }
+              }}
+            >
+              Save Changes
+            </button>
+          </div>
+        )}
 
         {tab === "members" && (
           <div className="server-settings-list">
@@ -199,26 +277,32 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
                   </span>
                   <span className="server-member-username">@{m.username}</span>
                 </div>
-                {isOwner && m.user_id !== user?.id && (
+                {m.user_id !== user?.id && (canManageRoles || canKickMembers || canBanMembers) && (
                   <div className="server-member-actions">
-                    <button
-                      className="btn-ghost server-roles-btn"
-                      onClick={() => setEditRolesTarget({ userId: m.user_id, username: m.display_name || m.username })}
-                    >
-                      Roles
-                    </button>
-                    <button
-                      className="btn-ghost server-kick-btn"
-                      onClick={() => setKickTarget({ userId: m.user_id, username: m.display_name || m.username })}
-                    >
-                      Kick
-                    </button>
-                    <button
-                      className="btn-ghost server-ban-btn"
-                      onClick={() => setBanTarget({ userId: m.user_id, username: m.display_name || m.username })}
-                    >
-                      Ban
-                    </button>
+                    {canManageRoles && (
+                      <button
+                        className="btn-ghost server-roles-btn"
+                        onClick={() => setEditRolesTarget({ userId: m.user_id, username: m.display_name || m.username })}
+                      >
+                        Roles
+                      </button>
+                    )}
+                    {canKickMembers && (
+                      <button
+                        className="btn-ghost server-kick-btn"
+                        onClick={() => setKickTarget({ userId: m.user_id, username: m.display_name || m.username })}
+                      >
+                        Kick
+                      </button>
+                    )}
+                    {canBanMembers && (
+                      <button
+                        className="btn-ghost server-ban-btn"
+                        onClick={() => setBanTarget({ userId: m.user_id, username: m.display_name || m.username })}
+                      >
+                        Ban
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -226,7 +310,7 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
           </div>
         )}
 
-        {tab === "invites" && isOwner && (
+        {tab === "invites" && (canManageInvites || canCreateInvites) && (
           <div className="server-settings-list">
             <div style={{ padding: "8px 16px" }}>
               <button className="btn-small" onClick={handleCreateInvite}>
@@ -254,12 +338,14 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
                     <span> | Expires: {new Date(inv.expires_at).toLocaleString()}</span>
                   )}
                 </div>
-                <button
-                  className="btn-ghost"
-                  onClick={() => handleDeleteInvite(inv.id)}
-                >
-                  Revoke
-                </button>
+                {canManageInvites && (
+                  <button
+                    className="btn-ghost"
+                    onClick={() => handleDeleteInvite(inv.id)}
+                  >
+                    Revoke
+                  </button>
+                )}
               </div>
             ))}
             {invites.length === 0 && (
@@ -270,7 +356,7 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
           </div>
         )}
 
-        {tab === "categories" && isOwner && (
+        {tab === "categories" && canManageChannels && (
           <div className="server-settings-list">
             <div style={{ padding: "8px 16px" }}>
               <div className="dm-input-row">
@@ -333,7 +419,7 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
           </div>
         )}
 
-        {tab === "bans" && isOwner && (
+        {tab === "bans" && canBanMembers && (
           <div className="server-settings-list">
             {bans.map((ban) => (
               <div key={ban.id} className="server-member-row">
@@ -365,7 +451,7 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
           </div>
         )}
 
-        {tab === "roles" && isOwner && (
+        {tab === "roles" && canManageRoles && (
           <RoleSettings serverId={serverId} />
         )}
       </div>

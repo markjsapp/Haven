@@ -87,7 +87,7 @@ pub fn build_router(state: AppState) -> Router {
     let server_routes = Router::new()
         .route("/", get(api::servers::list_servers))
         .route("/", post(api::servers::create_server))
-        .route("/:server_id", get(api::servers::get_server))
+        .route("/:server_id", get(api::servers::get_server).patch(api::servers::update_server))
         .route(
             "/:server_id/channels",
             get(api::servers::list_server_channels),
@@ -95,6 +95,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/:server_id/channels",
             post(api::channels::create_channel),
+        )
+        .route(
+            "/:server_id/channels/reorder",
+            put(api::channels::reorder_channels),
         )
         .route(
             "/:server_id/categories",
@@ -121,6 +125,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/:server_id/invites/:invite_id",
             delete(api::invites::delete_invite),
+        )
+        .route(
+            "/:server_id/members/@me/permissions",
+            get(api::servers::get_my_permissions),
         )
         .route(
             "/:server_id/members",
@@ -153,6 +161,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/:server_id/bans/:user_id",
             post(api::bans::ban_member).delete(api::bans::revoke_ban),
+        )
+        .route(
+            "/:server_id/nickname",
+            put(api::servers::set_nickname),
         );
 
     // Channel routes
@@ -250,6 +262,15 @@ pub fn build_router(state: AppState) -> Router {
     let report_routes = Router::new()
         .route("/", post(api::reports::create_report));
 
+    // Voice routes
+    let voice_routes = Router::new()
+        .route("/:channel_id/join", post(api::voice::join_voice))
+        .route("/:channel_id/leave", post(api::voice::leave_voice))
+        .route(
+            "/:channel_id/participants",
+            get(api::voice::get_participants),
+        );
+
     // Assemble the full API
     let api = Router::new()
         .nest("/auth", auth_routes.merge(auth_protected))
@@ -264,7 +285,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(link_preview_routes)
         .merge(presence_routes)
         .merge(dm_privacy_routes)
-        .nest("/reports", report_routes);
+        .nest("/reports", report_routes)
+        .nest("/voice", voice_routes);
 
     Router::new()
         .route("/api/v1/ws", get(ws::ws_handler))

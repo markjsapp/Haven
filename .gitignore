@@ -42,3 +42,6 @@ mockups/
 
 # Test storage (integration tests)
 /tmp/haven-test-storage/
+related-projects
+.claude/settings.local.json
+CLAUDE.md

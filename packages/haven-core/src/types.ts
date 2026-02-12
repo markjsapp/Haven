@@ -130,6 +130,8 @@ export interface ServerResponse {
   encrypted_meta: string; // base64
   owner_id: string;
   created_at: string;
+  my_permissions?: string; // i64 as string for JS BigInt safety
+  system_channel_id?: string; // channel where system messages (joins, etc.) are posted
 }
 
 // ─── Channels ──────────────────────────────────────────
@@ -178,6 +180,10 @@ export interface ReorderCategoriesRequest {
 
 export interface SetChannelCategoryRequest {
   category_id: string | null;
+}
+
+export interface ReorderChannelsRequest {
+  order: Array<{ id: string; position: number; category_id: string | null }>;
 }
 
 export interface CreateDmRequest {
@@ -302,7 +308,8 @@ export type WsServerMessage =
   | { type: "FriendRemoved"; payload: { user_id: string } }
   | { type: "DmRequestReceived"; payload: { channel_id: string; from_user_id: string } }
   | { type: "MessagePinned"; payload: { channel_id: string; message_id: string; pinned_by: string } }
-  | { type: "MessageUnpinned"; payload: { channel_id: string; message_id: string } };
+  | { type: "MessageUnpinned"; payload: { channel_id: string; message_id: string } }
+  | { type: "VoiceStateUpdate"; payload: { channel_id: string; user_id: string; username: string; joined: boolean } };
 
 // ─── Presence ─────────────────────────────────────────
 
@@ -336,6 +343,8 @@ export interface ServerMemberResponse {
   display_name: string | null;
   avatar_url: string | null;
   joined_at: string;
+  nickname?: string | null;
+  role_ids: string[];
 }
 
 // ─── Roles & Permissions ─────────────────────────────
@@ -461,6 +470,21 @@ export interface ReportResponse {
   reason: string;
   status: string;
   created_at: string;
+}
+
+// ─── Voice ────────────────────────────────────────────
+
+export interface VoiceTokenResponse {
+  token: string;
+  url: string;
+  channel_id: string;
+}
+
+export interface VoiceParticipant {
+  user_id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
 }
 
 // ─── API Error ─────────────────────────────────────────

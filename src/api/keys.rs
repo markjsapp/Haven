@@ -130,6 +130,16 @@ pub async fn update_identity_keys(
     )
     .map_err(|_| AppError::Validation("Invalid signed_prekey_signature encoding".into()))?;
 
+    // Check if the identity key actually changed — if so, old SKDMs are undecryptable
+    let user = queries::find_user_by_id(&state.db, user_id)
+        .await?
+        .ok_or(AppError::NotFound("User not found".into()))?;
+
+    if user.identity_key != identity_key {
+        // Identity key changed: clear all pending SKDMs encrypted with the old key
+        queries::clear_sender_key_distributions_for_user(&state.db, user_id).await?;
+    }
+
     queries::update_user_keys(&state.db, user_id, &identity_key, &signed_prekey, &signed_prekey_sig).await?;
 
     Ok(Json(serde_json::json!({ "message": "Keys updated" })))

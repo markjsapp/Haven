@@ -91,6 +91,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
         heading: { levels: [1, 2, 3] },
         bold: false,
         codeBlock: false,
+        link: false,
+        underline: false,
       }),
       BoldStarOnly,
       CodeBlockLowlight.configure({ lowlight }),

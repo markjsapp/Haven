@@ -7,6 +7,7 @@ const coreDir = path.resolve(__dirname, "../haven-core");
 export default defineConfig({
   plugins: [react()],
   resolve: {
+    dedupe: ["react", "react-dom"],
     alias: {
       // libsodium-wrappers-sumo ESM imports ./libsodium-sumo.mjs which lives
       // in the sibling libsodium-sumo package. Point Rollup to the right file.
@@ -18,6 +19,12 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ["libsodium-wrappers-sumo"],
+    include: [
+      "@dnd-kit/core",
+      "@dnd-kit/sortable",
+      "@dnd-kit/utilities",
+      "@dnd-kit/accessibility",
+    ],
   },
   build: {
     target: "esnext",
@@ -25,11 +32,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:8080",
       "/api/v1/ws": {
         target: "ws://127.0.0.1:8080",
         ws: true,
       },
+      "/api": "http://127.0.0.1:8080",
     },
   },
 });

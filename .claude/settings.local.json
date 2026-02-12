@@ -39,7 +39,17 @@
       "Bash(cargo tree:*)",
       "Bash(ls:*)",
       "Bash(git -C /Users/mark/Desktop/code/Haven log --oneline -n 10)",
-      "Bash(git -C /Users/mark/Desktop/code/Haven log --oneline --all)"
+      "Bash(git -C /Users/mark/Desktop/code/Haven log --oneline --all)",
+      "WebFetch(domain:docs.spacebar.chat)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:docs.livekit.io)",
+      "Bash(timeout 5 npx vite:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && grep -A5 \"\"dnd\\\\|drag\"\" {}')",
+      "Bash(npm ls:*)",
+      "Bash(python3:*)",
+      "Bash(npm view:*)",
+      "WebFetch(domain:tiptap.dev)",
+      "Bash(sort:*)"
     ]
   }
 }

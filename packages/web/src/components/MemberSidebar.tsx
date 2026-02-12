@@ -5,6 +5,7 @@ import { useChatStore } from "../store/chat.js";
 import ProfilePopup from "./ProfilePopup.js";
 import FullProfileCard from "./FullProfileCard.js";
 import UserContextMenu from "./UserContextMenu.js";
+import EditMemberRolesModal from "./EditMemberRolesModal.js";
 import Avatar from "./Avatar.js";
 import type { ServerMemberResponse, RoleResponse } from "@haven/core";
 
@@ -12,7 +13,7 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
   const api = useAuthStore((s) => s.api);
   const presenceStatuses = usePresenceStore((s) => s.statuses);
   const fetchPresence = usePresenceStore((s) => s.fetchPresence);
-  const roles = useChatStore((s) => s.roles[serverId] ?? []);
+  const roles = useChatStore((s) => s.roles[serverId]) ?? [];
   const ownerId = useChatStore((s) => s.servers.find((sv) => sv.id === serverId)?.owner_id);
 
   const [members, setMembers] = useState<ServerMemberResponse[]>([]);
@@ -26,6 +27,7 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
     position: { x: number; y: number };
   } | null>(null);
   const [fullProfileUserId, setFullProfileUserId] = useState<string | null>(null);
+  const [editRolesTarget, setEditRolesTarget] = useState<{ userId: string; username: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,8 +42,9 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
 
   const filtered = searchQuery
     ? members.filter((m) => {
-        const name = (m.display_name || m.username).toLowerCase();
-        return name.includes(searchQuery.toLowerCase());
+        const q = searchQuery.toLowerCase();
+        const name = (m.nickname || m.display_name || m.username).toLowerCase();
+        return name.includes(q) || m.username.toLowerCase().includes(q);
       })
     : members;
 
@@ -139,6 +142,12 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
           onOpenProfile={() => {
             setFullProfileUserId(contextMenu.userId);
           }}
+          onManageRoles={() => {
+            const m = members.find((mem) => mem.user_id === contextMenu.userId);
+            if (m) {
+              setEditRolesTarget({ userId: m.user_id, username: m.display_name || m.username });
+            }
+          }}
         />
       )}
 
@@ -147,6 +156,19 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
           userId={fullProfileUserId}
           serverId={serverId}
           onClose={() => setFullProfileUserId(null)}
+        />
+      )}
+
+      {editRolesTarget && (
+        <EditMemberRolesModal
+          serverId={serverId}
+          userId={editRolesTarget.userId}
+          username={editRolesTarget.username}
+          onClose={() => setEditRolesTarget(null)}
+          onChanged={() => {
+            // Reload members to get updated role_ids
+            api.listServerMembers(serverId).then(setMembers).catch(() => {});
+          }}
         />
       )}
     </aside>
@@ -168,12 +190,13 @@ function MemberItem({
   onClick: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
-  const displayName = member.display_name || member.username;
+  const displayName = member.nickname || member.display_name || member.username;
+  const showUsername = !!member.nickname;
   const isOffline = status === "offline";
   const statusColor = STATUS_CONFIG[status]?.color ?? STATUS_CONFIG.offline.color;
 
   const topRole = roles
-    .filter((r) => !r.is_default && r.color)
+    .filter((r) => !r.is_default && r.color && member.role_ids.includes(r.id))
     .sort((a, b) => b.position - a.position)[0];
 
   return (
@@ -190,6 +213,9 @@ function MemberItem({
         <span className="member-name" style={topRole?.color ? { color: topRole.color } : undefined}>
           {displayName}
         </span>
+        {showUsername && (
+          <span className="member-username">{member.display_name || member.username}</span>
+        )}
       </div>
       {isOwner && (
         <span title="Server Owner">

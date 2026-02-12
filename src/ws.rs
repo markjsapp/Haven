@@ -148,6 +148,8 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
 
     if was_last_connection {
         broadcast_presence(user_id, "offline", &state).await;
+        // Clean up voice state — remove from any voice channel
+        crate::api::voice::cleanup_voice_state(&state, user_id).await;
     }
 
     tracing::info!("WebSocket disconnected: user={}", user_id);
@@ -732,7 +734,7 @@ async fn handle_remove_reaction(
 
 /// Broadcast a presence update (online/offline) to all channels the user belongs to,
 /// and track the state in Redis for multi-instance queries.
-async fn broadcast_presence(user_id: Uuid, status: &str, state: &AppState) {
+pub(crate) async fn broadcast_presence(user_id: Uuid, status: &str, state: &AppState) {
     // Update Redis presence hash
     let mut redis = state.redis.clone();
     let redis_result: Result<(), _> = if status == "offline" {
@@ -816,6 +818,24 @@ async fn handle_pin_message(
                     pinned_by: user_id,
                 });
             }
+
+            // Insert system message for pin
+            if let Ok(Some(user)) = queries::find_user_by_id(&state.db, user_id).await {
+                let username = user.display_name.as_deref().unwrap_or(&user.username);
+                let body = serde_json::json!({
+                    "event": "message_pinned",
+                    "username": username,
+                    "user_id": user_id.to_string(),
+                });
+                if let Ok(sys_msg) = queries::insert_system_message(
+                    &state.db, channel_id, &body.to_string(),
+                ).await {
+                    let response: MessageResponse = sys_msg.into();
+                    if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
+                        let _ = broadcaster.send(WsServerMessage::NewMessage(response));
+                    }
+                }
+            }
         }
         Err(e) => {
             let _ = reply_tx.send(WsServerMessage::Error { message: e.to_string() });
@@ -852,6 +872,24 @@ async fn handle_unpin_message(
                     channel_id,
                     message_id,
                 });
+            }
+
+            // Insert system message for unpin
+            if let Ok(Some(user)) = queries::find_user_by_id(&state.db, user_id).await {
+                let username = user.display_name.as_deref().unwrap_or(&user.username);
+                let body = serde_json::json!({
+                    "event": "message_unpinned",
+                    "username": username,
+                    "user_id": user_id.to_string(),
+                });
+                if let Ok(sys_msg) = queries::insert_system_message(
+                    &state.db, channel_id, &body.to_string(),
+                ).await {
+                    let response: MessageResponse = sys_msg.into();
+                    if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
+                        let _ = broadcaster.send(WsServerMessage::NewMessage(response));
+                    }
+                }
             }
         }
         Ok(false) => {

@@ -34,6 +34,7 @@ import type {
   CreateCategoryRequest,
   UpdateCategoryRequest,
   ReorderCategoriesRequest,
+  ReorderChannelsRequest,
   SetChannelCategoryRequest,
   RoleResponse,
   CreateRoleRequest,
@@ -52,6 +53,8 @@ import type {
   CreateBanRequest,
   CreateReportRequest,
   ReportResponse,
+  VoiceTokenResponse,
+  VoiceParticipant,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -170,6 +173,14 @@ export class HavenApi {
     return this.get<ServerResponse>(`/api/v1/servers/${serverId}`);
   }
 
+  async getMyPermissions(serverId: string): Promise<{ permissions: string; is_owner: boolean }> {
+    return this.get(`/api/v1/servers/${serverId}/members/@me/permissions`);
+  }
+
+  async updateServer(serverId: string, req: { system_channel_id?: string | null }): Promise<{ ok: boolean }> {
+    return this.patch(`/api/v1/servers/${serverId}`, req);
+  }
+
   async listServerChannels(serverId: string): Promise<ChannelResponse[]> {
     return this.get<ChannelResponse[]>(`/api/v1/servers/${serverId}/channels`);
   }
@@ -232,6 +243,10 @@ export class HavenApi {
 
   async reorderCategories(serverId: string, req: ReorderCategoriesRequest): Promise<void> {
     await this.put(`/api/v1/servers/${serverId}/categories/reorder`, req);
+  }
+
+  async reorderChannels(serverId: string, req: ReorderChannelsRequest): Promise<void> {
+    await this.put(`/api/v1/servers/${serverId}/channels/reorder`, req);
   }
 
   async setChannelCategory(channelId: string, req: SetChannelCategoryRequest): Promise<ChannelResponse> {
@@ -383,6 +398,10 @@ export class HavenApi {
 
   async kickMember(serverId: string, userId: string): Promise<void> {
     await this.delete(`/api/v1/servers/${serverId}/members/${userId}`);
+  }
+
+  async setNickname(serverId: string, nickname: string | null): Promise<void> {
+    await this.put(`/api/v1/servers/${serverId}/nickname`, { nickname });
   }
 
   // ─── Bans ──────────────────────────────────────────
@@ -541,6 +560,20 @@ export class HavenApi {
     return this.post<ReportResponse>("/api/v1/reports", req);
   }
 
+  // ─── Voice ──────────────────────────────────────
+
+  async joinVoice(channelId: string): Promise<VoiceTokenResponse> {
+    return this.post<VoiceTokenResponse>(`/api/v1/voice/${channelId}/join`, {});
+  }
+
+  async leaveVoice(channelId: string): Promise<void> {
+    await this.post<unknown>(`/api/v1/voice/${channelId}/leave`, {});
+  }
+
+  async getVoiceParticipants(channelId: string): Promise<VoiceParticipant[]> {
+    return this.get<VoiceParticipant[]>(`/api/v1/voice/${channelId}/participants`);
+  }
+
   // ─── HTTP Helpers ────────────────────────────────
 
   private async get<T>(path: string): Promise<T> {
@@ -553,6 +586,10 @@ export class HavenApi {
 
   private async put<T>(path: string, body: unknown): Promise<T> {
     return this.request<T>("PUT", path, body);
+  }
+
+  private async patch<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>("PATCH", path, body);
   }
 
   private async delete<T>(path: string): Promise<T> {

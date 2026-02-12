@@ -252,6 +252,32 @@ pub async fn update_channel(
     }))
 }
 
+/// PUT /api/v1/servers/:server_id/channels/reorder
+/// Reorder channels within a server (position + category assignment).
+pub async fn reorder_channels(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(server_id): Path<Uuid>,
+    Json(req): Json<ReorderChannelsRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    queries::require_server_permission(
+        &state.db,
+        server_id,
+        user_id,
+        permissions::MANAGE_CHANNELS,
+    )
+    .await?;
+
+    let order: Vec<(Uuid, i32, Option<Uuid>)> = req
+        .order
+        .iter()
+        .map(|p| (p.id, p.position, p.category_id))
+        .collect();
+    queries::reorder_channels(&state.db, server_id, &order).await?;
+
+    Ok(Json(serde_json::json!({ "message": "Channels reordered" })))
+}
+
 /// DELETE /api/v1/channels/:channel_id
 /// Delete a channel. Server owner only.
 pub async fn delete_channel(
@@ -376,6 +402,13 @@ pub async fn leave_channel(
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
+    // Look up username before removing
+    let user = queries::find_user_by_id(&state.db, user_id).await?;
+    let username = user
+        .as_ref()
+        .map(|u| u.display_name.as_deref().unwrap_or(&u.username).to_string())
+        .unwrap_or_else(|| "Someone".to_string());
+
     // Remove the user from the channel
     queries::remove_channel_member(&state.db, channel_id, user_id).await?;
 
@@ -383,6 +416,21 @@ pub async fn leave_channel(
     let remaining = queries::get_channel_member_ids(&state.db, channel_id).await?;
     if remaining.is_empty() {
         queries::delete_channel(&state.db, channel_id).await?;
+    } else {
+        // Insert system message about the user leaving
+        let body = serde_json::json!({
+            "event": "member_left",
+            "username": username,
+            "user_id": user_id.to_string(),
+        });
+        if let Ok(sys_msg) = queries::insert_system_message(
+            &state.db, channel_id, &body.to_string(),
+        ).await {
+            let response: MessageResponse = sys_msg.into();
+            if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
+                let _ = broadcaster.send(WsServerMessage::NewMessage(response));
+            }
+        }
     }
 
     Ok(Json(serde_json::json!({ "message": "Left channel" })))

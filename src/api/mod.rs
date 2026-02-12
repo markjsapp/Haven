@@ -14,3 +14,4 @@ pub mod attachments;
 pub mod link_preview;
 pub mod reports;
 pub mod users;
+pub mod voice;

@@ -35,9 +35,21 @@ pub struct AppConfig {
 
     // File Upload
     pub max_upload_size_bytes: u64,
+
+    // LiveKit (voice channels) — all optional, voice disabled if empty
+    pub livekit_url: String,
+    pub livekit_api_key: String,
+    pub livekit_api_secret: String,
 }
 
 impl AppConfig {
+    /// Returns true if LiveKit voice is configured.
+    pub fn livekit_enabled(&self) -> bool {
+        !self.livekit_url.is_empty()
+            && !self.livekit_api_key.is_empty()
+            && !self.livekit_api_secret.is_empty()
+    }
+
     /// Config with test-appropriate defaults (no env vars needed).
     #[cfg(test)]
     pub fn test_default() -> Self {
@@ -55,6 +67,9 @@ impl AppConfig {
             max_requests_per_minute: 1000,
             max_ws_connections_per_user: 10,
             max_upload_size_bytes: 10_000_000,
+            livekit_url: String::new(),
+            livekit_api_key: String::new(),
+            livekit_api_secret: String::new(),
         }
     }
 
@@ -105,6 +120,10 @@ impl AppConfig {
                 .unwrap_or_else(|_| "524288000".into()) // 500MB
                 .parse()
                 .unwrap_or(524_288_000),
+
+            livekit_url: env::var("LIVEKIT_URL").unwrap_or_default(),
+            livekit_api_key: env::var("LIVEKIT_API_KEY").unwrap_or_default(),
+            livekit_api_secret: env::var("LIVEKIT_API_SECRET").unwrap_or_default(),
         }
     }
 }

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
-import type { UserProfileResponse } from "@haven/core";
+import { Permission, type UserProfileResponse } from "@haven/core";
+import { usePermissions } from "../hooks/usePermissions.js";
 
 interface Props {
   userId: string;
@@ -10,16 +11,21 @@ interface Props {
   position: { x: number; y: number };
   onClose: () => void;
   onOpenProfile: () => void;
+  onManageRoles?: () => void;
 }
 
-export default function UserContextMenu({ userId, serverId, position, onClose, onOpenProfile }: Props) {
+export default function UserContextMenu({ userId, serverId, position, onClose, onOpenProfile, onManageRoles }: Props) {
   const api = useAuthStore((s) => s.api);
   const currentUser = useAuthStore((s) => s.user);
   const startDm = useChatStore((s) => s.startDm);
+  const { can } = usePermissions(serverId);
   const ref = useRef<HTMLDivElement>(null);
   const [profile, setProfile] = useState<UserProfileResponse | null>(null);
 
   const isSelf = currentUser?.id === userId;
+  const canKick = can(Permission.KICK_MEMBERS);
+  const canBan = can(Permission.BAN_MEMBERS);
+  const canManageRoles = can(Permission.MANAGE_ROLES);
 
   useEffect(() => {
     api.getUserProfile(userId, serverId).then(setProfile).catch(() => {});
@@ -132,15 +138,24 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
             </button>
           )}
 
-          {serverId && (
+          {serverId && (canManageRoles || canKick || canBan) && (
             <>
               <div className="user-context-divider" />
-              <button className="user-context-item user-context-danger" onClick={handleKick}>
-                Kick
-              </button>
-              <button className="user-context-item user-context-danger" onClick={handleBan}>
-                Ban
-              </button>
+              {canManageRoles && onManageRoles && (
+                <button className="user-context-item" onClick={() => { onManageRoles(); onClose(); }}>
+                  Manage Roles
+                </button>
+              )}
+              {canKick && (
+                <button className="user-context-item user-context-danger" onClick={handleKick}>
+                  Kick
+                </button>
+              )}
+              {canBan && (
+                <button className="user-context-item user-context-danger" onClick={handleBan}>
+                  Ban
+                </button>
+              )}
             </>
           )}
 

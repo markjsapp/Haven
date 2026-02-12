@@ -73,6 +73,19 @@ const receivedSenderKeys = new Map<string, { fromUserId: string; key: ReceivedSe
 const distributedChannels = new Set<string>();
 
 /**
+ * Clear all in-memory E2EE state. Call on logout or when identity keys change
+ * so stale sessions/sender keys don't cause decryption failures.
+ */
+export function clearCryptoState(): void {
+  sessions.clear();
+  sessionAD.clear();
+  channelPeerMap.clear();
+  mySenderKeys.clear();
+  receivedSenderKeys.clear();
+  distributedChannels.clear();
+}
+
+/**
  * Establish a Double Ratchet session with a peer using their key bundle.
  */
 export async function ensureSession(peerId: string, bundle: KeyBundle): Promise<void> {

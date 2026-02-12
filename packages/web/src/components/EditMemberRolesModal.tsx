@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
+import { useChatStore } from "../store/chat.js";
 import type { RoleResponse } from "@haven/core";
 
 interface Props {
@@ -7,14 +8,16 @@ interface Props {
   userId: string;
   username: string;
   onClose: () => void;
+  onChanged?: () => void;
 }
 
-export default function EditMemberRolesModal({ serverId, userId, username, onClose }: Props) {
+export default function EditMemberRolesModal({ serverId, userId, username, onClose, onChanged }: Props) {
   const api = useAuthStore((s) => s.api);
   const [allRoles, setAllRoles] = useState<RoleResponse[]>([]);
   const [memberRoleIds, setMemberRoleIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [savedRoleId, setSavedRoleId] = useState<string | null>(null);
 
   useEffect(() => {
     loadRolesAndMember();
@@ -50,6 +53,12 @@ export default function EditMemberRolesModal({ serverId, userId, username, onClo
         await api.assignRole(serverId, userId, { role_id: roleId });
         setMemberRoleIds((prev) => new Set(prev).add(roleId));
       }
+      // Refresh current user's permissions & member lists
+      useChatStore.getState().refreshPermissions(serverId);
+      useChatStore.getState().loadChannels();
+      onChanged?.();
+      setSavedRoleId(roleId);
+      setTimeout(() => setSavedRoleId(null), 1500);
     } catch (err: any) {
       setError(err.message || "Failed to update role");
     }
@@ -80,6 +89,9 @@ export default function EditMemberRolesModal({ serverId, userId, username, onClo
                   <span className="role-dot" style={{ background: role.color }} />
                 )}
                 <span>{role.name}</span>
+                {savedRoleId === role.id && (
+                  <span className="role-saved-indicator">Updated</span>
+                )}
               </label>
             ))}
           </div>

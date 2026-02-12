@@ -59,7 +59,7 @@ export function parseServerName(encryptedMeta: string): string {
 export function parseChannelDisplay(
   encryptedMeta: string,
   myUserId: string,
-): { name: string; isDm: boolean; isGroup: boolean } {
+): { name: string; isDm: boolean; isGroup: boolean; topic?: string } {
   try {
     const json = JSON.parse(atob(encryptedMeta));
     if (json.type === "dm") {
@@ -74,7 +74,7 @@ export function parseChannelDisplay(
       const name = parseGroupDisplayName(json, myUserId);
       return { name, isDm: false, isGroup: true };
     }
-    return { name: json.name || "unnamed", isDm: false, isGroup: false };
+    return { name: json.name || "unnamed", isDm: false, isGroup: false, topic: json.topic || undefined };
   } catch {
     return { name: "unnamed", isDm: false, isGroup: false };
   }

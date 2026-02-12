@@ -174,6 +174,10 @@ pub async fn logout(
     // Revoke all refresh tokens for this user
     queries::revoke_all_user_refresh_tokens(&state.db, user_id).await?;
 
+    // Broadcast offline presence and clean up voice state
+    crate::ws::broadcast_presence(user_id, "offline", &state).await;
+    crate::api::voice::cleanup_voice_state(&state, user_id).await;
+
     Ok(Json(serde_json::json!({ "message": "Logged out" })))
 }
 
