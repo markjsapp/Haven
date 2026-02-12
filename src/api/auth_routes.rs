@@ -223,6 +223,36 @@ pub async fn totp_verify(
     Ok(Json(serde_json::json!({ "message": "TOTP verified and enabled" })))
 }
 
+/// PUT /api/v1/auth/password
+pub async fn change_password(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Json(req): Json<ChangePasswordRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    // Validate new password length
+    if req.new_password.len() < 8 || req.new_password.len() > 128 {
+        return Err(AppError::Validation("New password must be 8-128 characters".into()));
+    }
+
+    // Fetch user and verify current password
+    let user = queries::find_user_by_id(&state.db, user_id)
+        .await?
+        .ok_or(AppError::UserNotFound)?;
+
+    if !auth::verify_password(&req.current_password, &user.password_hash)? {
+        return Err(AppError::AuthError("Current password is incorrect".into()));
+    }
+
+    // Hash and save new password
+    let new_hash = auth::hash_password(&req.new_password)?;
+    queries::update_user_password(&state.db, user_id, &new_hash).await?;
+
+    // Revoke all refresh tokens (force re-login everywhere)
+    queries::revoke_all_user_refresh_tokens(&state.db, user_id).await?;
+
+    Ok(Json(serde_json::json!({ "message": "Password changed" })))
+}
+
 /// DELETE /api/v1/auth/totp
 pub async fn totp_disable(
     State(state): State<AppState>,

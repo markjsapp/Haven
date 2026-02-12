@@ -32,5 +32,13 @@ Thumbs.db
 
 # Docker overrides
 docker-compose.override.yml
-docs/haven-architecture-plan.md
-docs/features-deep-research-report.md
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Design docs and mockups (not versioned)
+docs/
+mockups/
+
+# Test storage (integration tests)
+/tmp/haven-test-storage/

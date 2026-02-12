@@ -80,10 +80,10 @@ export class HavenWs {
     this.ws.send(JSON.stringify(msg));
   }
 
-  sendMessage(channelId: string, senderToken: string, encryptedBody: string, expiresAt?: string, attachmentIds?: string[]): void {
+  sendMessage(channelId: string, senderToken: string, encryptedBody: string, expiresAt?: string, attachmentIds?: string[], replyToId?: string): void {
     this.send({
       type: "SendMessage",
-      payload: { channel_id: channelId, sender_token: senderToken, encrypted_body: encryptedBody, expires_at: expiresAt, attachment_ids: attachmentIds },
+      payload: { channel_id: channelId, sender_token: senderToken, encrypted_body: encryptedBody, expires_at: expiresAt, attachment_ids: attachmentIds, reply_to_id: replyToId },
     });
   }
 
@@ -125,6 +125,18 @@ export class HavenWs {
 
   typing(channelId: string): void {
     this.send({ type: "Typing", payload: { channel_id: channelId } });
+  }
+
+  setStatus(status: string): void {
+    this.send({ type: "SetStatus", payload: { status } });
+  }
+
+  pinMessage(channelId: string, messageId: string): void {
+    this.send({ type: "PinMessage", payload: { channel_id: channelId, message_id: messageId } });
+  }
+
+  unpinMessage(channelId: string, messageId: string): void {
+    this.send({ type: "UnpinMessage", payload: { channel_id: channelId, message_id: messageId } });
   }
 
   // ─── Events ──────────────────────────────────────

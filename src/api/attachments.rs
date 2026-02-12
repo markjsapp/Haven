@@ -73,7 +73,7 @@ pub async fn download(
         .await?
         .ok_or(AppError::NotFound("Message not found".into()))?;
 
-    if !queries::is_channel_member(&state.db, message.channel_id, user_id).await? {
+    if !queries::can_access_channel(&state.db, message.channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 

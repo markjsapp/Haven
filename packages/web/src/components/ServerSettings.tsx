@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
-import type { InviteResponse, ServerMemberResponse, CategoryResponse } from "@haven/core";
+import type { InviteResponse, ServerMemberResponse, CategoryResponse, BanResponse } from "@haven/core";
 import RoleSettings from "./RoleSettings.js";
+import ConfirmDialog from "./ConfirmDialog.js";
+import BanMemberModal from "./BanMemberModal.js";
+import EditMemberRolesModal from "./EditMemberRolesModal.js";
 
 interface Props {
   serverId: string;
@@ -16,12 +19,19 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
   const [invites, setInvites] = useState<InviteResponse[]>([]);
   const [members, setMembers] = useState<ServerMemberResponse[]>([]);
   const [categories, setCategories] = useState<CategoryResponse[]>([]);
-  const [tab, setTab] = useState<"members" | "invites" | "categories" | "roles">("members");
+  const [bans, setBans] = useState<BanResponse[]>([]);
+  const [tab, setTab] = useState<"members" | "invites" | "categories" | "roles" | "bans">("members");
   const [error, setError] = useState("");
   const [createdCode, setCreatedCode] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [editingCatName, setEditingCatName] = useState("");
+
+  // Confirmation modals
+  const [kickTarget, setKickTarget] = useState<{ userId: string; username: string } | null>(null);
+  const [banTarget, setBanTarget] = useState<{ userId: string; username: string } | null>(null);
+  const [deleteCatTarget, setDeleteCatTarget] = useState<{ id: string; name: string } | null>(null);
+  const [editRolesTarget, setEditRolesTarget] = useState<{ userId: string; username: string } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -32,12 +42,14 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
       const m = await api.listServerMembers(serverId);
       setMembers(m);
       if (isOwner) {
-        const [inv, cats] = await Promise.all([
+        const [inv, cats, b] = await Promise.all([
           api.listInvites(serverId),
           api.listCategories(serverId),
+          api.listBans(serverId),
         ]);
         setInvites(inv);
         setCategories(cats);
+        setBans(b);
       }
     } catch (err: any) {
       setError(err.message || "Failed to load server data");
@@ -69,8 +81,18 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
     try {
       await api.kickMember(serverId, userId);
       setMembers((prev) => prev.filter((m) => m.user_id !== userId));
+      setKickTarget(null);
     } catch (err: any) {
       setError(err.message || "Failed to kick member");
+    }
+  }
+
+  async function handleRevokeBan(userId: string) {
+    try {
+      await api.revokeBan(serverId, userId);
+      setBans((prev) => prev.filter((b) => b.user_id !== userId));
+    } catch (err: any) {
+      setError(err.message || "Failed to revoke ban");
     }
   }
 
@@ -104,11 +126,11 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
   }
 
   async function handleDeleteCategory(catId: string) {
-    if (!confirm("Delete this category? Channels in it will become uncategorized.")) return;
     setError("");
     try {
       await api.deleteCategory(serverId, catId);
       setCategories((prev) => prev.filter((c) => c.id !== catId));
+      setDeleteCatTarget(null);
       useChatStore.getState().loadChannels();
     } catch (err: any) {
       setError(err.message || "Failed to delete category");
@@ -152,6 +174,12 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
               >
                 Roles
               </button>
+              <button
+                className={`server-settings-tab ${tab === "bans" ? "active" : ""}`}
+                onClick={() => setTab("bans")}
+              >
+                Bans ({bans.length})
+              </button>
             </>
           )}
         </div>
@@ -172,12 +200,26 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
                   <span className="server-member-username">@{m.username}</span>
                 </div>
                 {isOwner && m.user_id !== user?.id && (
-                  <button
-                    className="btn-ghost server-kick-btn"
-                    onClick={() => handleKick(m.user_id)}
-                  >
-                    Kick
-                  </button>
+                  <div className="server-member-actions">
+                    <button
+                      className="btn-ghost server-roles-btn"
+                      onClick={() => setEditRolesTarget({ userId: m.user_id, username: m.display_name || m.username })}
+                    >
+                      Roles
+                    </button>
+                    <button
+                      className="btn-ghost server-kick-btn"
+                      onClick={() => setKickTarget({ userId: m.user_id, username: m.display_name || m.username })}
+                    >
+                      Kick
+                    </button>
+                    <button
+                      className="btn-ghost server-ban-btn"
+                      onClick={() => setBanTarget({ userId: m.user_id, username: m.display_name || m.username })}
+                    >
+                      Ban
+                    </button>
+                  </div>
                 )}
               </div>
             ))}
@@ -275,7 +317,7 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
                     </button>
                     <button
                       className="btn-ghost server-kick-btn"
-                      onClick={() => handleDeleteCategory(cat.id)}
+                      onClick={() => setDeleteCatTarget({ id: cat.id, name: cat.name })}
                     >
                       Delete
                     </button>
@@ -291,10 +333,90 @@ export default function ServerSettings({ serverId, isOwner, onClose }: Props) {
           </div>
         )}
 
+        {tab === "bans" && isOwner && (
+          <div className="server-settings-list">
+            {bans.map((ban) => (
+              <div key={ban.id} className="server-member-row">
+                <div className="server-member-avatar" style={{ background: "var(--red)" }}>
+                  {ban.username.charAt(0).toUpperCase()}
+                </div>
+                <div className="server-member-info">
+                  <span className="server-member-name">{ban.username}</span>
+                  {ban.reason && (
+                    <span className="server-member-username">Reason: {ban.reason}</span>
+                  )}
+                  <span className="server-member-username">
+                    Banned {new Date(ban.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <button
+                  className="btn-ghost"
+                  onClick={() => handleRevokeBan(ban.user_id)}
+                >
+                  Revoke
+                </button>
+              </div>
+            ))}
+            {bans.length === 0 && (
+              <div style={{ padding: "8px 16px", color: "var(--text-muted)", fontSize: 13 }}>
+                No banned users.
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "roles" && isOwner && (
           <RoleSettings serverId={serverId} />
         )}
       </div>
+
+      {/* Kick confirmation */}
+      {kickTarget && (
+        <ConfirmDialog
+          title="Kick Member"
+          message={`Are you sure you want to kick ${kickTarget.username} from this server?`}
+          confirmLabel="Kick"
+          danger
+          onConfirm={() => handleKick(kickTarget.userId)}
+          onCancel={() => setKickTarget(null)}
+        />
+      )}
+
+      {/* Ban modal */}
+      {banTarget && (
+        <BanMemberModal
+          serverId={serverId}
+          userId={banTarget.userId}
+          username={banTarget.username}
+          onBanned={(userId) => {
+            setMembers((prev) => prev.filter((m) => m.user_id !== userId));
+            loadData(); // Reload bans list
+          }}
+          onClose={() => setBanTarget(null)}
+        />
+      )}
+
+      {/* Edit member roles */}
+      {editRolesTarget && (
+        <EditMemberRolesModal
+          serverId={serverId}
+          userId={editRolesTarget.userId}
+          username={editRolesTarget.username}
+          onClose={() => setEditRolesTarget(null)}
+        />
+      )}
+
+      {/* Delete category confirmation */}
+      {deleteCatTarget && (
+        <ConfirmDialog
+          title="Delete Category"
+          message={`Delete "${deleteCatTarget.name}"? Channels in it will become uncategorized.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => handleDeleteCategory(deleteCatTarget.id)}
+          onCancel={() => setDeleteCatTarget(null)}
+        />
+      )}
     </div>
   );
 }

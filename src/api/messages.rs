@@ -27,7 +27,7 @@ pub async fn get_messages(
     Query(params): Query<MessageQuery>,
 ) -> AppResult<Json<Vec<MessageResponse>>> {
     // Verify membership
-    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
@@ -49,7 +49,7 @@ pub async fn get_channel_reactions(
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<ReactionGroup>>> {
     // Verify membership
-    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
@@ -91,7 +91,7 @@ pub async fn send_message(
     Json(req): Json<SendMessageRequest>,
 ) -> AppResult<Json<MessageResponse>> {
     // Verify membership
-    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
@@ -115,6 +115,7 @@ pub async fn send_message(
         req.expires_at,
         req.has_attachments,
         user_id,
+        req.reply_to_id,
     )
     .await?;
 
@@ -132,4 +133,35 @@ pub async fn send_message(
     }
 
     Ok(Json(response))
+}
+
+/// GET /api/v1/channels/:channel_id/pins
+/// Returns all pinned messages in a channel.
+pub async fn get_pins(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+) -> AppResult<Json<Vec<MessageResponse>>> {
+    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
+    }
+
+    let messages = queries::get_pinned_messages(&state.db, channel_id).await?;
+    let responses: Vec<MessageResponse> = messages.into_iter().map(|m| m.into()).collect();
+    Ok(Json(responses))
+}
+
+/// GET /api/v1/channels/:channel_id/pin-ids
+/// Returns just the IDs of pinned messages (lightweight).
+pub async fn get_pin_ids(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+) -> AppResult<Json<Vec<Uuid>>> {
+    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
+    }
+
+    let ids = queries::get_pinned_message_ids(&state.db, channel_id).await?;
+    Ok(Json(ids))
 }

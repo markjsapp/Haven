@@ -54,6 +54,8 @@ export interface DecryptedMessage {
   formatting?: object;
   timestamp: string;
   edited?: boolean;
+  replyToId?: string | null;
+  messageType?: string; // "user" | "system"
   raw: MessageResponse;
 }
 
@@ -68,6 +70,9 @@ interface ChatState {
   messages: Record<string, DecryptedMessage[]>;
   pendingUploads: PendingUpload[];
   editingMessageId: string | null;
+  replyingToId: string | null;
+  /** channelId -> set of pinned message IDs */
+  pinnedMessageIds: Record<string, string[]>;
   ws: HavenWs | null;
   wsState: "disconnected" | "connecting" | "connected";
   /** userId -> expiry timestamp + username, per channel */
@@ -93,6 +98,11 @@ interface ChatState {
   cancelEditing(): void;
   submitEdit(messageId: string, text: string, formatting?: { contentType: string; data: object }): Promise<void>;
   deleteMessage(messageId: string): void;
+  startReply(messageId: string): void;
+  cancelReply(): void;
+  loadPins(channelId: string): Promise<void>;
+  pinMessage(messageId: string): void;
+  unpinMessage(messageId: string): void;
   addReaction(messageId: string, emoji: string): void;
   removeReaction(messageId: string, emoji: string): void;
   toggleReaction(messageId: string, emoji: string): void;
@@ -131,6 +141,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
   pendingUploads: [],
   editingMessageId: null,
+  replyingToId: null,
+  pinnedMessageIds: {},
   ws: null,
   wsState: "disconnected",
   typingUsers: {},
@@ -250,6 +262,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
         useFriendsStore.getState().loadFriends();
       });
     });
+    ws.on("MessagePinned", (msg: Extract<WsServerMessage, { type: "MessagePinned" }>) => {
+      const { channel_id, message_id } = msg.payload;
+      set((state) => {
+        const existing = state.pinnedMessageIds[channel_id] ?? [];
+        if (existing.includes(message_id)) return state;
+        return {
+          pinnedMessageIds: {
+            ...state.pinnedMessageIds,
+            [channel_id]: [...existing, message_id],
+          },
+        };
+      });
+    });
+
+    ws.on("MessageUnpinned", (msg: Extract<WsServerMessage, { type: "MessageUnpinned" }>) => {
+      const { channel_id, message_id } = msg.payload;
+      set((state) => {
+        const existing = state.pinnedMessageIds[channel_id] ?? [];
+        return {
+          pinnedMessageIds: {
+            ...state.pinnedMessageIds,
+            [channel_id]: existing.filter((id) => id !== message_id),
+          },
+        };
+      });
+    });
+
     ws.on("DmRequestReceived", () => {
       import("./friends.js").then(({ useFriendsStore }) => {
         useFriendsStore.getState().loadDmRequests();
@@ -291,6 +330,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     ws.connect();
     set({ ws, wsState: "connecting" });
+
+    // Provide WS setStatus to presence store (avoids circular import)
+    usePresenceStore.setState({ _wsSendStatus: (status: string) => ws.setStatus(status) });
   },
 
   disconnect() {
@@ -339,6 +381,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
+    // Extract names from DM/group channel metadata
+    const dmUserNames: Record<string, string> = {};
+    for (const ch of dmChannels) {
+      try {
+        const meta = JSON.parse(atob(ch.encrypted_meta));
+        if (meta.names) {
+          for (const [id, name] of Object.entries(meta.names)) {
+            if (!dmUserNames[id]) dmUserNames[id] = name as string;
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
     // Build global userId -> displayName map from server members
     const memberArrays = await Promise.all(
       servers.map((server) => api.listServerMembers(server.id))
@@ -350,7 +405,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    set({ servers, channels: allChannels, categories, roles, userNames });
+    // Merge DM/group names (server member names take priority)
+    const mergedUserNames = { ...dmUserNames, ...userNames };
+    set({ servers, channels: allChannels, categories, roles, userNames: mergedUserNames });
 
     // Load blocked users list
     get().loadBlockedUsers();
@@ -381,15 +438,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const decrypted: DecryptedMessage[] = [];
       for (const raw of rawMessages) {
+        // System messages are unencrypted — parse directly
+        if (raw.message_type === "system") {
+          decrypted.push({
+            id: raw.id,
+            channelId: raw.channel_id,
+            senderId: raw.sender_token, // repurposed for system msgs
+            text: raw.encrypted_body,   // plaintext for system msgs
+            timestamp: raw.timestamp,
+            messageType: "system",
+            raw,
+          });
+          continue;
+        }
         try {
           const msg = await decryptIncoming(raw);
           msg.edited = raw.edited;
+          msg.replyToId = raw.reply_to_id;
           cacheMessage(msg);
           decrypted.push(msg);
         } catch {
           // Can't decrypt — try local cache (survives re-login)
           const cached = getCachedMessage(raw.id, raw.channel_id, raw.timestamp, raw.edited, raw);
           if (cached) {
+            cached.replyToId = raw.reply_to_id;
             decrypted.push(cached);
           } else {
             decrypted.push({
@@ -398,6 +470,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               senderId: "unknown",
               text: "[encrypted message]",
               timestamp: raw.timestamp,
+              replyToId: raw.reply_to_id,
               raw,
             });
           }
@@ -430,10 +503,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Subscribe to this channel
     const { ws } = get();
     if (ws) ws.subscribe(channelId);
+
+    // Load pinned message IDs for this channel
+    get().loadPins(channelId);
   },
 
   async sendMessage(text, attachments, formatting) {
-    const { currentChannelId, ws } = get();
+    const { currentChannelId, ws, replyingToId } = get();
     if (!currentChannelId || !ws) return;
 
     const { user } = useAuthStore.getState();
@@ -465,12 +541,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       contentType: formatting?.contentType,
       formatting: formatting?.data,
       timestamp: new Date().toISOString(),
+      replyToId: replyingToId,
       raw: {} as MessageResponse, // placeholder — replaced on ack
     };
     set((state) => appendMessage(state, currentChannelId, optimistic));
 
     const attachmentIds = attachments?.map((a) => a.id);
-    ws.sendMessage(currentChannelId, senderToken, encryptedBody, undefined, attachmentIds);
+    ws.sendMessage(currentChannelId, senderToken, encryptedBody, undefined, attachmentIds, replyingToId ?? undefined);
+
+    // Clear reply state after send
+    set({ replyingToId: null });
   },
 
   addFiles(files: File[]) {
@@ -575,6 +655,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ editingMessageId: null });
   },
 
+  startReply(messageId: string) {
+    set({ replyingToId: messageId, editingMessageId: null });
+  },
+
+  cancelReply() {
+    set({ replyingToId: null });
+  },
+
+  async loadPins(channelId: string) {
+    const { api } = useAuthStore.getState();
+    try {
+      const ids = await api.getPinnedMessageIds(channelId);
+      set((state) => ({
+        pinnedMessageIds: { ...state.pinnedMessageIds, [channelId]: ids },
+      }));
+    } catch { /* non-fatal */ }
+  },
+
+  pinMessage(messageId: string) {
+    const { ws, currentChannelId } = get();
+    if (!ws || !currentChannelId) return;
+    ws.pinMessage(currentChannelId, messageId);
+  },
+
+  unpinMessage(messageId: string) {
+    const { ws, currentChannelId } = get();
+    if (!ws || !currentChannelId) return;
+    ws.unpinMessage(currentChannelId, messageId);
+  },
+
   async submitEdit(messageId, text, formatting) {
     const { currentChannelId, ws } = get();
     if (!currentChannelId || !ws) return;
@@ -595,9 +705,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   deleteMessage(messageId: string) {
-    const { ws } = get();
+    const { ws, currentChannelId } = get();
     if (!ws) return;
     ws.deleteMessage(messageId);
+    // Optimistic removal — remove from local state immediately
+    if (currentChannelId) {
+      set((state) => {
+        const channelMsgs = state.messages[currentChannelId];
+        if (!channelMsgs) return state;
+        return {
+          messages: {
+            ...state.messages,
+            [currentChannelId]: channelMsgs.filter((m) => m.id !== messageId),
+          },
+        };
+      });
+    }
   },
 
   addReaction(messageId: string, emoji: string) {
@@ -710,9 +833,25 @@ async function handleIncomingMessage(raw: MessageResponse) {
     await useChatStore.getState().loadChannels();
   }
 
+  // System messages are unencrypted
+  if (raw.message_type === "system") {
+    const msg: DecryptedMessage = {
+      id: raw.id,
+      channelId: raw.channel_id,
+      senderId: raw.sender_token,
+      text: raw.encrypted_body,
+      timestamp: raw.timestamp,
+      messageType: "system",
+      raw,
+    };
+    useChatStore.setState((state) => appendMessage(state, raw.channel_id, msg));
+    return;
+  }
+
   try {
     const msg = await decryptIncoming(raw);
     msg.edited = raw.edited;
+    msg.replyToId = raw.reply_to_id;
     cacheMessage(msg);
     useChatStore.setState((state) => appendMessage(state, raw.channel_id, msg));
   } catch {
@@ -724,6 +863,7 @@ async function handleIncomingMessage(raw: MessageResponse) {
       senderId: "unknown",
       text: "[encrypted message]",
       timestamp: raw.timestamp,
+      replyToId: raw.reply_to_id,
       raw,
     };
     useChatStore.setState((state) => appendMessage(state, raw.channel_id, fallback));

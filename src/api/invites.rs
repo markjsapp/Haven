@@ -116,6 +116,11 @@ pub async fn join_by_invite(
         }
     }
 
+    // Check if banned
+    if queries::is_banned(&state.db, invite.server_id, user_id).await? {
+        return Err(AppError::Forbidden("You are banned from this server".into()));
+    }
+
     // Check if already a member
     if queries::is_server_member(&state.db, invite.server_id, user_id).await? {
         return Err(AppError::Validation("Already a member of this server".into()));

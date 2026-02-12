@@ -6,8 +6,12 @@ import MessageBody from "./MessageBody.js";
 import LinkPreviewCard from "./LinkPreviewCard.js";
 import ConfirmDialog from "./ConfirmDialog.js";
 import ProfilePopup from "./ProfilePopup.js";
+import Avatar from "./Avatar.js";
 import { parseNamesFromMeta } from "../lib/channel-utils.js";
-import { FREQUENT_EMOJIS } from "./EmojiPicker.js";
+import EmojiPicker from "./EmojiPicker.js";
+import MessageContextMenu from "./MessageContextMenu.js";
+import ReportModal from "./ReportModal.js";
+import type { DecryptedMessage } from "../store/chat.js";
 
 export default function MessageList() {
   const currentChannelId = useChatStore((s) => s.currentChannelId);
@@ -19,16 +23,22 @@ export default function MessageList() {
   const reactions = useChatStore((s) => s.reactions);
   const toggleReaction = useChatStore((s) => s.toggleReaction);
   const blockedUserIds = useChatStore((s) => s.blockedUserIds);
+  const startReply = useChatStore((s) => s.startReply);
+  const pinnedMessageIds = useChatStore((s) => s.pinnedMessageIds);
   const user = useAuthStore((s) => s.user);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const channelMessages = currentChannelId ? messages[currentChannelId] ?? [] : [];
   const currentChannel = channels.find((c) => c.id === currentChannelId);
   const nameMap = useMemo(() => parseNamesFromMeta(currentChannel?.encrypted_meta), [currentChannel?.encrypted_meta]);
+  const pinnedIds = currentChannelId ? pinnedMessageIds[currentChannelId] ?? [] : [];
 
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
   const [profilePopup, setProfilePopup] = useState<{ userId: string; top: number; left: number } | null>(null);
+  const [highlightedMsgId, setHighlightedMsgId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ message: DecryptedMessage; x: number; y: number } | null>(null);
+  const [reportingMessageId, setReportingMessageId] = useState<string | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -57,6 +67,20 @@ export default function MessageList() {
     setProfilePopup({ userId, top: rect.top, left: rect.right });
   }, []);
 
+  const scrollToMessage = useCallback((messageId: string) => {
+    const el = document.getElementById(`msg-${messageId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedMsgId(messageId);
+      setTimeout(() => setHighlightedMsgId(null), 1500);
+    }
+  }, []);
+
+  const getSenderName = useCallback((senderId: string) => {
+    if (senderId === user?.id) return user?.username ?? "You";
+    return nameMap[senderId] ?? userNames[senderId] ?? senderId.slice(0, 8);
+  }, [user, nameMap, userNames]);
+
   return (
     <div className="message-list">
       {channelMessages.length === 0 && (
@@ -66,19 +90,46 @@ export default function MessageList() {
         </div>
       )}
       {channelMessages.map((msg, i) => {
+        // System messages render differently
+        if (msg.messageType === "system") {
+          let systemText = msg.text;
+          try {
+            const data = JSON.parse(msg.text);
+            const name = data.username ?? data.user_id?.slice(0, 8) ?? "Someone";
+            if (data.event === "member_joined") systemText = `${name} joined the server`;
+            else if (data.event === "member_left") systemText = `${name} left the group`;
+            else systemText = `${name} — ${data.event}`;
+          } catch { /* use raw text */ }
+
+          return (
+            <div key={msg.id} className="system-message" id={`msg-${msg.id}`}>
+              <span className="system-message-text">{systemText}</span>
+              <span className="system-message-time">
+                {new Date(msg.timestamp).toLocaleString([], {
+                  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                })}
+              </span>
+            </div>
+          );
+        }
+
         const isOwn = msg.senderId === user?.id;
         const isBlocked = blockedUserIds.includes(msg.senderId);
         const prev = channelMessages[i - 1];
-        const isGrouped = prev && prev.senderId === msg.senderId;
-        const senderName = isOwn
-          ? user?.username ?? "You"
-          : nameMap[msg.senderId] ?? userNames[msg.senderId] ?? msg.senderId.slice(0, 8);
+        const isGrouped = prev && prev.senderId === msg.senderId && prev.messageType !== "system";
+        const senderName = getSenderName(msg.senderId);
+        const isPinned = pinnedIds.includes(msg.id);
 
         const msgReactions = reactions[msg.id] ?? [];
 
+        // Build reply preview
+        const repliedMsg = msg.replyToId
+          ? channelMessages.find((m) => m.id === msg.replyToId)
+          : null;
+
         if (isBlocked) {
           return (
-            <div key={msg.id} className="message message-first message-blocked">
+            <div key={msg.id} id={`msg-${msg.id}`} className="message message-first message-blocked">
               <div className="message-avatar">?</div>
               <div className="message-content">
                 <div className="message-meta">
@@ -98,17 +149,44 @@ export default function MessageList() {
         return (
           <div
             key={msg.id}
-            className={`message ${isGrouped ? "message-grouped" : "message-first"}`}
+            id={`msg-${msg.id}`}
+            className={`message ${isGrouped ? "message-grouped" : "message-first"} ${highlightedMsgId === msg.id ? "message-highlight" : ""}`}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu({ message: msg, x: e.clientX, y: e.clientY });
+            }}
           >
             {!isGrouped && (
               <div
                 className="message-avatar message-avatar-clickable"
                 onClick={(e) => handleAvatarClick(msg.senderId, e)}
               >
-                {senderName.charAt(0).toUpperCase()}
+                <Avatar
+                  name={senderName}
+                  size={40}
+                />
               </div>
             )}
             <div className="message-content">
+              {/* Reply preview */}
+              {repliedMsg && (
+                <div
+                  className="reply-preview"
+                  onClick={() => scrollToMessage(repliedMsg.id)}
+                >
+                  <span className="reply-preview-bar" />
+                  <span className="reply-preview-sender">{getSenderName(repliedMsg.senderId)}</span>
+                  <span className="reply-preview-text">
+                    {repliedMsg.text.length > 80 ? repliedMsg.text.slice(0, 80) + "..." : repliedMsg.text}
+                  </span>
+                </div>
+              )}
+              {msg.replyToId && !repliedMsg && (
+                <div className="reply-preview reply-preview-unknown">
+                  <span className="reply-preview-bar" />
+                  <span className="reply-preview-text">Original message not loaded</span>
+                </div>
+              )}
               {!isGrouped && (
                 <div className="message-meta">
                   <span
@@ -126,6 +204,13 @@ export default function MessageList() {
                     })}
                   </span>
                   {msg.edited && <span className="message-edited">(edited)</span>}
+                  {isPinned && (
+                    <span className="message-pin-indicator" title="Pinned">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                      </svg>
+                    </span>
+                  )}
                 </div>
               )}
               <MessageBody text={msg.text} contentType={msg.contentType} formatting={msg.formatting} />
@@ -168,7 +253,18 @@ export default function MessageList() {
               )}
             </div>
             <div className="message-actions">
-              {/* Reaction button — available for ALL messages */}
+              {/* Reply button */}
+              <button
+                type="button"
+                className="message-action-btn"
+                onClick={() => startReply(msg.id)}
+                title="Reply"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
+                </svg>
+              </button>
+              {/* Reaction button */}
               <button
                 type="button"
                 className="message-action-btn"
@@ -205,19 +301,13 @@ export default function MessageList() {
                   </button>
                 </>
               )}
-              {/* Inline reaction picker */}
+              {/* Reaction emoji picker */}
               {reactionPickerMsgId === msg.id && (
-                <div className="reaction-picker" ref={reactionPickerRef}>
-                  {FREQUENT_EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      className="reaction-picker-emoji"
-                      onClick={() => handleReactionSelect(msg.id, emoji)}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
+                <div className="reaction-picker-wrap" ref={reactionPickerRef}>
+                  <EmojiPicker
+                    onSelect={(emoji) => handleReactionSelect(msg.id, emoji)}
+                    onClose={() => setReactionPickerMsgId(null)}
+                  />
                 </div>
               )}
             </div>
@@ -241,8 +331,27 @@ export default function MessageList() {
       {profilePopup && (
         <ProfilePopup
           userId={profilePopup.userId}
+          serverId={currentChannel?.server_id ?? undefined}
           position={{ top: profilePopup.top, left: profilePopup.left }}
           onClose={() => setProfilePopup(null)}
+        />
+      )}
+      {contextMenu && (
+        <MessageContextMenu
+          message={contextMenu.message}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          isPinned={pinnedIds.includes(contextMenu.message.id)}
+          onClose={() => setContextMenu(null)}
+          onDelete={() => setDeletingMessageId(contextMenu.message.id)}
+          onReport={() => setReportingMessageId(contextMenu.message.id)}
+        />
+      )}
+      {reportingMessageId && currentChannelId && (
+        <ReportModal
+          messageId={reportingMessageId}
+          channelId={currentChannelId}
+          onClose={() => setReportingMessageId(null)}
         />
       )}
     </div>

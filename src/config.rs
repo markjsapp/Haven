@@ -38,6 +38,26 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
+    /// Config with test-appropriate defaults (no env vars needed).
+    #[cfg(test)]
+    pub fn test_default() -> Self {
+        Self {
+            host: "127.0.0.1".into(),
+            port: 0,
+            database_url: String::new(), // not used — pool comes from #[sqlx::test]
+            db_max_connections: 5,
+            redis_url: "redis://127.0.0.1:6379".into(),
+            jwt_secret: "test-jwt-secret-that-is-long-enough-for-hmac".into(),
+            jwt_expiry_hours: 24,
+            refresh_token_expiry_days: 30,
+            storage_dir: "/tmp/haven-test-storage".into(),
+            storage_encryption_key: "0".repeat(64), // 32 zero bytes in hex
+            max_requests_per_minute: 1000,
+            max_ws_connections_per_user: 10,
+            max_upload_size_bytes: 10_000_000,
+        }
+    }
+
     pub fn from_env() -> Self {
         Self {
             host: env::var("HAVEN_HOST").unwrap_or_else(|_| "0.0.0.0".into()),

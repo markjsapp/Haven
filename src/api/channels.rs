@@ -279,6 +279,155 @@ pub async fn delete_channel(
     Ok(Json(serde_json::json!({ "message": "Channel deleted" })))
 }
 
+/// GET /api/v1/channels/:channel_id/members
+/// List members of a channel with user info (for DM/group member sidebar).
+pub async fn list_channel_members(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+) -> AppResult<Json<Vec<ChannelMemberInfo>>> {
+    // Verify caller can access the channel
+    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
+    }
+
+    let members = queries::get_channel_members_info(&state.db, channel_id).await?;
+    Ok(Json(members))
+}
+
+/// POST /api/v1/dm/group
+/// Create a group DM channel with multiple friends.
+pub async fn create_group_dm(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Json(req): Json<CreateGroupDmRequest>,
+) -> AppResult<Json<ChannelResponse>> {
+    // Validate member count: need at least 2 others (3+ total), max 10 total
+    if req.member_ids.len() < 2 {
+        return Err(AppError::Validation("Group DM requires at least 2 other members".into()));
+    }
+    if req.member_ids.len() > 9 {
+        return Err(AppError::Validation("Group DM can have at most 10 members total".into()));
+    }
+
+    // Verify all members are friends of the creator
+    for &member_id in &req.member_ids {
+        if member_id == user_id {
+            continue; // Skip self if accidentally included
+        }
+        if !queries::are_friends(&state.db, user_id, member_id).await? {
+            return Err(AppError::Validation(format!(
+                "User {} is not your friend",
+                member_id
+            )));
+        }
+    }
+
+    let encrypted_meta = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &req.encrypted_meta,
+    )
+    .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
+
+    let channel = queries::create_channel(&state.db, None, &encrypted_meta, "group", 0, None).await?;
+
+    // Add creator
+    queries::add_channel_member(&state.db, channel.id, user_id).await?;
+
+    // Add all other members
+    for &member_id in &req.member_ids {
+        if member_id == user_id {
+            continue;
+        }
+        queries::add_channel_member(&state.db, channel.id, member_id).await?;
+    }
+
+    Ok(Json(ChannelResponse {
+        id: channel.id,
+        server_id: None,
+        encrypted_meta: base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &channel.encrypted_meta,
+        ),
+        channel_type: channel.channel_type,
+        position: channel.position,
+        created_at: channel.created_at,
+        category_id: None,
+        dm_status: Some("active".to_string()),
+    }))
+}
+
+/// DELETE /api/v1/channels/:channel_id/leave
+/// Leave a group DM channel.
+pub async fn leave_channel(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let channel = queries::find_channel_by_id(&state.db, channel_id)
+        .await?
+        .ok_or(AppError::NotFound("Channel not found".into()))?;
+
+    if channel.channel_type != "group" {
+        return Err(AppError::Validation("Can only leave group DM channels".into()));
+    }
+
+    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
+    }
+
+    // Remove the user from the channel
+    queries::remove_channel_member(&state.db, channel_id, user_id).await?;
+
+    // Check if channel is now empty
+    let remaining = queries::get_channel_member_ids(&state.db, channel_id).await?;
+    if remaining.is_empty() {
+        queries::delete_channel(&state.db, channel_id).await?;
+    }
+
+    Ok(Json(serde_json::json!({ "message": "Left channel" })))
+}
+
+/// POST /api/v1/channels/:channel_id/members
+/// Add a member to an existing group DM.
+pub async fn add_group_member(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+    Json(body): Json<AddGroupMemberRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    let channel = queries::find_channel_by_id(&state.db, channel_id)
+        .await?
+        .ok_or(AppError::NotFound("Channel not found".into()))?;
+
+    if channel.channel_type != "group" {
+        return Err(AppError::Validation("Can only add members to group DM channels".into()));
+    }
+
+    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
+    }
+
+    if queries::is_channel_member(&state.db, channel_id, body.user_id).await? {
+        return Err(AppError::Validation("User is already a member".into()));
+    }
+
+    // Cap at 10 members
+    let members = queries::get_channel_member_ids(&state.db, channel_id).await?;
+    if members.len() >= 10 {
+        return Err(AppError::Validation("Group DM cannot have more than 10 members".into()));
+    }
+
+    queries::add_channel_member(&state.db, channel_id, body.user_id).await?;
+
+    Ok(Json(serde_json::json!({ "added": true })))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct AddGroupMemberRequest {
+    pub user_id: Uuid,
+}
+
 /// Helper request type for DM creation.
 #[derive(Debug, serde::Deserialize)]
 pub struct CreateDmRequest {

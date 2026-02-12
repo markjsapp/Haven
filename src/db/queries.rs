@@ -98,6 +98,15 @@ pub async fn clear_user_totp_secret(pool: &PgPool, user_id: Uuid) -> AppResult<(
     Ok(())
 }
 
+pub async fn update_user_password(pool: &PgPool, user_id: Uuid, password_hash: &str) -> AppResult<()> {
+    sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
+        .bind(password_hash)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // ─── Pre-Keys ──────────────────────────────────────────
 
 pub async fn insert_prekeys(pool: &PgPool, user_id: Uuid, keys: &[(i32, Vec<u8>)]) -> AppResult<()> {
@@ -353,7 +362,7 @@ pub async fn get_user_dm_channels(pool: &PgPool, user_id: Uuid) -> AppResult<Vec
         r#"
         SELECT c.* FROM channels c
         INNER JOIN channel_members cm ON c.id = cm.channel_id
-        WHERE cm.user_id = $1 AND c.channel_type = 'dm'
+        WHERE cm.user_id = $1 AND c.channel_type IN ('dm', 'group')
         ORDER BY c.created_at DESC
         "#,
     )
@@ -441,6 +450,27 @@ pub async fn is_channel_member(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -
     Ok(row.0)
 }
 
+/// Check if a user can access a channel: either via channel_members (DM/group)
+/// or via server membership (server channels).
+pub async fn can_access_channel(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -> AppResult<bool> {
+    let row: (bool,) = sqlx::query_as(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2
+            UNION ALL
+            SELECT 1 FROM channels c
+            JOIN server_members sm ON sm.server_id = c.server_id
+            WHERE c.id = $1 AND sm.user_id = $2 AND c.server_id IS NOT NULL
+        )
+        "#,
+    )
+    .bind(channel_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.0)
+}
+
 pub async fn get_channel_member_ids(pool: &PgPool, channel_id: Uuid) -> AppResult<Vec<Uuid>> {
     let rows: Vec<(Uuid,)> =
         sqlx::query_as("SELECT user_id FROM channel_members WHERE channel_id = $1")
@@ -450,13 +480,55 @@ pub async fn get_channel_member_ids(pool: &PgPool, channel_id: Uuid) -> AppResul
     Ok(rows.into_iter().map(|r| r.0).collect())
 }
 
+/// Remove a user from a channel.
+pub async fn remove_channel_member(
+    pool: &PgPool,
+    channel_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<()> {
+    sqlx::query("DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2")
+        .bind(channel_id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Get channel members with user info (for DM/group member sidebar).
+pub async fn get_channel_members_info(
+    pool: &PgPool,
+    channel_id: Uuid,
+) -> AppResult<Vec<ChannelMemberInfo>> {
+    let members = sqlx::query_as::<_, ChannelMemberInfo>(
+        r#"
+        SELECT cm.user_id, u.username, u.display_name, u.avatar_url, cm.joined_at
+        FROM channel_members cm
+        INNER JOIN users u ON u.id = cm.user_id
+        WHERE cm.channel_id = $1
+        ORDER BY cm.joined_at ASC
+        "#,
+    )
+    .bind(channel_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(members)
+}
+
 /// Get all channel IDs a user belongs to (for presence broadcast).
+/// Includes DM/group channels (via channel_members) and server channels (via server membership).
 pub async fn get_user_channel_ids(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Uuid>> {
-    let rows: Vec<(Uuid,)> =
-        sqlx::query_as("SELECT channel_id FROM channel_members WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_all(pool)
-            .await?;
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        r#"
+        SELECT channel_id FROM channel_members WHERE user_id = $1
+        UNION
+        SELECT c.id FROM channels c
+        JOIN server_members sm ON sm.server_id = c.server_id
+        WHERE sm.user_id = $1 AND c.server_id IS NOT NULL
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
     Ok(rows.into_iter().map(|r| r.0).collect())
 }
 
@@ -478,12 +550,13 @@ pub async fn insert_message(
     expires_at: Option<DateTime<Utc>>,
     has_attachments: bool,
     sender_id: Uuid,
+    reply_to_id: Option<Uuid>,
 ) -> AppResult<Message> {
     let msg = sqlx::query_as::<_, Message>(
         r#"
         INSERT INTO messages (id, channel_id, sender_token, encrypted_body,
-                             timestamp, expires_at, has_attachments, sender_id)
-        VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
+                             timestamp, expires_at, has_attachments, sender_id, reply_to_id)
+        VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8)
         RETURNING *
         "#,
     )
@@ -494,6 +567,7 @@ pub async fn insert_message(
     .bind(expires_at)
     .bind(has_attachments)
     .bind(sender_id)
+    .bind(reply_to_id)
     .fetch_one(pool)
     .await?;
     Ok(msg)
@@ -543,6 +617,25 @@ pub async fn delete_message(
     .await?;
 
     msg.ok_or_else(|| AppError::Forbidden("Cannot delete this message".into()))
+}
+
+/// Delete a message by ID (admin/owner — no sender check).
+pub async fn delete_message_admin(
+    pool: &PgPool,
+    message_id: Uuid,
+) -> AppResult<Message> {
+    let msg = sqlx::query_as::<_, Message>(
+        r#"
+        DELETE FROM messages
+        WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(message_id)
+    .fetch_optional(pool)
+    .await?;
+
+    msg.ok_or_else(|| AppError::NotFound("Message not found".into()))
 }
 
 pub async fn get_channel_messages(
@@ -843,6 +936,7 @@ pub async fn delete_sender_key_distributions(
 
 /// Get all channel member identity keys (for SKDM encryption).
 /// Returns (user_id, identity_key) pairs for all members except the requester.
+/// For server channels, includes all server members (not just channel_members).
 pub async fn get_channel_member_identity_keys(
     pool: &PgPool,
     channel_id: Uuid,
@@ -850,10 +944,15 @@ pub async fn get_channel_member_identity_keys(
 ) -> AppResult<Vec<(Uuid, Vec<u8>)>> {
     let rows: Vec<(Uuid, Vec<u8>)> = sqlx::query_as(
         r#"
-        SELECT u.id, u.identity_key
-        FROM channel_members cm
-        INNER JOIN users u ON u.id = cm.user_id
-        WHERE cm.channel_id = $1 AND cm.user_id != $2
+        SELECT DISTINCT u.id, u.identity_key FROM (
+            SELECT cm.user_id FROM channel_members cm WHERE cm.channel_id = $1
+            UNION
+            SELECT sm.user_id FROM server_members sm
+            JOIN channels c ON c.server_id = sm.server_id
+            WHERE c.id = $1 AND c.server_id IS NOT NULL
+        ) members
+        JOIN users u ON u.id = members.user_id
+        WHERE u.id != $2
         "#,
     )
     .bind(channel_id)
@@ -939,6 +1038,17 @@ pub async fn update_user_profile(
     .bind(about_me)
     .bind(custom_status)
     .bind(custom_status_emoji)
+    .fetch_one(pool)
+    .await?;
+    Ok(user)
+}
+
+pub async fn update_user_avatar(pool: &PgPool, user_id: Uuid, avatar_url: &str) -> AppResult<User> {
+    let user = sqlx::query_as::<_, User>(
+        "UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1 RETURNING *",
+    )
+    .bind(user_id)
+    .bind(avatar_url)
     .fetch_one(pool)
     .await?;
     Ok(user)
@@ -1559,6 +1669,58 @@ pub async fn get_pending_dm_channels(pool: &PgPool, user_id: Uuid) -> AppResult<
     Ok(channels)
 }
 
+// ─── Mutual Friends / Servers ───────────────────────────
+
+pub async fn get_mutual_friends(
+    pool: &PgPool,
+    viewer_id: Uuid,
+    target_id: Uuid,
+) -> AppResult<Vec<MutualFriendInfo>> {
+    let friends = sqlx::query_as::<_, MutualFriendInfo>(
+        r#"
+        SELECT u.id AS user_id, u.username, u.display_name, u.avatar_url
+        FROM users u
+        WHERE u.id != $1 AND u.id != $2
+          AND EXISTS (
+            SELECT 1 FROM friendships f WHERE f.status = 'accepted'
+              AND ((f.requester_id = $1 AND f.addressee_id = u.id)
+                OR (f.requester_id = u.id AND f.addressee_id = $1))
+          )
+          AND EXISTS (
+            SELECT 1 FROM friendships f WHERE f.status = 'accepted'
+              AND ((f.requester_id = $2 AND f.addressee_id = u.id)
+                OR (f.requester_id = u.id AND f.addressee_id = $2))
+          )
+        LIMIT 10
+        "#,
+    )
+    .bind(viewer_id)
+    .bind(target_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(friends)
+}
+
+pub async fn get_mutual_server_count(
+    pool: &PgPool,
+    viewer_id: Uuid,
+    target_id: Uuid,
+) -> AppResult<i64> {
+    let row: (i64,) = sqlx::query_as(
+        r#"
+        SELECT COUNT(*)
+        FROM server_members sm1
+        INNER JOIN server_members sm2 ON sm1.server_id = sm2.server_id
+        WHERE sm1.user_id = $1 AND sm2.user_id = $2
+        "#,
+    )
+    .bind(viewer_id)
+    .bind(target_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.0)
+}
+
 pub async fn update_dm_privacy(pool: &PgPool, user_id: Uuid, dm_privacy: &str) -> AppResult<()> {
     sqlx::query("UPDATE users SET dm_privacy = $2, updated_at = NOW() WHERE id = $1")
         .bind(user_id)
@@ -1566,4 +1728,186 @@ pub async fn update_dm_privacy(pool: &PgPool, user_id: Uuid, dm_privacy: &str) -
         .execute(pool)
         .await?;
     Ok(())
+}
+
+// ─── Bans ──────────────────────────────────────────────
+
+pub async fn create_ban(
+    pool: &PgPool,
+    server_id: Uuid,
+    user_id: Uuid,
+    reason: Option<&str>,
+    banned_by: Uuid,
+) -> AppResult<crate::models::Ban> {
+    let ban = sqlx::query_as::<_, crate::models::Ban>(
+        "INSERT INTO bans (server_id, user_id, reason, banned_by) VALUES ($1, $2, $3, $4) RETURNING *"
+    )
+    .bind(server_id)
+    .bind(user_id)
+    .bind(reason)
+    .bind(banned_by)
+    .fetch_one(pool)
+    .await?;
+    Ok(ban)
+}
+
+pub async fn remove_ban(pool: &PgPool, server_id: Uuid, user_id: Uuid) -> AppResult<()> {
+    sqlx::query("DELETE FROM bans WHERE server_id = $1 AND user_id = $2")
+        .bind(server_id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn list_bans(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<crate::models::BanResponse>> {
+    let rows = sqlx::query_as::<_, (Uuid, Uuid, Option<String>, Uuid, chrono::DateTime<chrono::Utc>, String)>(
+        "SELECT b.id, b.user_id, b.reason, b.banned_by, b.created_at, u.username \
+         FROM bans b JOIN users u ON u.id = b.user_id \
+         WHERE b.server_id = $1 ORDER BY b.created_at DESC"
+    )
+    .bind(server_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(|(id, user_id, reason, banned_by, created_at, username)| {
+        crate::models::BanResponse {
+            id,
+            user_id,
+            username,
+            reason,
+            banned_by,
+            created_at: created_at.to_rfc3339(),
+        }
+    }).collect())
+}
+
+pub async fn is_banned(pool: &PgPool, server_id: Uuid, user_id: Uuid) -> AppResult<bool> {
+    let row: (bool,) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM bans WHERE server_id = $1 AND user_id = $2)"
+    )
+    .bind(server_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.0)
+}
+
+// ─── Pinned Messages ────────────────────────────────
+
+pub async fn pin_message(
+    pool: &PgPool,
+    channel_id: Uuid,
+    message_id: Uuid,
+    pinned_by: Uuid,
+) -> AppResult<PinnedMessage> {
+    // Cap at 50 pins per channel
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pinned_messages WHERE channel_id = $1"
+    )
+    .bind(channel_id)
+    .fetch_one(pool)
+    .await?;
+    if count.0 >= 50 {
+        return Err(AppError::Validation("Channel has reached the maximum of 50 pinned messages".into()));
+    }
+
+    let pin = sqlx::query_as::<_, PinnedMessage>(
+        r#"
+        INSERT INTO pinned_messages (channel_id, message_id, pinned_by)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (channel_id, message_id) DO NOTHING
+        RETURNING *
+        "#,
+    )
+    .bind(channel_id)
+    .bind(message_id)
+    .bind(pinned_by)
+    .fetch_optional(pool)
+    .await?;
+
+    pin.ok_or_else(|| AppError::Validation("Message is already pinned".into()))
+}
+
+pub async fn unpin_message(
+    pool: &PgPool,
+    channel_id: Uuid,
+    message_id: Uuid,
+) -> AppResult<bool> {
+    let result = sqlx::query(
+        "DELETE FROM pinned_messages WHERE channel_id = $1 AND message_id = $2"
+    )
+    .bind(channel_id)
+    .bind(message_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn get_pinned_messages(
+    pool: &PgPool,
+    channel_id: Uuid,
+) -> AppResult<Vec<Message>> {
+    let rows = sqlx::query_as::<_, Message>(
+        r#"
+        SELECT m.*
+        FROM pinned_messages pm
+        JOIN messages m ON m.id = pm.message_id
+        WHERE pm.channel_id = $1
+        ORDER BY pm.pinned_at DESC
+        "#,
+    )
+    .bind(channel_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn get_pinned_message_ids(
+    pool: &PgPool,
+    channel_id: Uuid,
+) -> AppResult<Vec<Uuid>> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT message_id FROM pinned_messages WHERE channel_id = $1 ORDER BY pinned_at DESC"
+    )
+    .bind(channel_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}
+
+// ─── Reports ────────────────────────────────────────
+
+pub async fn create_report(
+    pool: &PgPool,
+    reporter_id: Uuid,
+    message_id: Uuid,
+    channel_id: Uuid,
+    reason: &str,
+) -> AppResult<Report> {
+    // Rate limit: max 5 reports per user per hour
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM reports WHERE reporter_id = $1 AND created_at > NOW() - INTERVAL '1 hour'"
+    )
+    .bind(reporter_id)
+    .fetch_one(pool)
+    .await?;
+    if count.0 >= 5 {
+        return Err(AppError::Validation("You can only submit 5 reports per hour".into()));
+    }
+
+    let report = sqlx::query_as::<_, Report>(
+        r#"
+        INSERT INTO reports (reporter_id, message_id, channel_id, reason)
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+        "#,
+    )
+    .bind(reporter_id)
+    .bind(message_id)
+    .bind(channel_id)
+    .bind(reason)
+    .fetch_one(pool)
+    .await?;
+    Ok(report)
 }

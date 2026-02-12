@@ -1,4 +1,5 @@
 pub mod auth_routes;
+pub mod bans;
 pub mod categories;
 pub mod channels;
 pub mod friends;
@@ -11,4 +12,5 @@ pub mod sender_keys;
 pub mod servers;
 pub mod attachments;
 pub mod link_preview;
+pub mod reports;
 pub mod users;

@@ -9,6 +9,10 @@ import MessageList from "../components/MessageList.js";
 import MessageInput from "../components/MessageInput.js";
 import FriendsList from "../components/FriendsList.js";
 import DmRequestBanner from "../components/DmRequestBanner.js";
+import UserSettings from "../components/UserSettings.js";
+import DmMemberSidebar from "../components/DmMemberSidebar.js";
+import PinnedMessagesPanel from "../components/PinnedMessagesPanel.js";
+import SearchPanel from "../components/SearchPanel.js";
 import { parseChannelDisplay } from "../lib/channel-utils.js";
 
 export default function Chat() {
@@ -21,8 +25,14 @@ export default function Chat() {
   const channels = useChatStore((s) => s.channels);
   const addFiles = useChatStore((s) => s.addFiles);
 
+  const selectedServerId = useUiStore((s) => s.selectedServerId);
   const memberSidebarOpen = useUiStore((s) => s.memberSidebarOpen);
+  const showUserSettings = useUiStore((s) => s.showUserSettings);
   const toggleMemberSidebar = useUiStore((s) => s.toggleMemberSidebar);
+  const pinnedPanelOpen = useUiStore((s) => s.pinnedPanelOpen);
+  const searchPanelOpen = useUiStore((s) => s.searchPanelOpen);
+  const togglePinnedPanel = useUiStore((s) => s.togglePinnedPanel);
+  const toggleSearchPanel = useUiStore((s) => s.toggleSearchPanel);
 
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -79,6 +89,7 @@ export default function Chat() {
     : null;
 
   const isServerChannel = currentChannel && currentChannel.server_id !== null;
+  const isDmOrGroupChannel = currentChannel && (currentChannel.channel_type === "dm" || currentChannel.channel_type === "group");
   const isDmPending = currentChannel?.dm_status === "pending";
   const showFriends = useUiStore((s) => s.showFriends);
 
@@ -94,7 +105,9 @@ export default function Chat() {
   const inputPlaceholder = channelDisplay
     ? channelDisplay.isDm
       ? `Message @${channelDisplay.name}`
-      : `Message #${channelDisplay.name}`
+      : channelDisplay.isGroup
+        ? `Message ${channelDisplay.name}`
+        : `Message #${channelDisplay.name}`
     : "Type a message...";
 
   return (
@@ -105,9 +118,13 @@ export default function Chat() {
       <div className="chat-main">
         <header className="chat-header">
           <div className="chat-header-left">
-            {channelDisplay ? (
+            {showFriends && selectedServerId === null ? (
+              <h2>Friends</h2>
+            ) : channelDisplay ? (
               <>
-                <span className="chat-header-icon">{channelDisplay.isDm ? "@" : "#"}</span>
+                <span className="chat-header-icon">
+                  {channelDisplay.isDm ? "@" : channelDisplay.isGroup ? "@" : "#"}
+                </span>
                 <h2>{channelDisplay.name}</h2>
               </>
             ) : (
@@ -115,16 +132,36 @@ export default function Chat() {
             )}
           </div>
           <div className="chat-header-right">
-            {isServerChannel && (
-              <button
-                className={`chat-header-btn ${memberSidebarOpen ? "active" : ""}`}
-                onClick={toggleMemberSidebar}
-                title="Member List"
-              >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
-                </svg>
-              </button>
+            {(isServerChannel || isDmOrGroupChannel) && !(showFriends && selectedServerId === null) && (
+              <>
+                <button
+                  className={`chat-header-btn ${searchPanelOpen ? "active" : ""}`}
+                  onClick={toggleSearchPanel}
+                  title="Search Messages"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 001.48-5.34c-.47-2.78-2.79-5-5.59-5.34A6.505 6.505 0 003.03 10.5c0 3.59 2.91 6.5 6.5 6.5 1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 20l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                  </svg>
+                </button>
+                <button
+                  className={`chat-header-btn ${pinnedPanelOpen ? "active" : ""}`}
+                  onClick={togglePinnedPanel}
+                  title="Pinned Messages"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                  </svg>
+                </button>
+                <button
+                  className={`chat-header-btn ${memberSidebarOpen ? "active" : ""}`}
+                  onClick={toggleMemberSidebar}
+                  title="Member List"
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
+                  </svg>
+                </button>
+              </>
             )}
             <span className={`ws-badge ws-${wsState}`} />
           </div>
@@ -145,7 +182,7 @@ export default function Chat() {
               </div>
             </div>
           )}
-          {showFriends && !isServerChannel ? (
+          {showFriends && selectedServerId === null ? (
             <FriendsList />
           ) : currentChannelId ? (
             <>
@@ -178,9 +215,18 @@ export default function Chat() {
         </div>
       </div>
 
-      {memberSidebarOpen && isServerChannel && currentChannel && (
+      {memberSidebarOpen && isServerChannel && currentChannel && selectedServerId !== null && (
         <MemberSidebar serverId={currentChannel.server_id!} />
       )}
+
+      {memberSidebarOpen && isDmOrGroupChannel && currentChannel && !(showFriends && selectedServerId === null) && (
+        <DmMemberSidebar channelId={currentChannel.id} channelType={currentChannel.channel_type} />
+      )}
+
+      {pinnedPanelOpen && currentChannelId && <PinnedMessagesPanel channelId={currentChannelId} />}
+      {searchPanelOpen && <SearchPanel />}
+
+      {showUserSettings && <UserSettings />}
     </div>
   );
 }

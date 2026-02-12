@@ -21,23 +21,33 @@ pub async fn get_presence(
         return Ok(Json(vec![]));
     }
 
-    // Check Redis for each user
+    // Bulk-fetch presence from Redis hash
     let mut redis = state.redis.clone();
-    let mut entries = Vec::with_capacity(user_ids.len());
-
+    let mut cmd = redis::cmd("HMGET");
+    cmd.arg("haven:presence");
     for uid in &user_ids {
-        let is_online: bool = redis::cmd("SISMEMBER")
-            .arg("haven:online")
-            .arg(uid.to_string())
-            .query_async(&mut redis)
-            .await
-            .unwrap_or(false);
-
-        entries.push(PresenceEntry {
-            user_id: *uid,
-            status: if is_online { "online" } else { "offline" }.to_string(),
-        });
+        cmd.arg(uid.to_string());
     }
+    let statuses: Vec<Option<String>> = cmd
+        .query_async(&mut redis)
+        .await
+        .unwrap_or_else(|_| vec![None; user_ids.len()]);
+
+    let entries: Vec<PresenceEntry> = user_ids
+        .iter()
+        .zip(statuses.iter())
+        .map(|(uid, status)| {
+            let s = match status.as_deref() {
+                // Never leak "invisible" to other users
+                Some("invisible") | None => "offline",
+                Some(s) => s,
+            };
+            PresenceEntry {
+                user_id: *uid,
+                status: s.to_string(),
+            }
+        })
+        .collect();
 
     Ok(Json(entries))
 }

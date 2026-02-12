@@ -19,7 +19,7 @@ pub async fn distribute_sender_keys(
     Json(req): Json<DistributeSenderKeyRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
     // Verify membership
-    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
@@ -65,15 +65,17 @@ pub async fn distribute_sender_keys(
 }
 
 /// GET /api/v1/channels/:channel_id/sender-keys
-/// Fetch all pending sender key distributions for the authenticated user.
-/// Fetched SKDMs are deleted (consume-on-read).
+/// Fetch all sender key distributions for the authenticated user in this channel.
+/// SKDMs are retained so clients can re-fetch after page reloads or on new devices.
+/// The INSERT uses ON CONFLICT ... DO UPDATE, so rows are bounded to one per
+/// (channel, sender, recipient, distributionId).
 pub async fn get_sender_keys(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<SenderKeyDistributionResponse>>> {
     // Verify membership
-    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
@@ -94,10 +96,6 @@ pub async fn get_sender_keys(
         })
         .collect();
 
-    // Delete consumed SKDMs
-    let ids: Vec<Uuid> = skdms.iter().map(|s| s.id).collect();
-    queries::delete_sender_key_distributions(&state.db, &ids).await?;
-
     Ok(Json(responses))
 }
 
@@ -109,7 +107,7 @@ pub async fn get_channel_member_keys(
     AuthUser(user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<ChannelMemberKeyInfo>>> {
-    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 

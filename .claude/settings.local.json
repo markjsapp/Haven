@@ -23,7 +23,23 @@
       "Bash(node -e:*)",
       "Bash(grep:*)",
       "Bash(openssl rand:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(cargo test:*)",
+      "Bash(DATABASE_URL=\"postgres://haven:haven_secret@127.0.0.1:5432/haven\" cargo test:*)",
+      "Bash(npx vitest:*)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:support.discord.com)",
+      "Bash(psql:*)",
+      "Bash(brew --prefix:*)",
+      "Bash(/opt/homebrew/opt/postgresql@17/bin/psql:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(file:*)",
+      "Bash(find:*)",
+      "Bash(git -C /Users/mark/Desktop/code/Haven status --short)",
+      "Bash(cargo tree:*)",
+      "Bash(ls:*)",
+      "Bash(git -C /Users/mark/Desktop/code/Haven log --oneline -n 10)",
+      "Bash(git -C /Users/mark/Desktop/code/Haven log --oneline --all)"
     ]
   }
 }

@@ -49,6 +49,13 @@ export interface UserPublic {
   created_at: string;
 }
 
+export interface MutualFriendInfo {
+  user_id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
 export interface UserProfileResponse {
   id: string;
   username: string;
@@ -59,6 +66,13 @@ export interface UserProfileResponse {
   custom_status_emoji: string | null;
   created_at: string;
   is_blocked: boolean;
+  is_friend: boolean;
+  friend_request_status: "pending_incoming" | "pending_outgoing" | null;
+  friendship_id: string | null;
+  mutual_friend_count: number;
+  mutual_friends: MutualFriendInfo[];
+  mutual_server_count: number;
+  roles?: RoleResponse[];
 }
 
 export interface UpdateProfileRequest {
@@ -66,6 +80,11 @@ export interface UpdateProfileRequest {
   about_me?: string | null;
   custom_status?: string | null;
   custom_status_emoji?: string | null;
+}
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
 }
 
 export interface BlockedUserResponse {
@@ -166,6 +185,21 @@ export interface CreateDmRequest {
   encrypted_meta: string; // base64
 }
 
+export interface CreateGroupDmRequest {
+  member_ids: string[];
+  encrypted_meta: string; // base64
+}
+
+// ─── Channel Members ─────────────────────────────────
+
+export interface ChannelMemberInfo {
+  user_id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  joined_at: string;
+}
+
 // ─── Messages ──────────────────────────────────────────
 
 export interface SendMessageRequest {
@@ -185,6 +219,8 @@ export interface MessageResponse {
   expires_at: string | null;
   has_attachments: boolean;
   edited: boolean;
+  reply_to_id: string | null;
+  message_type?: string;  // "user" | "system"
 }
 
 export interface MessageQuery {
@@ -235,7 +271,7 @@ export interface ReactionGroup {
 // ─── WebSocket ─────────────────────────────────────────
 
 export type WsClientMessage =
-  | { type: "SendMessage"; payload: { channel_id: string; sender_token: string; encrypted_body: string; expires_at?: string; attachment_ids?: string[] } }
+  | { type: "SendMessage"; payload: { channel_id: string; sender_token: string; encrypted_body: string; expires_at?: string; attachment_ids?: string[]; reply_to_id?: string } }
   | { type: "EditMessage"; payload: { message_id: string; encrypted_body: string } }
   | { type: "DeleteMessage"; payload: { message_id: string } }
   | { type: "AddReaction"; payload: { message_id: string; emoji: string } }
@@ -243,6 +279,9 @@ export type WsClientMessage =
   | { type: "Subscribe"; payload: { channel_id: string } }
   | { type: "Unsubscribe"; payload: { channel_id: string } }
   | { type: "Typing"; payload: { channel_id: string } }
+  | { type: "SetStatus"; payload: { status: string } }
+  | { type: "PinMessage"; payload: { channel_id: string; message_id: string } }
+  | { type: "UnpinMessage"; payload: { channel_id: string; message_id: string } }
   | { type: "Ping" };
 
 export type WsServerMessage =
@@ -261,7 +300,9 @@ export type WsServerMessage =
   | { type: "FriendRequestReceived"; payload: { from_user_id: string; from_username: string; friendship_id: string } }
   | { type: "FriendRequestAccepted"; payload: { user_id: string; username: string; friendship_id: string } }
   | { type: "FriendRemoved"; payload: { user_id: string } }
-  | { type: "DmRequestReceived"; payload: { channel_id: string; from_user_id: string } };
+  | { type: "DmRequestReceived"; payload: { channel_id: string; from_user_id: string } }
+  | { type: "MessagePinned"; payload: { channel_id: string; message_id: string; pinned_by: string } }
+  | { type: "MessageUnpinned"; payload: { channel_id: string; message_id: string } };
 
 // ─── Presence ─────────────────────────────────────────
 
@@ -362,6 +403,25 @@ export interface SetOverwriteRequest {
   deny_bits: string;
 }
 
+// ─── Bans ────────────────────────────────────────────
+
+export interface BanResponse {
+  id: string;
+  user_id: string;
+  username: string;
+  reason: string | null;
+  banned_by: string;
+  created_at: string;
+}
+
+export interface CreateBanRequest {
+  reason?: string;
+}
+
+export interface AddGroupMemberRequest {
+  user_id: string;
+}
+
 // ─── Friends ──────────────────────────────────────────
 
 export interface FriendResponse {
@@ -385,6 +445,22 @@ export interface DmRequestAction {
 
 export interface UpdateDmPrivacyRequest {
   dm_privacy: string; // "everyone", "friends_only", "server_members"
+}
+
+// ─── Reports ─────────────────────────────────────────
+
+export interface CreateReportRequest {
+  message_id: string;
+  channel_id: string;
+  reason: string;
+}
+
+export interface ReportResponse {
+  id: string;
+  message_id: string;
+  reason: string;
+  status: string;
+  created_at: string;
 }
 
 // ─── API Error ─────────────────────────────────────────

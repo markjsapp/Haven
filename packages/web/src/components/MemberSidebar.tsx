@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
-import { usePresenceStore } from "../store/presence.js";
+import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
 import { useChatStore } from "../store/chat.js";
 import ProfilePopup from "./ProfilePopup.js";
+import FullProfileCard from "./FullProfileCard.js";
+import UserContextMenu from "./UserContextMenu.js";
+import Avatar from "./Avatar.js";
 import type { ServerMemberResponse, RoleResponse } from "@haven/core";
 
 export default function MemberSidebar({ serverId }: { serverId: string }) {
@@ -10,6 +13,7 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
   const presenceStatuses = usePresenceStore((s) => s.statuses);
   const fetchPresence = usePresenceStore((s) => s.fetchPresence);
   const roles = useChatStore((s) => s.roles[serverId] ?? []);
+  const ownerId = useChatStore((s) => s.servers.find((sv) => sv.id === serverId)?.owner_id);
 
   const [members, setMembers] = useState<ServerMemberResponse[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -17,6 +21,11 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
     userId: string;
     position: { top: number; left: number };
   } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    userId: string;
+    position: { x: number; y: number };
+  } | null>(null);
+  const [fullProfileUserId, setFullProfileUserId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,14 +45,34 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
       })
     : members;
 
-  const online = filtered.filter((m) => presenceStatuses[m.user_id] === "online");
-  const offline = filtered.filter((m) => presenceStatuses[m.user_id] !== "online");
+  // Group members by presence status
+  const statusGroups: { key: string; label: string; members: ServerMemberResponse[] }[] = [];
+  const buckets: Record<string, ServerMemberResponse[]> = { online: [], idle: [], dnd: [], offline: [] };
+  for (const m of filtered) {
+    const status = presenceStatuses[m.user_id] ?? "offline";
+    if (status === "online") buckets.online.push(m);
+    else if (status === "idle") buckets.idle.push(m);
+    else if (status === "dnd") buckets.dnd.push(m);
+    else buckets.offline.push(m);
+  }
+  if (buckets.online.length > 0) statusGroups.push({ key: "online", label: "ONLINE", members: buckets.online });
+  if (buckets.idle.length > 0) statusGroups.push({ key: "idle", label: "IDLE", members: buckets.idle });
+  if (buckets.dnd.length > 0) statusGroups.push({ key: "dnd", label: "DO NOT DISTURB", members: buckets.dnd });
+  if (buckets.offline.length > 0) statusGroups.push({ key: "offline", label: "OFFLINE", members: buckets.offline });
 
   const handleMemberClick = (userId: string, e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setProfilePopup({
       userId,
       position: { top: rect.top, left: rect.left - 310 },
+    });
+  };
+
+  const handleContextMenu = (userId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({
+      userId,
+      position: { x: e.clientX, y: e.clientY },
     });
   };
 
@@ -69,34 +98,22 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
         </div>
       </div>
       <div className="member-sidebar-content">
-      {online.length > 0 && (
-        <>
-          <div className="member-group-header">ONLINE — {online.length}</div>
-          {online.map((m) => (
+      {statusGroups.map((group) => (
+        <div key={group.key}>
+          <div className="member-group-header">{group.label} — {group.members.length}</div>
+          {group.members.map((m) => (
             <MemberItem
               key={m.user_id}
               member={m}
-              isOnline
+              status={presenceStatuses[m.user_id] ?? "offline"}
               roles={roles}
+              isOwner={m.user_id === ownerId}
               onClick={(e) => handleMemberClick(m.user_id, e)}
+              onContextMenu={(e) => handleContextMenu(m.user_id, e)}
             />
           ))}
-        </>
-      )}
-      {offline.length > 0 && (
-        <>
-          <div className="member-group-header">OFFLINE — {offline.length}</div>
-          {offline.map((m) => (
-            <MemberItem
-              key={m.user_id}
-              member={m}
-              isOnline={false}
-              roles={roles}
-              onClick={(e) => handleMemberClick(m.user_id, e)}
-            />
-          ))}
-        </>
-      )}
+        </div>
+      ))}
       {filtered.length === 0 && (
         <div className="member-group-header">
           {searchQuery ? "No matches" : "MEMBERS — 0"}
@@ -107,8 +124,29 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
       {profilePopup && (
         <ProfilePopup
           userId={profilePopup.userId}
+          serverId={serverId}
           position={profilePopup.position}
           onClose={() => setProfilePopup(null)}
+        />
+      )}
+
+      {contextMenu && (
+        <UserContextMenu
+          userId={contextMenu.userId}
+          serverId={serverId}
+          position={contextMenu.position}
+          onClose={() => setContextMenu(null)}
+          onOpenProfile={() => {
+            setFullProfileUserId(contextMenu.userId);
+          }}
+        />
+      )}
+
+      {fullProfileUserId && (
+        <FullProfileCard
+          userId={fullProfileUserId}
+          serverId={serverId}
+          onClose={() => setFullProfileUserId(null)}
         />
       )}
     </aside>
@@ -117,35 +155,49 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
 
 function MemberItem({
   member,
-  isOnline,
+  status,
   roles,
+  isOwner,
   onClick,
+  onContextMenu,
 }: {
   member: ServerMemberResponse;
-  isOnline: boolean;
+  status: string;
   roles: RoleResponse[];
+  isOwner: boolean;
   onClick: (e: React.MouseEvent) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const displayName = member.display_name || member.username;
+  const isOffline = status === "offline";
+  const statusColor = STATUS_CONFIG[status]?.color ?? STATUS_CONFIG.offline.color;
 
-  // Find the highest-position non-default role with a color for this member's badge
-  // For now, show the highest-position role that has a color (we don't have per-member role assignments in the member list yet, so show the server's top colored role as a placeholder)
-  // TODO: Once member_roles are exposed via API, show actual assigned roles
   const topRole = roles
     .filter((r) => !r.is_default && r.color)
     .sort((a, b) => b.position - a.position)[0];
 
   return (
-    <div className={`member-item ${isOnline ? "" : "offline"}`} onClick={onClick}>
-      <div className="member-avatar">
-        {displayName.charAt(0).toUpperCase()}
-        <span className={`member-avatar-status ${isOnline ? "online" : "offline"}`} />
+    <div className={`member-item ${isOffline ? "offline" : ""}`} onClick={onClick} onContextMenu={onContextMenu}>
+      <div className="member-avatar-wrap">
+        <Avatar
+          avatarUrl={member.avatar_url}
+          name={displayName}
+          size={32}
+        />
+        <span className="member-avatar-status" style={{ backgroundColor: statusColor }} />
       </div>
       <div className="member-info">
         <span className="member-name" style={topRole?.color ? { color: topRole.color } : undefined}>
           {displayName}
         </span>
       </div>
+      {isOwner && (
+        <span title="Server Owner">
+          <svg className="member-owner-crown" width="16" height="16" viewBox="0 0 16 16" fill="#f0b232">
+            <path d="M2 11l2-6 4 3 4-3 2 6H2zm6-9l2.5 4L8 8 5.5 6 8 2z" />
+          </svg>
+        </span>
+      )}
     </div>
   );
 }

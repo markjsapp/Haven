@@ -45,6 +45,13 @@ import type {
   FriendRequestBody,
   DmRequestAction,
   UpdateDmPrivacyRequest,
+  ChangePasswordRequest,
+  CreateGroupDmRequest,
+  ChannelMemberInfo,
+  BanResponse,
+  CreateBanRequest,
+  CreateReportRequest,
+  ReportResponse,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -121,6 +128,10 @@ export class HavenApi {
     await this.delete("/api/v1/auth/totp");
   }
 
+  async changePassword(req: ChangePasswordRequest): Promise<void> {
+    await this.put("/api/v1/auth/password", req);
+  }
+
   // ─── Users ────────────────────────────────────────
 
   async getUserByUsername(username: string): Promise<import("../types.js").UserPublic> {
@@ -187,6 +198,18 @@ export class HavenApi {
 
   async createDm(req: CreateDmRequest): Promise<ChannelResponse> {
     return this.post<ChannelResponse>("/api/v1/dm", req);
+  }
+
+  async createGroupDm(req: CreateGroupDmRequest): Promise<ChannelResponse> {
+    return this.post<ChannelResponse>("/api/v1/dm/group", req);
+  }
+
+  async listChannelMembers(channelId: string): Promise<ChannelMemberInfo[]> {
+    return this.get<ChannelMemberInfo[]>(`/api/v1/channels/${channelId}/members`);
+  }
+
+  async leaveChannel(channelId: string): Promise<void> {
+    await this.delete(`/api/v1/channels/${channelId}/leave`);
   }
 
   // ─── Channel Categories ─────────────────────────
@@ -273,6 +296,14 @@ export class HavenApi {
     return this.get<ReactionGroup[]>(`/api/v1/channels/${channelId}/reactions`);
   }
 
+  async getPinnedMessages(channelId: string): Promise<MessageResponse[]> {
+    return this.get<MessageResponse[]>(`/api/v1/channels/${channelId}/pins`);
+  }
+
+  async getPinnedMessageIds(channelId: string): Promise<string[]> {
+    return this.get<string[]>(`/api/v1/channels/${channelId}/pin-ids`);
+  }
+
   // ─── Attachments ─────────────────────────────────
 
   /** Upload encrypted blob directly to backend. Returns attachment_id + storage_key. */
@@ -354,6 +385,26 @@ export class HavenApi {
     await this.delete(`/api/v1/servers/${serverId}/members/${userId}`);
   }
 
+  // ─── Bans ──────────────────────────────────────────
+
+  async banMember(serverId: string, userId: string, req: CreateBanRequest): Promise<BanResponse> {
+    return this.post<BanResponse>(`/api/v1/servers/${serverId}/bans/${userId}`, req);
+  }
+
+  async revokeBan(serverId: string, userId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}/bans/${userId}`);
+  }
+
+  async listBans(serverId: string): Promise<BanResponse[]> {
+    return this.get<BanResponse[]>(`/api/v1/servers/${serverId}/bans`);
+  }
+
+  // ─── Group DM Members ──────────────────────────────
+
+  async addGroupMember(channelId: string, userId: string): Promise<void> {
+    await this.post(`/api/v1/channels/${channelId}/members`, { user_id: userId });
+  }
+
   // ─── Sender Keys ───────────────────────────────────
 
   async distributeSenderKeys(
@@ -397,12 +448,41 @@ export class HavenApi {
 
   // ─── User Profiles ──────────────────────────────
 
-  async getUserProfile(userId: string): Promise<UserProfileResponse> {
-    return this.get<UserProfileResponse>(`/api/v1/users/${userId}/profile`);
+  async getUserProfile(userId: string, serverId?: string): Promise<UserProfileResponse> {
+    const qs = serverId ? `?server_id=${serverId}` : "";
+    return this.get<UserProfileResponse>(`/api/v1/users/${userId}/profile${qs}`);
   }
 
   async updateProfile(req: UpdateProfileRequest): Promise<import("../types.js").UserPublic> {
     return this.put(`/api/v1/users/profile`, req);
+  }
+
+  async uploadAvatar(blob: ArrayBuffer): Promise<import("../types.js").UserPublic> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+
+    const res = await fetch(`${this.baseUrl}/api/v1/users/avatar`, {
+      method: "POST",
+      headers,
+      body: blob,
+    });
+
+    if (!res.ok) {
+      if (res.status === 401 && this.onTokenExpired) {
+        this.onTokenExpired();
+      }
+      const err: ApiError = await res.json().catch(() => ({
+        error: res.statusText,
+        status: res.status,
+      }));
+      throw new HavenApiError(err.error, err.status);
+    }
+
+    return res.json() as Promise<import("../types.js").UserPublic>;
   }
 
   // ─── Friends ──────────────────────────────────────
@@ -453,6 +533,12 @@ export class HavenApi {
 
   async getBlockedUsers(): Promise<BlockedUserResponse[]> {
     return this.get<BlockedUserResponse[]>("/api/v1/users/blocked");
+  }
+
+  // ─── Reports ──────────────────────────────────────
+
+  async reportMessage(req: CreateReportRequest): Promise<ReportResponse> {
+    return this.post<ReportResponse>("/api/v1/reports", req);
   }
 
   // ─── HTTP Helpers ────────────────────────────────

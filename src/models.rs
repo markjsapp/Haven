@@ -288,6 +288,7 @@ pub struct Message {
     pub has_attachments: bool,
     pub sender_id: Option<Uuid>,  // for edit authorization; null for legacy messages
     pub edited_at: Option<DateTime<Utc>>,
+    pub reply_to_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -297,6 +298,7 @@ pub struct SendMessageRequest {
     pub encrypted_body: String,  // base64
     pub expires_at: Option<DateTime<Utc>>,
     pub has_attachments: bool,
+    pub reply_to_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -309,6 +311,8 @@ pub struct MessageResponse {
     pub expires_at: Option<DateTime<Utc>>,
     pub has_attachments: bool,
     pub edited: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_id: Option<Uuid>,
 }
 
 impl From<Message> for MessageResponse {
@@ -328,6 +332,7 @@ impl From<Message> for MessageResponse {
             expires_at: m.expires_at,
             has_attachments: m.has_attachments,
             edited: m.edited_at.is_some(),
+            reply_to_id: m.reply_to_id,
         }
     }
 }
@@ -443,6 +448,7 @@ pub enum WsClientMessage {
         encrypted_body: String,
         expires_at: Option<DateTime<Utc>>,
         attachment_ids: Option<Vec<Uuid>>,
+        reply_to_id: Option<Uuid>,
     },
     /// Edit a previously sent message
     EditMessage {
@@ -461,6 +467,12 @@ pub enum WsClientMessage {
     RemoveReaction { message_id: Uuid, emoji: String },
     /// Typing indicator
     Typing { channel_id: Uuid },
+    /// Set user presence status (online, idle, dnd, invisible)
+    SetStatus { status: String },
+    /// Pin a message in a channel
+    PinMessage { channel_id: Uuid, message_id: Uuid },
+    /// Unpin a message from a channel
+    UnpinMessage { channel_id: Uuid, message_id: Uuid },
     /// Ping (keepalive)
     Ping,
 }
@@ -521,6 +533,10 @@ pub enum WsServerMessage {
     FriendRemoved { user_id: Uuid },
     /// A DM message request was received (pending channel)
     DmRequestReceived { channel_id: Uuid, from_user_id: Uuid },
+    /// A message was pinned
+    MessagePinned { channel_id: Uuid, message_id: Uuid, pinned_by: Uuid },
+    /// A message was unpinned
+    MessageUnpinned { channel_id: Uuid, message_id: Uuid },
 }
 
 // ─── Presence ─────────────────────────────────────────
@@ -601,6 +617,33 @@ pub struct ServerMemberResponse {
     pub joined_at: DateTime<Utc>,
 }
 
+// ─── Channel Member Info ─────────────────────────────
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct ChannelMemberInfo {
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub joined_at: DateTime<Utc>,
+}
+
+// ─── Group DM ────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct CreateGroupDmRequest {
+    pub member_ids: Vec<Uuid>,
+    pub encrypted_meta: String, // base64
+}
+
+// ─── Change Password ─────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
 // ─── User Profiles ───────────────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -614,6 +657,22 @@ pub struct UserProfileResponse {
     pub custom_status_emoji: Option<String>,
     pub created_at: DateTime<Utc>,
     pub is_blocked: bool,
+    pub is_friend: bool,
+    pub friend_request_status: Option<String>, // null, "pending_incoming", "pending_outgoing"
+    pub friendship_id: Option<Uuid>,
+    pub mutual_friend_count: i64,
+    pub mutual_friends: Vec<MutualFriendInfo>,
+    pub mutual_server_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roles: Option<Vec<RoleResponse>>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct MutualFriendInfo {
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -777,6 +836,73 @@ pub struct DmRequestAction {
 #[derive(Debug, Deserialize)]
 pub struct UpdateDmPrivacyRequest {
     pub dm_privacy: String, // "everyone", "friends_only", "server_members"
+}
+
+// ─── Pinned Messages ────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PinnedMessage {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub message_id: Uuid,
+    pub pinned_by: Uuid,
+    pub pinned_at: DateTime<Utc>,
+}
+
+// ─── Reports ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Report {
+    pub id: Uuid,
+    pub reporter_id: Uuid,
+    pub message_id: Uuid,
+    pub channel_id: Uuid,
+    pub reason: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateReportRequest {
+    pub message_id: Uuid,
+    pub channel_id: Uuid,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReportResponse {
+    pub id: Uuid,
+    pub message_id: Uuid,
+    pub reason: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+// ─── Bans ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Ban {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub user_id: Uuid,
+    pub reason: Option<String>,
+    pub banned_by: Uuid,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BanResponse {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub username: String,
+    pub reason: Option<String>,
+    pub banned_by: Uuid,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateBanRequest {
+    pub reason: Option<String>,
 }
 
 // ─── Validation helpers ───────────────────────────────

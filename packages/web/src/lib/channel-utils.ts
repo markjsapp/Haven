@@ -59,20 +59,61 @@ export function parseServerName(encryptedMeta: string): string {
 export function parseChannelDisplay(
   encryptedMeta: string,
   myUserId: string,
-): { name: string; isDm: boolean } {
+): { name: string; isDm: boolean; isGroup: boolean } {
   try {
     const json = JSON.parse(atob(encryptedMeta));
     if (json.type === "dm") {
       if (json.names) {
         for (const [id, name] of Object.entries(json.names)) {
-          if (id !== myUserId) return { name: name as string, isDm: true };
+          if (id !== myUserId) return { name: name as string, isDm: true, isGroup: false };
         }
       }
-      return { name: "DM", isDm: true };
+      return { name: "DM", isDm: true, isGroup: false };
     }
-    return { name: json.name || "unnamed", isDm: false };
+    if (json.type === "group") {
+      const name = parseGroupDisplayName(json, myUserId);
+      return { name, isDm: false, isGroup: true };
+    }
+    return { name: json.name || "unnamed", isDm: false, isGroup: false };
   } catch {
-    return { name: "unnamed", isDm: false };
+    return { name: "unnamed", isDm: false, isGroup: false };
+  }
+}
+
+/** Get display name for a group DM channel. */
+export function parseGroupName(encryptedMeta: string, myUserId: string): string {
+  try {
+    const json = JSON.parse(atob(encryptedMeta));
+    return parseGroupDisplayName(json, myUserId);
+  } catch {
+    return "Group";
+  }
+}
+
+/** Internal helper: get group display name from parsed JSON meta. */
+function parseGroupDisplayName(json: Record<string, unknown>, myUserId: string): string {
+  if (json.name && typeof json.name === "string") return json.name;
+  // Build name from participant names, excluding self
+  if (json.names && typeof json.names === "object") {
+    const names = Object.entries(json.names as Record<string, string>)
+      .filter(([id]) => id !== myUserId)
+      .map(([, name]) => name);
+    if (names.length > 0) return names.join(", ");
+  }
+  // Fall back to participant count
+  const participants = json.participants as string[] | undefined;
+  if (participants) return `Group (${participants.length})`;
+  return "Group";
+}
+
+/** Get member count from a group channel's meta. */
+export function parseGroupMemberCount(encryptedMeta: string): number {
+  try {
+    const json = JSON.parse(atob(encryptedMeta));
+    if (Array.isArray(json.participants)) return json.participants.length;
+    return 0;
+  } catch {
+    return 0;
   }
 }
 

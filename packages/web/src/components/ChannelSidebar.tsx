@@ -9,8 +9,13 @@ import {
   parseChannelName,
   parseDmPeerId,
   parseDmDisplayName,
+  parseGroupName,
+  parseGroupMemberCount,
   parseServerName,
 } from "../lib/channel-utils.js";
+import CreateGroupDm from "./CreateGroupDm.js";
+import CreateChannelModal from "./CreateChannelModal.js";
+import ConfirmDialog from "./ConfirmDialog.js";
 import UserPanel from "./UserPanel.js";
 import ServerSettings from "./ServerSettings.js";
 import {
@@ -49,16 +54,19 @@ function DmView() {
   const showFriends = useUiStore((s) => s.showFriends);
   const setShowFriends = useUiStore((s) => s.setShowFriends);
 
-  const [showInput, setShowInput] = useState(false);
-  const [dmTarget, setDmTarget] = useState("");
+  const [showCreateDm, setShowCreateDm] = useState(false);
   const [error, setError] = useState("");
   const [headerSearch, setHeaderSearch] = useState(false);
   const [headerSearchValue, setHeaderSearchValue] = useState("");
 
-  const allDmChannels = channels.filter((ch) => ch.channel_type === "dm" && ch.dm_status !== "pending");
+  const allDmChannels = channels.filter(
+    (ch) => (ch.channel_type === "dm" || ch.channel_type === "group") && ch.dm_status !== "pending"
+  );
   const dmChannels = headerSearchValue
     ? allDmChannels.filter((ch) => {
-        const name = parseDmDisplayName(ch.encrypted_meta, user?.id ?? "").toLowerCase();
+        const name = ch.channel_type === "group"
+          ? parseGroupName(ch.encrypted_meta, user?.id ?? "").toLowerCase()
+          : parseDmDisplayName(ch.encrypted_meta, user?.id ?? "").toLowerCase();
         return name.includes(headerSearchValue.toLowerCase());
       })
     : allDmChannels;
@@ -78,14 +86,11 @@ function DmView() {
     if (peerIds.length > 0) fetchPresence(peerIds);
   }, [allDmChannels.length, user?.id]);
 
-  async function handleStartDm(username?: string) {
-    const target = username || dmTarget.trim();
-    if (!target) return;
+  async function handleStartDm(username: string) {
+    if (!username) return;
     setError("");
     try {
-      await startDm(target);
-      setDmTarget("");
-      setShowInput(false);
+      await startDm(username);
       setHeaderSearch(false);
       setHeaderSearchValue("");
     } catch (err: any) {
@@ -175,32 +180,42 @@ function DmView() {
           <span>Direct Messages</span>
           <button
             className="btn-icon"
-            onClick={() => setShowInput(!showInput)}
-            title="New DM"
+            onClick={() => setShowCreateDm(true)}
+            title="Create DM"
           >
             +
           </button>
         </div>
 
-        {showInput && (
-          <div className="dm-input-row">
-            <input
-              type="text"
-              placeholder="Username..."
-              value={dmTarget}
-              onChange={(e) => setDmTarget(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleStartDm()}
-              autoFocus
-            />
-            <button className="btn-small" onClick={() => handleStartDm()}>Go</button>
-            {error && <div className="error-small">{error}</div>}
-          </div>
-        )}
-
         <ul className="channel-list">
           {dmChannels.map((ch) => {
+            if (ch.channel_type === "group") {
+              const gName = parseGroupName(ch.encrypted_meta, user?.id ?? "");
+              const memberCount = parseGroupMemberCount(ch.encrypted_meta);
+              return (
+                <li key={ch.id}>
+                  <button
+                    className={`channel-item dm-item ${ch.id === currentChannelId ? "active" : ""}`}
+                    onClick={() => { selectChannel(ch.id); setShowFriends(false); setHeaderSearch(false); setHeaderSearchValue(""); }}
+                  >
+                    <div className="dm-avatar group-dm-avatar">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
+                      </svg>
+                    </div>
+                    <div className="dm-item-text">
+                      <span className="dm-item-name">{gName}</span>
+                      {memberCount > 0 && (
+                        <span className="dm-item-members">{memberCount} Members</span>
+                      )}
+                    </div>
+                  </button>
+                </li>
+              );
+            }
             const peerId = parseDmPeerId(ch.encrypted_meta, user?.id ?? "");
-            const isOnline = peerId ? presenceStatuses[peerId] === "online" : false;
+            const peerStatus = peerId ? (presenceStatuses[peerId] ?? "offline") : "offline";
+            const isActive = peerStatus !== "offline" && peerStatus !== "invisible";
             return (
               <li key={ch.id}>
                 <button
@@ -209,7 +224,7 @@ function DmView() {
                 >
                   <div className="dm-avatar">
                     {parseDmDisplayName(ch.encrypted_meta, user?.id ?? "").charAt(0).toUpperCase()}
-                    <span className={`dm-avatar-status ${isOnline ? "online" : "offline"}`} />
+                    <span className={`dm-avatar-status ${isActive ? "online" : "offline"}`} />
                   </div>
                   <span className="dm-item-name">
                     {parseDmDisplayName(ch.encrypted_meta, user?.id ?? "")}
@@ -231,6 +246,10 @@ function DmView() {
         </ul>
         {error && <div className="error-small" style={{ padding: "0 12px" }}>{error}</div>}
       </div>
+
+      {showCreateDm && (
+        <CreateGroupDm onClose={() => setShowCreateDm(false)} />
+      )}
     </>
   );
 }
@@ -268,10 +287,7 @@ function ServerView({ serverId }: { serverId: string }) {
   const user = useAuthStore((s) => s.user);
 
   const [showSettings, setShowSettings] = useState(false);
-  const [showCreateChannel, setShowCreateChannel] = useState(false);
-  const [createCategoryId, setCreateCategoryId] = useState<string | null>(null);
-  const [newChannelName, setNewChannelName] = useState("");
-  const [createError, setCreateError] = useState("");
+  const [createModal, setCreateModal] = useState<{ categoryId?: string | null; categoryName?: string } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ channelId: string; x: number; y: number } | null>(null);
   const [categoryContextMenu, setCategoryContextMenu] = useState<{ categoryId: string; x: number; y: number } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -279,6 +295,8 @@ function ServerView({ serverId }: { serverId: string }) {
   const [renamingCatId, setRenamingCatId] = useState<string | null>(null);
   const [renameCatValue, setRenameCatValue] = useState("");
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [confirmDeleteChannel, setConfirmDeleteChannel] = useState<string | null>(null);
+  const [confirmDeleteCategory, setConfirmDeleteCategory] = useState<string | null>(null);
 
   const server = servers.find((s) => s.id === serverId);
   const serverName = server ? parseServerName(server.encrypted_meta) : "Server";
@@ -314,24 +332,6 @@ function ServerView({ serverId }: { serverId: string }) {
     });
   }
 
-  async function handleCreateChannel(categoryId?: string | null) {
-    if (!newChannelName.trim()) return;
-    setCreateError("");
-    try {
-      const meta = JSON.stringify({ name: newChannelName.trim() });
-      await api.createChannel(serverId, {
-        encrypted_meta: btoa(meta),
-        category_id: categoryId ?? undefined,
-      });
-      await loadChannels();
-      setNewChannelName("");
-      setShowCreateChannel(false);
-      setCreateCategoryId(null);
-    } catch (err: any) {
-      setCreateError(err.message || "Failed");
-    }
-  }
-
   async function handleRename(channelId: string) {
     if (!renameValue.trim()) return;
     try {
@@ -343,10 +343,13 @@ function ServerView({ serverId }: { serverId: string }) {
   }
 
   async function handleDelete(channelId: string) {
-    if (!confirm("Delete this channel? All messages will be lost.")) return;
     try {
+      const wasCurrent = useChatStore.getState().currentChannelId === channelId;
       await api.deleteChannel(channelId);
       await loadChannels();
+      if (wasCurrent) {
+        useChatStore.setState({ currentChannelId: null });
+      }
     } catch { /* non-fatal */ }
   }
 
@@ -360,7 +363,6 @@ function ServerView({ serverId }: { serverId: string }) {
   }
 
   async function handleDeleteCategory(catId: string) {
-    if (!confirm("Delete this category? Channels in it will become uncategorized.")) return;
     try {
       await api.deleteCategory(serverId, catId);
       await loadChannels();
@@ -433,13 +435,21 @@ function ServerView({ serverId }: { serverId: string }) {
         </li>
       );
     }
+    const isVoice = ch.channel_type === "voice";
     const channelBtn = (
       <button
         className={`channel-item ${ch.id === currentChannelId ? "active" : ""}`}
         onClick={() => selectChannel(ch.id)}
         onContextMenu={(e) => handleContextMenu(e, ch.id)}
       >
-        <span className="channel-hash">#</span>
+        {isVoice ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="channel-type-icon">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z" />
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+          </svg>
+        ) : (
+          <span className="channel-hash">#</span>
+        )}
         {parseChannelName(ch.encrypted_meta)}
       </button>
     );
@@ -478,31 +488,13 @@ function ServerView({ serverId }: { serverId: string }) {
               {isOwner && (
                 <button
                   className="btn-icon"
-                  onClick={() => {
-                    setCreateCategoryId(null);
-                    setShowCreateChannel(!showCreateChannel);
-                  }}
+                  onClick={() => setCreateModal({ categoryId: null })}
                   title="Create Channel"
                 >
                   +
                 </button>
               )}
             </div>
-
-            {showCreateChannel && createCategoryId === null && (
-              <div className="dm-input-row">
-                <input
-                  type="text"
-                  placeholder="new-channel"
-                  value={newChannelName}
-                  onChange={(e) => setNewChannelName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleCreateChannel(null)}
-                  autoFocus
-                />
-                <button className="btn-small" onClick={() => handleCreateChannel(null)}>Create</button>
-                {createError && <div className="error-small">{createError}</div>}
-              </div>
-            )}
 
             <ul className="channel-list">
               {uncategorized.map(renderChannelItem)}
@@ -557,11 +549,7 @@ function ServerView({ serverId }: { serverId: string }) {
                     {isOwner && (
                       <button
                         className="btn-icon"
-                        onClick={() => {
-                          setCreateCategoryId(cat.id);
-                          setShowCreateChannel(true);
-                          setNewChannelName("");
-                        }}
+                        onClick={() => setCreateModal({ categoryId: cat.id, categoryName: cat.name })}
                         title={`Create Channel in ${cat.name}`}
                       >
                         +
@@ -570,21 +558,6 @@ function ServerView({ serverId }: { serverId: string }) {
                   </>
                 )}
               </div>
-
-              {showCreateChannel && createCategoryId === cat.id && (
-                <div className="dm-input-row">
-                  <input
-                    type="text"
-                    placeholder="new-channel"
-                    value={newChannelName}
-                    onChange={(e) => setNewChannelName(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleCreateChannel(cat.id)}
-                    autoFocus
-                  />
-                  <button className="btn-small" onClick={() => handleCreateChannel(cat.id)}>Create</button>
-                  {createError && <div className="error-small">{createError}</div>}
-                </div>
-              )}
 
               {!isCollapsed && (
                 <ul className="channel-list">
@@ -616,7 +589,7 @@ function ServerView({ serverId }: { serverId: string }) {
           <button
             className="danger"
             onClick={() => {
-              handleDelete(contextMenu.channelId);
+              setConfirmDeleteChannel(contextMenu.channelId);
               setContextMenu(null);
             }}
           >
@@ -644,13 +617,53 @@ function ServerView({ serverId }: { serverId: string }) {
           <button
             className="danger"
             onClick={() => {
-              handleDeleteCategory(categoryContextMenu.categoryId);
+              setConfirmDeleteCategory(categoryContextMenu.categoryId);
               setCategoryContextMenu(null);
             }}
           >
             Delete Category
           </button>
         </div>
+      )}
+
+      {/* Create Channel Modal */}
+      {createModal && (
+        <CreateChannelModal
+          serverId={serverId}
+          categoryId={createModal.categoryId}
+          categoryName={createModal.categoryName}
+          onClose={() => setCreateModal(null)}
+        />
+      )}
+
+      {/* Delete Channel Confirmation */}
+      {confirmDeleteChannel && (
+        <ConfirmDialog
+          title="Delete Channel"
+          message="Are you sure you want to delete this channel? All messages will be lost."
+          confirmLabel="Delete Channel"
+          danger
+          onConfirm={() => {
+            handleDelete(confirmDeleteChannel);
+            setConfirmDeleteChannel(null);
+          }}
+          onCancel={() => setConfirmDeleteChannel(null)}
+        />
+      )}
+
+      {/* Delete Category Confirmation */}
+      {confirmDeleteCategory && (
+        <ConfirmDialog
+          title="Delete Category"
+          message="Are you sure you want to delete this category? Channels in it will become uncategorized."
+          confirmLabel="Delete Category"
+          danger
+          onConfirm={() => {
+            handleDeleteCategory(confirmDeleteCategory);
+            setConfirmDeleteCategory(null);
+          }}
+          onCancel={() => setConfirmDeleteCategory(null)}
+        />
       )}
 
       {showSettings && server && (

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useFriendsStore } from "../store/friends.js";
 import { usePresenceStore } from "../store/presence.js";
 import { useChatStore } from "../store/chat.js";
+import ConfirmDialog from "./ConfirmDialog.js";
 import type { FriendResponse } from "@haven/core";
 
 type Tab = "online" | "all" | "pending" | "blocked";
@@ -22,6 +23,7 @@ export default function FriendsList() {
   const [addInput, setAddInput] = useState("");
   const [addError, setAddError] = useState("");
   const [addSuccess, setAddSuccess] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     loadFriends();
@@ -37,7 +39,10 @@ export default function FriendsList() {
 
   const accepted = friends.filter((f) => f.status === "accepted");
   const pending = friends.filter((f) => f.status === "pending");
-  const online = accepted.filter((f) => presenceStatuses[f.user_id] === "online");
+  const online = accepted.filter((f) => {
+    const s = presenceStatuses[f.user_id] ?? "offline";
+    return s !== "offline" && s !== "invisible";
+  });
 
   async function handleAdd() {
     if (!addInput.trim()) return;
@@ -143,18 +148,39 @@ export default function FriendsList() {
         )}
 
         <div className="friend-list">
-          {filtered.map((friend) => (
-            <FriendRow
-              key={friend.id}
-              friend={friend}
-              isOnline={presenceStatuses[friend.user_id] === "online"}
-              onAccept={() => acceptRequest(friend.id)}
-              onDecline={() => declineRequest(friend.id)}
-              onRemove={() => removeFriend(friend.id)}
-            />
-          ))}
+          {filtered.map((friend) => {
+            const s = presenceStatuses[friend.user_id] ?? "offline";
+            const friendOnline = s !== "offline" && s !== "invisible";
+            return (
+              <FriendRow
+                key={friend.id}
+                friend={friend}
+                isOnline={friendOnline}
+                onAccept={() => acceptRequest(friend.id)}
+                onDecline={() => declineRequest(friend.id)}
+                onRemove={() => setConfirmRemove({
+                  id: friend.id,
+                  name: friend.display_name || friend.username,
+                })}
+              />
+            );
+          })}
         </div>
       </div>
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Remove Friend"
+          message={`Are you sure you want to remove ${confirmRemove.name} as a friend?`}
+          confirmLabel="Remove Friend"
+          danger
+          onConfirm={() => {
+            removeFriend(confirmRemove.id);
+            setConfirmRemove(null);
+          }}
+          onCancel={() => setConfirmRemove(null)}
+        />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { Permission, type RoleResponse } from "@haven/core";
+import ConfirmDialog from "./ConfirmDialog.js";
 
 const PERM_LABELS: Array<{ key: keyof typeof Permission; label: string }> = [
   { key: "ADMINISTRATOR", label: "Administrator" },
@@ -34,6 +35,7 @@ export default function RoleSettings({ serverId }: Props) {
   const [editColor, setEditColor] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
   const [error, setError] = useState("");
+  const [deletingRoleId, setDeletingRoleId] = useState<string | null>(null);
 
   useEffect(() => {
     loadRoles();
@@ -93,12 +95,12 @@ export default function RoleSettings({ serverId }: Props) {
   }
 
   async function handleDelete(roleId: string) {
-    if (!confirm("Delete this role?")) return;
     setError("");
     try {
       await api.deleteRole(serverId, roleId);
       setRoles((prev) => prev.filter((r) => r.id !== roleId));
       if (selectedRoleId === roleId) setSelectedRoleId(null);
+      setDeletingRoleId(null);
       useChatStore.getState().loadChannels();
     } catch (err: any) {
       setError(err.message || "Failed to delete role");
@@ -183,7 +185,7 @@ export default function RoleSettings({ serverId }: Props) {
               {!selectedRole.is_default && (
                 <button
                   className="btn-danger"
-                  onClick={() => handleDelete(selectedRole.id)}
+                  onClick={() => setDeletingRoleId(selectedRole.id)}
                 >
                   Delete
                 </button>
@@ -199,6 +201,17 @@ export default function RoleSettings({ serverId }: Props) {
           </div>
         )}
       </div>
+
+      {deletingRoleId && (
+        <ConfirmDialog
+          title="Delete Role"
+          message={`Delete the role "${roles.find((r) => r.id === deletingRoleId)?.name}"? Members will lose permissions from this role.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => handleDelete(deletingRoleId)}
+          onCancel={() => setDeletingRoleId(null)}
+        />
+      )}
     </div>
   );
 }
