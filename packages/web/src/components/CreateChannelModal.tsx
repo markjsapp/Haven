@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
+import EmojiPicker from "./EmojiPicker.js";
 
 interface Props {
   serverId: string;
@@ -21,13 +22,23 @@ export default function CreateChannelModal({ serverId, categoryId, categoryName,
   const [channelName, setChannelName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-format channel name (lowercase, replace spaces with hyphens)
+  // Auto-format channel name (lowercase ASCII, replace spaces with hyphens, allow emoji)
   function formatName(raw: string) {
-    return raw
-      .toLowerCase()
-      .replace(/\s+/g, "-")
-      .replace(/[^a-z0-9\-_]/g, "");
+    // Split into grapheme clusters to preserve emoji sequences
+    let result = "";
+    for (const ch of raw) {
+      if (/\s/.test(ch)) { result += "-"; continue; }
+      // Keep emoji-related code points as-is
+      const cp = ch.codePointAt(0) ?? 0;
+      if (cp > 127) { result += ch; continue; }
+      // ASCII: lowercase, keep letters/digits/hyphens/underscores
+      const lower = ch.toLowerCase();
+      if (/[a-z0-9\-_]/.test(lower)) result += lower;
+    }
+    return result;
   }
 
   async function handleCreate() {
@@ -121,6 +132,7 @@ export default function CreateChannelModal({ serverId, categoryId, categoryName,
               {channelType === "text" ? "#" : "\uD83C\uDF99"}
             </span>
             <input
+              ref={nameInputRef}
               type="text"
               className="modal-input"
               placeholder="new-channel"
@@ -130,6 +142,29 @@ export default function CreateChannelModal({ serverId, categoryId, categoryName,
               autoFocus
               maxLength={100}
             />
+            <div className="create-channel-emoji-wrap">
+              <button
+                type="button"
+                className="create-channel-emoji-btn"
+                onClick={() => setShowEmoji(!showEmoji)}
+                title="Add emoji"
+                aria-label="Add emoji to channel name"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
+                </svg>
+              </button>
+              {showEmoji && (
+                <EmojiPicker
+                  onSelect={(emoji) => {
+                    setChannelName((prev) => prev + emoji);
+                    setShowEmoji(false);
+                    nameInputRef.current?.focus();
+                  }}
+                  onClose={() => setShowEmoji(false)}
+                />
+              )}
+            </div>
           </div>
 
           {error && <span className="modal-error">{error}</span>}

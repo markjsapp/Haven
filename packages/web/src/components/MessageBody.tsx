@@ -9,8 +9,29 @@ import Mention from "@tiptap/extension-mention";
 import { Spoiler } from "../lib/tiptap-spoiler.js";
 import { Subtext } from "../lib/tiptap-subtext.js";
 import LinkWarningModal from "./LinkWarningModal.js";
+import { useChatStore } from "../store/chat.js";
+import { useUiStore } from "../store/ui.js";
 
 const lowlight = createLowlight(common);
+
+const ChannelMention = Mention.extend({
+  name: "channelMention",
+  renderText({ node }) {
+    return `#${node.attrs.label ?? node.attrs.id}`;
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    return [
+      "span",
+      {
+        ...HTMLAttributes,
+        class: "mention mention-channel",
+        "data-type": "channel",
+        "data-id": node.attrs.id,
+      },
+      `#${node.attrs.label ?? node.attrs.id}`,
+    ];
+  },
+});
 
 const extensions = [
   StarterKit.configure({ codeBlock: false, link: false, underline: false }),
@@ -20,6 +41,7 @@ const extensions = [
   Mention.configure({
     HTMLAttributes: { class: "mention" },
   }),
+  ChannelMention,
   Spoiler,
   Subtext,
 ];
@@ -70,6 +92,34 @@ export default function MessageBody({ text, contentType, formatting }: Props) {
     // Handle spoiler reveals
     if (target.classList.contains("spoiler")) {
       target.classList.toggle("spoiler-revealed");
+      return;
+    }
+
+    // Handle @user mention clicks — show profile popup
+    const userMention = target.closest(".mention:not([data-type='channel'])") as HTMLElement | null;
+    if (userMention) {
+      const userId = userMention.getAttribute("data-id");
+      if (userId) {
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = userMention.getBoundingClientRect();
+        useUiStore.getState().setMentionPopup({
+          userId,
+          position: { top: rect.bottom + 4, left: rect.left },
+        });
+      }
+      return;
+    }
+
+    // Handle channel mention clicks — navigate to that channel
+    const channelMention = target.closest("[data-type='channel']") as HTMLElement | null;
+    if (channelMention) {
+      const channelId = channelMention.getAttribute("data-id");
+      if (channelId) {
+        e.preventDefault();
+        e.stopPropagation();
+        useChatStore.getState().selectChannel(channelId);
+      }
       return;
     }
 

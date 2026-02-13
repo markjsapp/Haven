@@ -3,10 +3,19 @@ import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { useVoiceStore } from "../store/voice.js";
 import Avatar from "./Avatar.js";
+import EmojiPicker from "./EmojiPicker.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import type { BlockedUserResponse } from "@haven/core";
+import { generateRecoveryKey } from "@haven/core";
+import {
+  uploadBackup,
+  cacheSecurityPhrase,
+  getCachedPhrase,
+  checkBackupStatus,
+  downloadAndRestoreBackup,
+} from "../lib/backup.js";
 
-type Tab = "account" | "profile" | "privacy" | "voice" | "accessibility";
+type Tab = "account" | "profile" | "privacy" | "voice" | "accessibility" | "security";
 
 export default function UserSettings() {
   const user = useAuthStore((s) => s.user);
@@ -57,6 +66,12 @@ export default function UserSettings() {
             Voice & Audio
           </button>
           <button
+            className={`user-settings-nav-item ${tab === "security" ? "active" : ""}`}
+            onClick={() => setTab("security")}
+          >
+            Security & Backup
+          </button>
+          <button
             className={`user-settings-nav-item ${tab === "accessibility" ? "active" : ""}`}
             onClick={() => setTab("accessibility")}
           >
@@ -75,7 +90,7 @@ export default function UserSettings() {
         </nav>
         <div className="user-settings-content">
           <div className="user-settings-content-header">
-            <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : tab === "privacy" ? "Privacy" : tab === "voice" ? "Voice & Audio" : "Accessibility"}</h2>
+            <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : tab === "privacy" ? "Privacy" : tab === "voice" ? "Voice & Audio" : tab === "security" ? "Security & Backup" : "Accessibility"}</h2>
             <button
               className="user-settings-close"
               onClick={() => setShowUserSettings(false)}
@@ -92,6 +107,7 @@ export default function UserSettings() {
             {tab === "profile" && <ProfileTab />}
             {tab === "privacy" && <PrivacyTab />}
             {tab === "voice" && <VoiceTab />}
+            {tab === "security" && <SecurityTab />}
             {tab === "accessibility" && <AccessibilityTab />}
           </div>
         </div>
@@ -224,6 +240,8 @@ function ProfileTab() {
   const [success, setSuccess] = useState("");
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
+  const [showStatusEmoji, setShowStatusEmoji] = useState(false);
+  const statusInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
 
@@ -362,17 +380,50 @@ function ProfileTab() {
           />
           <span className="settings-char-count">{aboutMe.length}/190</span>
         </label>
-        <label className="settings-field-label">
+        <div className="settings-field-label">
           Custom Status
-          <input
-            className="settings-input"
-            type="text"
-            value={customStatus}
-            onChange={(e) => setCustomStatus(e.target.value)}
-            maxLength={128}
-            placeholder="What's happening?"
-          />
-        </label>
+          <div className="settings-input-with-emoji">
+            <input
+              ref={statusInputRef}
+              className="settings-input"
+              type="text"
+              value={customStatus}
+              onChange={(e) => setCustomStatus(e.target.value)}
+              maxLength={128}
+              placeholder="What's happening?"
+            />
+            <div className="settings-emoji-btn-wrap">
+              <button
+                type="button"
+                className="create-channel-emoji-btn"
+                onClick={() => setShowStatusEmoji(!showStatusEmoji)}
+                title="Add emoji"
+                aria-label="Add emoji to status"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
+                </svg>
+              </button>
+              {showStatusEmoji && (
+                <EmojiPicker
+                  onSelect={(emoji) => {
+                    const input = statusInputRef.current;
+                    const start = input?.selectionStart ?? customStatus.length;
+                    const end = input?.selectionEnd ?? customStatus.length;
+                    setCustomStatus(customStatus.slice(0, start) + emoji + customStatus.slice(end));
+                    setShowStatusEmoji(false);
+                    requestAnimationFrame(() => {
+                      const pos = start + emoji.length;
+                      input?.setSelectionRange(pos, pos);
+                      input?.focus();
+                    });
+                  }}
+                  onClose={() => setShowStatusEmoji(false)}
+                />
+              )}
+            </div>
+          </div>
+        </div>
         {error && <div className="settings-error">{error}</div>}
         {success && <div className="settings-success">{success}</div>}
         <button
@@ -656,6 +707,330 @@ function VoiceTab() {
         />
         <span>Noise Suppression</span>
       </label>
+    </div>
+  );
+}
+
+// ─── Security & Backup Tab ──────────────────────────
+
+function SecurityTab() {
+  const api = useAuthStore((s) => s.api);
+
+  const [backupExists, setBackupExists] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Change phrase flow
+  type Mode = "idle" | "change" | "setup" | "generated";
+  const [mode, setMode] = useState<Mode>("idle");
+  const [currentPhrase, setCurrentPhrase] = useState("");
+  const [newPhrase, setNewPhrase] = useState("");
+  const [confirmPhrase, setConfirmPhrase] = useState("");
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    checkBackupStatus()
+      .then(({ hasBackup }) => {
+        if (!cancelled) {
+          setBackupExists(hasBackup);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleChangePhrase() {
+    setError("");
+    setSuccess("");
+    if (newPhrase.length < 8) {
+      setError("New phrase must be at least 8 characters");
+      return;
+    }
+    if (newPhrase !== confirmPhrase) {
+      setError("New phrases do not match");
+      return;
+    }
+    setSaving(true);
+    try {
+      // If we have a cached phrase, use it; otherwise require the current phrase
+      const cached = getCachedPhrase();
+      if (!cached && !currentPhrase) {
+        setError("Enter your current security phrase to verify identity");
+        setSaving(false);
+        return;
+      }
+      // Verify current phrase by attempting to download and decrypt
+      if (!cached) {
+        await downloadAndRestoreBackup(currentPhrase);
+      }
+      // Upload new backup with new phrase
+      await uploadBackup(newPhrase);
+      cacheSecurityPhrase(newPhrase);
+      setSuccess("Security phrase updated successfully");
+      setMode("idle");
+      setBackupExists(true);
+      setCurrentPhrase("");
+      setNewPhrase("");
+      setConfirmPhrase("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update. Is the current phrase correct?");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSetupWithPhrase(phrase: string) {
+    setError("");
+    setSuccess("");
+    setSaving(true);
+    try {
+      await uploadBackup(phrase);
+      cacheSecurityPhrase(phrase);
+      setBackupExists(true);
+      setSuccess("Key backup created successfully");
+      setMode("idle");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create backup");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteBackup() {
+    setError("");
+    setSuccess("");
+    setSaving(true);
+    try {
+      await api.deleteKeyBackup();
+      setBackupExists(false);
+      setSuccess("Backup deleted");
+      setMode("idle");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete backup");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return <div className="settings-section"><p className="settings-loading">Loading...</p></div>;
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">Key Backup Status</div>
+      <p className="settings-description">
+        Your key backup protects your encrypted messages. If you log in on a new device,
+        you'll need your security phrase to restore access to your message history.
+      </p>
+      <div className="settings-card" style={{ marginBottom: 16 }}>
+        <div className="settings-card-row">
+          <div>
+            <div className="settings-label">STATUS</div>
+            <div className="settings-value">
+              {backupExists ? (
+                <span style={{ color: "var(--status-online, #3ba55d)" }}>Backup exists on server</span>
+              ) : (
+                <span style={{ color: "var(--status-dnd, #ed4245)" }}>No backup — messages won't transfer to new devices</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {mode === "idle" && (
+        <div className="security-phrase-actions">
+          {backupExists ? (
+            <>
+              <button
+                className="btn-primary"
+                onClick={() => { setMode("change"); setError(""); setSuccess(""); }}
+                style={{ marginRight: 8 }}
+              >
+                Change Security Phrase
+              </button>
+              <button
+                className="btn-secondary btn-danger-outline"
+                onClick={handleDeleteBackup}
+                disabled={saving}
+              >
+                Delete Backup
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="btn-primary"
+                onClick={() => { setMode("setup"); setError(""); setSuccess(""); }}
+                style={{ marginRight: 8 }}
+              >
+                Set Up Security Phrase
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  setRecoveryKey(generateRecoveryKey());
+                  setMode("generated");
+                  setError("");
+                  setSuccess("");
+                }}
+              >
+                Generate Recovery Key
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {mode === "change" && (
+        <div className="settings-fields">
+          <div className="settings-section-title">Change Security Phrase</div>
+          {!getCachedPhrase() && (
+            <label className="settings-field-label">
+              Current Security Phrase
+              <input
+                className="settings-input"
+                type="password"
+                value={currentPhrase}
+                onChange={(e) => { setCurrentPhrase(e.target.value); setError(""); }}
+                placeholder="Enter your current phrase..."
+              />
+            </label>
+          )}
+          <label className="settings-field-label">
+            New Security Phrase
+            <input
+              className="settings-input"
+              type="password"
+              value={newPhrase}
+              onChange={(e) => { setNewPhrase(e.target.value); setError(""); }}
+              placeholder="At least 8 characters..."
+            />
+          </label>
+          <label className="settings-field-label">
+            Confirm New Phrase
+            <input
+              className="settings-input"
+              type="password"
+              value={confirmPhrase}
+              onChange={(e) => { setConfirmPhrase(e.target.value); setError(""); }}
+              placeholder="Confirm new phrase..."
+              onKeyDown={(e) => e.key === "Enter" && handleChangePhrase()}
+            />
+          </label>
+          {error && <div className="settings-error">{error}</div>}
+          <div className="security-phrase-actions">
+            <button className="btn-secondary" onClick={() => setMode("idle")}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={handleChangePhrase}
+              disabled={saving || !newPhrase || !confirmPhrase}
+              style={{ marginLeft: 8 }}
+            >
+              {saving ? "Saving..." : "Update Phrase"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mode === "setup" && (
+        <div className="settings-fields">
+          <div className="settings-section-title">Create Security Phrase</div>
+          <p className="settings-description">
+            Choose a strong phrase you'll remember. You'll need it on other devices.
+          </p>
+          <label className="settings-field-label">
+            Security Phrase
+            <input
+              className="settings-input"
+              type="password"
+              value={newPhrase}
+              onChange={(e) => { setNewPhrase(e.target.value); setError(""); }}
+              placeholder="At least 8 characters..."
+              autoFocus
+            />
+          </label>
+          <label className="settings-field-label">
+            Confirm Phrase
+            <input
+              className="settings-input"
+              type="password"
+              value={confirmPhrase}
+              onChange={(e) => { setConfirmPhrase(e.target.value); setError(""); }}
+              placeholder="Confirm phrase..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newPhrase.length >= 8 && newPhrase === confirmPhrase) {
+                  handleSetupWithPhrase(newPhrase);
+                }
+              }}
+            />
+          </label>
+          {error && <div className="settings-error">{error}</div>}
+          <div className="security-phrase-actions">
+            <button className="btn-secondary" onClick={() => setMode("idle")}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                if (newPhrase.length < 8) { setError("Must be at least 8 characters"); return; }
+                if (newPhrase !== confirmPhrase) { setError("Phrases do not match"); return; }
+                handleSetupWithPhrase(newPhrase);
+              }}
+              disabled={saving || !newPhrase || !confirmPhrase}
+              style={{ marginLeft: 8 }}
+            >
+              {saving ? "Saving..." : "Create Backup"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mode === "generated" && (
+        <div className="settings-fields">
+          <div className="settings-section-title">Your Recovery Key</div>
+          <p className="settings-description">
+            Copy this key and store it somewhere safe. You'll need it on other devices.
+          </p>
+          <div className="recovery-key-display">
+            <code>{recoveryKey}</code>
+          </div>
+          <button
+            className="btn-secondary"
+            style={{ width: "100%", marginBottom: 12 }}
+            onClick={() => navigator.clipboard.writeText(recoveryKey)}
+          >
+            Copy to Clipboard
+          </button>
+          <label className="security-phrase-confirm-label">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+            />
+            I have saved my recovery key
+          </label>
+          {error && <div className="settings-error">{error}</div>}
+          <div className="security-phrase-actions">
+            <button className="btn-secondary" onClick={() => setMode("idle")}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={() => handleSetupWithPhrase(recoveryKey)}
+              disabled={!confirmed || saving}
+              style={{ marginLeft: 8 }}
+            >
+              {saving ? "Saving..." : "Save Backup"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {success && <div className="settings-success" style={{ marginTop: 12 }}>{success}</div>}
     </div>
   );
 }

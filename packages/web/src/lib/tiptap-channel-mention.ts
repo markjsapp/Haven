@@ -3,27 +3,33 @@ import type { MentionNodeAttrs } from "@tiptap/extension-mention";
 import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
-import MentionList from "../components/MentionList.js";
+import ChannelMentionList from "../components/ChannelMentionList.js";
+import { suggestionActiveRef } from "./tiptap-mention.js";
 
-export interface MemberItem {
+export interface ChannelItem {
   id: string;
   label: string;
 }
 
-/** Shared flag: true when any suggestion popup (mention/channel) is visible. */
-export const suggestionActiveRef = { current: false };
-
-export function createMentionExtension(getMembers: () => MemberItem[]) {
-  return Mention.configure({
+export function createChannelMentionExtension(getChannels: () => ChannelItem[]) {
+  return Mention.extend({ name: "channelMention" }).configure({
     HTMLAttributes: {
-      class: "mention",
+      class: "mention mention-channel",
+      "data-type": "channel",
     },
+    // Always render with # prefix (suggestion is null during generateHTML)
+    renderText: ({ node }) => `#${node.attrs.label ?? node.attrs.id}`,
+    renderHTML: ({ options, node }) => [
+      "span",
+      { ...options.HTMLAttributes, "data-id": node.attrs.id },
+      `#${node.attrs.label ?? node.attrs.id}`,
+    ],
     suggestion: {
-      char: "@",
+      char: "#",
       items: ({ query }: { query: string }) => {
         const q = query.toLowerCase();
-        return getMembers()
-          .filter((m) => m.label.toLowerCase().includes(q))
+        return getChannels()
+          .filter((ch) => ch.label.toLowerCase().includes(q))
           .slice(0, 8);
       },
       render: () => {
@@ -31,10 +37,10 @@ export function createMentionExtension(getMembers: () => MemberItem[]) {
         let popup: TippyInstance[] | null = null;
 
         return {
-          onStart: (props: SuggestionProps<MemberItem, MentionNodeAttrs>) => {
+          onStart: (props: SuggestionProps<ChannelItem, MentionNodeAttrs>) => {
             suggestionActiveRef.current = true;
 
-            component = new ReactRenderer(MentionList, {
+            component = new ReactRenderer(ChannelMentionList, {
               props,
               editor: props.editor,
             });
@@ -52,7 +58,7 @@ export function createMentionExtension(getMembers: () => MemberItem[]) {
             });
           },
 
-          onUpdate(props: SuggestionProps<MemberItem, MentionNodeAttrs>) {
+          onUpdate(props: SuggestionProps<ChannelItem, MentionNodeAttrs>) {
             component?.updateProps(props);
 
             if (popup && props.clientRect) {

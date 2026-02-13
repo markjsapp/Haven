@@ -9,6 +9,11 @@ interface MuteEntry {
   expiresAt: number | null;
 }
 
+interface MentionPopup {
+  userId: string;
+  position: { top: number; left: number };
+}
+
 interface UiState {
   selectedServerId: string | null; // null = Home/DMs view
   memberSidebarOpen: boolean;
@@ -16,6 +21,7 @@ interface UiState {
   showUserSettings: boolean;
   pinnedPanelOpen: boolean;
   searchPanelOpen: boolean;
+  mentionPopup: MentionPopup | null;
 
   /** channelId -> mute entry */
   mutedChannels: Record<string, MuteEntry>;
@@ -34,6 +40,7 @@ interface UiState {
   setShowUserSettings(show: boolean): void;
   togglePinnedPanel(): void;
   toggleSearchPanel(): void;
+  setMentionPopup(popup: MentionPopup | null): void;
 
   muteChannel(channelId: string, durationMs: number | null): void;
   unmuteChannel(channelId: string): void;
@@ -55,6 +62,7 @@ export const useUiStore = create<UiState>()(
       showUserSettings: false,
       pinnedPanelOpen: false,
       searchPanelOpen: false,
+      mentionPopup: null,
       mutedChannels: {},
       channelNotifications: {},
 
@@ -89,6 +97,10 @@ export const useUiStore = create<UiState>()(
 
       toggleSearchPanel() {
         set((s) => ({ searchPanelOpen: !s.searchPanelOpen, pinnedPanelOpen: false }));
+      },
+
+      setMentionPopup(popup) {
+        set({ mentionPopup: popup });
       },
 
       muteChannel(channelId, durationMs) {

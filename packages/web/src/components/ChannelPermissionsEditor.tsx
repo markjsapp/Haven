@@ -18,9 +18,11 @@ interface Props {
   channelId: string;
   serverId: string;
   onClose: () => void;
+  /** When true, renders content only (no overlay/modal wrapper). */
+  embedded?: boolean;
 }
 
-export default function ChannelPermissionsEditor({ channelId, serverId, onClose }: Props) {
+export default function ChannelPermissionsEditor({ channelId, serverId, onClose, embedded }: Props) {
   const api = useAuthStore((s) => s.api);
   const [roles, setRoles] = useState<RoleResponse[]>([]);
   const [overwrites, setOverwrites] = useState<OverwriteResponse[]>([]);
@@ -129,6 +131,76 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose 
   const selectedRole = roles.find((r) => r.id === selectedRoleId);
   const selectedPerms = selectedRoleId ? editState[selectedRoleId] : null;
 
+  const content = (
+    <div className="role-settings">
+      <div className="role-settings-sidebar">
+        {roles.map((role) => {
+          const hasOverwrite = overwrites.some((o) => o.target_type === "role" && o.target_id === role.id);
+          return (
+            <button
+              key={role.id}
+              className={`role-list-item ${selectedRoleId === role.id ? "active" : ""}`}
+              onClick={() => setSelectedRoleId(role.id)}
+            >
+              {role.color && (
+                <span className="role-dot" style={{ background: role.color }} />
+              )}
+              <span>{role.name}</span>
+              {hasOverwrite && <span className="overwrite-indicator">*</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="role-settings-main">
+        {error && <div className="error-small" style={{ marginBottom: 8 }}>{error}</div>}
+
+        {selectedRole && selectedPerms ? (
+          <>
+            <div style={{ marginBottom: 12, fontSize: 13, color: "var(--text-muted)" }}>
+              Set permission overwrites for <strong>{selectedRole.name}</strong> in this channel.
+              Click a cell to cycle: Inherit &rarr; Allow &rarr; Deny.
+            </div>
+
+            <div className="perm-grid">
+              {CHANNEL_PERMS.map(({ key, label }) => {
+                const state = selectedPerms[key] || "inherit";
+                return (
+                  <div key={key} className="perm-overwrite-row">
+                    <span className="perm-overwrite-label">{label}</span>
+                    <button
+                      type="button"
+                      className={`perm-tri-btn perm-tri-${state}`}
+                      onClick={() => cyclePerm(selectedRole.id, key)}
+                    >
+                      {state === "allow" ? "Allow" : state === "deny" ? "Deny" : "—"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="profile-edit-actions" style={{ marginTop: 12 }}>
+              <button
+                className="btn-primary"
+                onClick={() => handleSave(selectedRole.id)}
+                disabled={saving}
+              >
+                {saving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div style={{ color: "var(--text-muted)", padding: 16 }}>
+            Select a role to configure its channel permissions.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  if (embedded) return content;
+
   return (
     <div className="server-settings-overlay" onClick={onClose} role="presentation">
       <div className="server-settings-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Channel Permissions">
@@ -136,72 +208,7 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose 
           <h3>Channel Permissions</h3>
           <button className="btn-ghost" onClick={onClose} aria-label="Close">&times;</button>
         </div>
-
-        <div className="role-settings">
-          <div className="role-settings-sidebar">
-            {roles.map((role) => {
-              const hasOverwrite = overwrites.some((o) => o.target_type === "role" && o.target_id === role.id);
-              return (
-                <button
-                  key={role.id}
-                  className={`role-list-item ${selectedRoleId === role.id ? "active" : ""}`}
-                  onClick={() => setSelectedRoleId(role.id)}
-                >
-                  {role.color && (
-                    <span className="role-dot" style={{ background: role.color }} />
-                  )}
-                  <span>{role.name}</span>
-                  {hasOverwrite && <span className="overwrite-indicator">*</span>}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="role-settings-main">
-            {error && <div className="error-small" style={{ marginBottom: 8 }}>{error}</div>}
-
-            {selectedRole && selectedPerms ? (
-              <>
-                <div style={{ marginBottom: 12, fontSize: 13, color: "var(--text-muted)" }}>
-                  Set permission overwrites for <strong>{selectedRole.name}</strong> in this channel.
-                  Click a cell to cycle: Inherit &rarr; Allow &rarr; Deny.
-                </div>
-
-                <div className="perm-grid">
-                  {CHANNEL_PERMS.map(({ key, label }) => {
-                    const state = selectedPerms[key] || "inherit";
-                    return (
-                      <div key={key} className="perm-overwrite-row">
-                        <span className="perm-overwrite-label">{label}</span>
-                        <button
-                          type="button"
-                          className={`perm-tri-btn perm-tri-${state}`}
-                          onClick={() => cyclePerm(selectedRole.id, key)}
-                        >
-                          {state === "allow" ? "Allow" : state === "deny" ? "Deny" : "—"}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="profile-edit-actions" style={{ marginTop: 12 }}>
-                  <button
-                    className="btn-primary"
-                    onClick={() => handleSave(selectedRole.id)}
-                    disabled={saving}
-                  >
-                    {saving ? "Saving..." : "Save"}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div style={{ color: "var(--text-muted)", padding: 16 }}>
-                Select a role to configure its channel permissions.
-              </div>
-            )}
-          </div>
-        </div>
+        {content}
       </div>
     </div>
   );

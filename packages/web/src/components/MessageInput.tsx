@@ -15,7 +15,10 @@ import { Subtext } from "../lib/tiptap-subtext.js";
 import { MaskedLink } from "../lib/tiptap-masked-link.js";
 import EmojiPicker from "./EmojiPicker.js";
 import { saveDraft, loadDraft, clearDraft } from "../lib/draft-store.js";
-import { createMentionExtension, type MemberItem } from "../lib/tiptap-mention.js";
+import { createMentionExtension, suggestionActiveRef, type MemberItem } from "../lib/tiptap-mention.js";
+import { createChannelMentionExtension, type ChannelItem } from "../lib/tiptap-channel-mention.js";
+import { useUiStore } from "../store/ui.js";
+import { parseChannelName } from "../lib/channel-utils.js";
 
 const lowlight = createLowlight(common);
 
@@ -49,9 +52,11 @@ interface MessageInputProps {
   placeholder?: string;
 }
 
-// Create mention extension once (stable reference)
+// Create mention extensions once (stable references)
 const memberListRef = { current: [] as MemberItem[] };
+const channelListRef = { current: [] as ChannelItem[] };
 const MentionExtension = createMentionExtension(() => memberListRef.current);
+const ChannelMentionExtension = createChannelMentionExtension(() => channelListRef.current);
 
 export default function MessageInput({ placeholder = "Type a message..." }: MessageInputProps) {
   const [sending, setSending] = useState(false);
@@ -72,9 +77,16 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
   const allMessages = useChatStore((s) => s.messages);
   const currentChannelId2 = useChatStore((s) => s.currentChannelId);
   const userNames = useChatStore((s) => s.userNames);
+  const channels = useChatStore((s) => s.channels);
+  const selectedServerId = useUiStore((s) => s.selectedServerId);
 
   // Keep mention member list in sync
   memberListRef.current = Object.entries(userNames).map(([id, name]) => ({ id, label: name }));
+
+  // Keep channel mention list in sync (scoped to current server, text channels only)
+  channelListRef.current = channels
+    .filter((ch) => ch.server_id === selectedServerId && ch.channel_type === "text")
+    .map((ch) => ({ id: ch.id, label: parseChannelName(ch.encrypted_meta) }));
 
   // Store placeholder in a ref so TipTap's placeholder function always reads the latest
   const placeholderRef = useRef(placeholder);
@@ -103,6 +115,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
       Subtext,
       MaskedLink,
       MentionExtension,
+      ChannelMentionExtension,
       ShiftEnterBreak,
     ],
     onUpdate: () => sendTyping(),
@@ -114,6 +127,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
         "aria-label": "Message",
       },
       handleKeyDown: (_view, event) => {
+        // Let TipTap's suggestion handler process Enter/Tab when a popup is active
+        if (suggestionActiveRef.current) return false;
         // Plain Enter (no modifiers) sends the message
         if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
           event.preventDefault();

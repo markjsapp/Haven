@@ -16,13 +16,14 @@ import {
   parseGroupMemberCount,
   parseServerName,
 } from "../lib/channel-utils.js";
+import { STATUS_CONFIG } from "../store/presence.js";
 import CreateGroupDm from "./CreateGroupDm.js";
 import CreateChannelModal from "./CreateChannelModal.js";
 import ConfirmDialog from "./ConfirmDialog.js";
 import UserPanel from "./UserPanel.js";
 const ServerSettings = lazy(() => import("./ServerSettings.js"));
 import VoiceChannelPreview from "./VoiceChannelPreview.js";
-import ChannelPermissionsEditor from "./ChannelPermissionsEditor.js";
+import ChannelSettings from "./ChannelSettings.js";
 import { useVoiceStore } from "../store/voice.js";
 import {
   DndContext,
@@ -71,6 +72,7 @@ function DmView() {
   const setShowFriends = useUiStore((s) => s.setShowFriends);
   const unreadCounts = useChatStore((s) => s.unreadCounts);
   const mentionCounts = useChatStore((s) => s.mentionCounts);
+  const typingUsers = useChatStore((s) => s.typingUsers);
 
   const [showCreateDm, setShowCreateDm] = useState(false);
   const [error, setError] = useState("");
@@ -220,6 +222,12 @@ function DmView() {
               const gName = parseGroupName(ch.encrypted_meta, user?.id ?? "");
               const memberCount = parseGroupMemberCount(ch.encrypted_meta);
               const unread = unreadCounts[ch.id] ?? 0;
+              const grpTyping = (typingUsers[ch.id] ?? []).filter((t) => t.expiry > Date.now());
+              const grpIsTyping = grpTyping.length > 0;
+              // Use the first typing user's presence color for group typing indicator
+              const grpTypingUserId = grpIsTyping ? grpTyping[0].userId : null;
+              const grpTypingStatus = grpTypingUserId ? (presenceStatuses[grpTypingUserId] ?? "online") : "online";
+              const grpTypingColor = grpIsTyping ? STATUS_CONFIG[grpTypingStatus]?.color ?? "var(--text-muted)" : undefined;
               return (
                 <li key={ch.id}>
                   <button
@@ -232,6 +240,11 @@ function DmView() {
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
                       </svg>
+                      {grpIsTyping && (
+                        <span className="dm-avatar-typing" aria-label="Typing" style={{ "--typing-color": grpTypingColor } as React.CSSProperties}>
+                          <span /><span /><span />
+                        </span>
+                      )}
                     </div>
                     <div className="dm-item-text">
                       <span className="dm-item-name">{gName}</span>
@@ -248,6 +261,9 @@ function DmView() {
             const peerStatus = peerId ? (presenceStatuses[peerId] ?? "offline") : "offline";
             const isActive = peerStatus !== "offline" && peerStatus !== "invisible";
             const unread = unreadCounts[ch.id] ?? 0;
+            const chTyping = (typingUsers[ch.id] ?? []).filter((t) => t.expiry > Date.now());
+            const isTyping = chTyping.length > 0;
+            const typingColor = isTyping ? STATUS_CONFIG[peerStatus]?.color ?? "var(--text-muted)" : undefined;
             return (
               <li key={ch.id}>
                 <button
@@ -258,7 +274,13 @@ function DmView() {
                 >
                   <div className="dm-avatar">
                     {parseDmDisplayName(ch.encrypted_meta, user?.id ?? "").charAt(0).toUpperCase()}
-                    <span className={`dm-avatar-status ${isActive ? "online" : "offline"}`} aria-label={isActive ? "Online" : "Offline"} />
+                    {isTyping ? (
+                      <span className="dm-avatar-typing" aria-label="Typing" style={{ "--typing-color": typingColor } as React.CSSProperties}>
+                        <span /><span /><span />
+                      </span>
+                    ) : (
+                      <span className={`dm-avatar-status ${isActive ? "online" : "offline"}`} aria-label={isActive ? "Online" : "Offline"} />
+                    )}
                   </div>
                   <span className="dm-item-name">
                     {parseDmDisplayName(ch.encrypted_meta, user?.id ?? "")}
@@ -315,7 +337,6 @@ function ChannelContextMenu({
   y,
   submenu,
   canManageChannels,
-  onRename,
   onPermissions,
   onDelete,
   onShowSubmenu,
@@ -326,7 +347,6 @@ function ChannelContextMenu({
   y: number;
   submenu?: "mute" | "notify";
   canManageChannels: boolean;
-  onRename: () => void;
   onPermissions: () => void;
   onDelete: () => void;
   onShowSubmenu: (sub: "mute" | "notify" | undefined) => void;
@@ -432,8 +452,7 @@ function ChannelContextMenu({
       {canManageChannels && (
         <>
           <div className="context-divider" role="separator" />
-          <button role="menuitem" tabIndex={-1} onClick={onRename}>Rename Channel</button>
-          <button role="menuitem" tabIndex={-1} onClick={onPermissions}>Permissions</button>
+          <button role="menuitem" tabIndex={-1} onClick={onPermissions}>Edit Channel</button>
           <button role="menuitem" tabIndex={-1} className="danger" onClick={onDelete}>Delete Channel</button>
         </>
       )}
@@ -838,7 +857,7 @@ function ServerView({ serverId }: { serverId: string }) {
   const [serverContextMenu, setServerContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
-  const [permissionsChannelId, setPermissionsChannelId] = useState<string | null>(null);
+  const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
 
   const channelListRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown: handleChannelRovingKeyDown } = useRovingTabindex(channelListRef);
@@ -1303,14 +1322,8 @@ function ServerView({ serverId }: { serverId: string }) {
           y={contextMenu.y}
           submenu={contextMenu.submenu}
           canManageChannels={canManageChannels}
-          onRename={() => {
-            const ch = channels.find((c) => c.id === contextMenu.channelId);
-            setRenameValue(ch ? parseChannelName(ch.encrypted_meta) : "");
-            setRenamingId(contextMenu.channelId);
-            setContextMenu(null);
-          }}
           onPermissions={() => {
-            setPermissionsChannelId(contextMenu.channelId);
+            setEditingChannelId(contextMenu.channelId);
             setContextMenu(null);
           }}
           onDelete={() => {
@@ -1438,11 +1451,11 @@ function ServerView({ serverId }: { serverId: string }) {
         </Suspense>
       )}
 
-      {permissionsChannelId && (
-        <ChannelPermissionsEditor
-          channelId={permissionsChannelId}
+      {editingChannelId && (
+        <ChannelSettings
+          channelId={editingChannelId}
           serverId={serverId}
-          onClose={() => setPermissionsChannelId(null)}
+          onClose={() => setEditingChannelId(null)}
         />
       )}
     </>

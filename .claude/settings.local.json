@@ -54,7 +54,8 @@
       "Bash(cargo llvm-cov:*)",
       "Bash(cargo clean:*)",
       "Bash(git add:*)",
-      "Bash(sqlx migrate info:*)"
+      "Bash(sqlx migrate info:*)",
+      "Bash(git status:*)"
     ]
   }
 }

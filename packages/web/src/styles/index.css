@@ -931,6 +931,30 @@ body {
   background: var(--interactive-muted);
 }
 
+/* Typing dots overlay on DM avatar (replaces status dot when typing) */
+.dm-avatar-typing {
+  position: absolute;
+  bottom: -4px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 2px 3px;
+}
+
+.dm-avatar-typing span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--typing-color, var(--text-muted));
+  animation: typing-bounce 1.4s infinite ease-in-out;
+}
+
+.dm-avatar-typing span:nth-child(2) { animation-delay: 0.2s; }
+.dm-avatar-typing span:nth-child(3) { animation-delay: 0.4s; }
+
 .dm-item-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1276,6 +1300,9 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .chat-header h2 {
@@ -3849,6 +3876,21 @@ em-emoji-picker {
   box-shadow: 0 0 0 2px var(--blurple);
 }
 
+.settings-input-with-emoji {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-input-with-emoji .settings-input {
+  flex: 1;
+}
+
+.settings-emoji-btn-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .settings-textarea {
   padding: 10px;
   background: var(--bg-tertiary);
@@ -4605,9 +4647,14 @@ em-emoji-picker {
 
 .custom-status-emoji-picker {
   position: absolute;
-  bottom: 48px;
-  left: 0;
+  top: calc(100% + 4px);
+  right: 0;
   z-index: 400;
+}
+
+.custom-status-emoji-picker em-emoji-picker {
+  max-height: 300px;
+  max-width: 320px;
 }
 
 .custom-status-input {
@@ -5421,6 +5468,45 @@ em-emoji-picker {
   padding: 0 1px;
 }
 
+.search-filters-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px 8px;
+}
+
+.search-filter-pill {
+  font-size: 0.7rem;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.search-panel-hints {
+  padding: 16px 12px;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.search-hint-title {
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.search-hint-row {
+  padding: 3px 0;
+  line-height: 1.4;
+}
+
+.search-hint-row code {
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+}
+
 /* ─── Context Menu ──────────────────────────────────── */
 
 .message-context-menu {
@@ -5565,7 +5651,8 @@ em-emoji-picker {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 300px;
+  min-width: 0;
+  flex-shrink: 1;
   border-left: 1px solid var(--border-color);
   padding-left: 12px;
 }
@@ -5790,6 +5877,90 @@ em-emoji-picker {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.channel-mention-hash {
+  color: var(--blurple, #5865f2);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.mention-channel {
+  cursor: pointer;
+}
+
+.mention-channel:hover {
+  text-decoration: underline;
+}
+
+/* ─── Channel Settings ──────────────────────────────── */
+
+.channel-settings-header-hash {
+  color: var(--text-muted, #949ba4);
+  margin-right: 4px;
+}
+
+.channel-settings-name-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.channel-settings-name-row .settings-input {
+  flex: 1;
+}
+
+.channel-settings-emoji-wrap {
+  position: relative;
+}
+
+.channel-settings-emoji-btn {
+  padding: 8px;
+  min-width: 40px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-danger-outline {
+  border: 1px solid var(--status-dnd, #ed4245);
+  color: var(--status-dnd, #ed4245);
+  background: transparent;
+}
+
+.btn-danger-outline:hover {
+  background: rgba(237, 66, 69, 0.1);
+}
+
+.channel-topic-textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+/* ─── Create Channel Emoji Button ──────────────────── */
+
+.create-channel-emoji-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.create-channel-emoji-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.create-channel-emoji-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 /* ─── Date Dividers ──────────────────────────────────── */

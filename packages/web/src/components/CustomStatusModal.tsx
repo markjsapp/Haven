@@ -86,6 +86,16 @@ export default function CustomStatusModal({ initialStatus, initialEmoji, onClose
         <h3 className="modal-title" id="custom-status-title">Set a custom status</h3>
 
         <div className="custom-status-input-row">
+          <input
+            ref={inputRef}
+            className="custom-status-input"
+            type="text"
+            placeholder="What's on your mind?"
+            value={statusText}
+            onChange={(e) => setStatusText(e.target.value.slice(0, 128))}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+            maxLength={128}
+          />
           <div className="custom-status-emoji-btn-wrap" ref={pickerRef}>
             <button
               className="custom-status-emoji-btn"
@@ -106,16 +116,6 @@ export default function CustomStatusModal({ initialStatus, initialEmoji, onClose
               </div>
             )}
           </div>
-          <input
-            ref={inputRef}
-            className="custom-status-input"
-            type="text"
-            placeholder="What's on your mind?"
-            value={statusText}
-            onChange={(e) => setStatusText(e.target.value.slice(0, 128))}
-            onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            maxLength={128}
-          />
         </div>
 
         <div className="custom-status-char-count">

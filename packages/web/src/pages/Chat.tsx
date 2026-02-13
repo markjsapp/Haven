@@ -17,6 +17,7 @@ import VoiceRoom from "../components/VoiceRoom.js";
 import { parseChannelDisplay } from "../lib/channel-utils.js";
 import SecurityPhraseSetup from "../components/SecurityPhraseSetup.js";
 import SecurityPhraseRestore from "../components/SecurityPhraseRestore.js";
+import ProfilePopup from "../components/ProfilePopup.js";
 
 export default function Chat() {
   const user = useAuthStore((s) => s.user);
@@ -38,6 +39,8 @@ export default function Chat() {
   const searchPanelOpen = useUiStore((s) => s.searchPanelOpen);
   const togglePinnedPanel = useUiStore((s) => s.togglePinnedPanel);
   const toggleSearchPanel = useUiStore((s) => s.toggleSearchPanel);
+  const mentionPopup = useUiStore((s) => s.mentionPopup);
+  const setMentionPopup = useUiStore((s) => s.setMentionPopup);
 
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -286,6 +289,15 @@ export default function Chat() {
 
       {backupPending && backupAvailable && <SecurityPhraseRestore />}
       {backupPending && !backupAvailable && <SecurityPhraseSetup />}
+
+      {mentionPopup && (
+        <ProfilePopup
+          userId={mentionPopup.userId}
+          serverId={selectedServerId ?? undefined}
+          position={mentionPopup.position}
+          onClose={() => setMentionPopup(null)}
+        />
+      )}
     </div>
   );
 }

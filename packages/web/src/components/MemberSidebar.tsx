@@ -48,20 +48,47 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
       })
     : members;
 
-  // Group members by presence status
-  const statusGroups: { key: string; label: string; members: ServerMemberResponse[] }[] = [];
-  const buckets: Record<string, ServerMemberResponse[]> = { online: [], idle: [], dnd: [], offline: [] };
+  // Group members: online+role → under role, online+no role → by status, offline → all in "Offline"
+  const nonDefaultRoles = roles.filter((r) => !r.is_default && r.color).sort((a, b) => b.position - a.position);
+
+  const roleGroups: { key: string; label: string; color?: string; members: ServerMemberResponse[] }[] = [];
+  const roleBuckets: Record<string, ServerMemberResponse[]> = {};
+  const statusBuckets: Record<string, ServerMemberResponse[]> = { online: [], idle: [], dnd: [] };
+  const offlineBucket: ServerMemberResponse[] = [];
+
   for (const m of filtered) {
     const status = presenceStatuses[m.user_id] ?? "offline";
-    if (status === "online") buckets.online.push(m);
-    else if (status === "idle") buckets.idle.push(m);
-    else if (status === "dnd") buckets.dnd.push(m);
-    else buckets.offline.push(m);
+    if (status === "offline" || status === "invisible") {
+      offlineBucket.push(m);
+      continue;
+    }
+    // Find highest non-default role
+    const topRole = nonDefaultRoles.find((r) => m.role_ids.includes(r.id));
+    if (topRole) {
+      if (!roleBuckets[topRole.id]) roleBuckets[topRole.id] = [];
+      roleBuckets[topRole.id].push(m);
+    } else {
+      if (status === "online") statusBuckets.online.push(m);
+      else if (status === "idle") statusBuckets.idle.push(m);
+      else if (status === "dnd") statusBuckets.dnd.push(m);
+    }
   }
-  if (buckets.online.length > 0) statusGroups.push({ key: "online", label: "ONLINE", members: buckets.online });
-  if (buckets.idle.length > 0) statusGroups.push({ key: "idle", label: "IDLE", members: buckets.idle });
-  if (buckets.dnd.length > 0) statusGroups.push({ key: "dnd", label: "DO NOT DISTURB", members: buckets.dnd });
-  if (buckets.offline.length > 0) statusGroups.push({ key: "offline", label: "OFFLINE", members: buckets.offline });
+
+  // Add role groups (sorted by role position, highest first)
+  for (const role of nonDefaultRoles) {
+    const bucket = roleBuckets[role.id];
+    if (bucket && bucket.length > 0) {
+      roleGroups.push({ key: `role-${role.id}`, label: role.name.toUpperCase(), color: role.color ?? undefined, members: bucket });
+    }
+  }
+  // Add status groups for roleless online members
+  if (statusBuckets.online.length > 0) roleGroups.push({ key: "online", label: "ONLINE", members: statusBuckets.online });
+  if (statusBuckets.idle.length > 0) roleGroups.push({ key: "idle", label: "IDLE", members: statusBuckets.idle });
+  if (statusBuckets.dnd.length > 0) roleGroups.push({ key: "dnd", label: "DO NOT DISTURB", members: statusBuckets.dnd });
+  // Add offline bucket last
+  if (offlineBucket.length > 0) roleGroups.push({ key: "offline", label: "OFFLINE", members: offlineBucket });
+
+  const statusGroups = roleGroups;
 
   const handleMemberClick = (userId: string, e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -104,7 +131,7 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
       <div className="member-sidebar-content">
       {statusGroups.map((group) => (
         <div key={group.key}>
-          <div className="member-group-header">{group.label} — {group.members.length}</div>
+          <div className="member-group-header" style={group.color ? { color: group.color } : undefined}>{group.label} — {group.members.length}</div>
           {group.members.map((m) => (
             <MemberItem
               key={m.user_id}
