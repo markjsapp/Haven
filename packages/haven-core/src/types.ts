@@ -47,6 +47,7 @@ export interface UserPublic {
   custom_status: string | null;
   custom_status_emoji: string | null;
   created_at: string;
+  encrypted_profile?: string | null; // base64 encrypted blob
 }
 
 export interface MutualFriendInfo {
@@ -73,10 +74,33 @@ export interface UserProfileResponse {
   mutual_friends: MutualFriendInfo[];
   mutual_server_count: number;
   roles?: RoleResponse[];
+  encrypted_profile?: string | null; // base64 encrypted blob
 }
 
 export interface UpdateProfileRequest {
   display_name?: string | null;
+  about_me?: string | null;
+  custom_status?: string | null;
+  custom_status_emoji?: string | null;
+  encrypted_profile?: string; // base64 encrypted blob
+}
+
+export interface ProfileKeyDistributionEntry {
+  to_user_id: string;
+  encrypted_profile_key: string; // base64
+}
+
+export interface DistributeProfileKeysRequest {
+  distributions: ProfileKeyDistributionEntry[];
+}
+
+export interface ProfileKeyResponse {
+  from_user_id: string;
+  encrypted_profile_key: string; // base64
+}
+
+/** Plaintext fields stored inside the encrypted profile blob */
+export interface ProfileFields {
   about_me?: string | null;
   custom_status?: string | null;
   custom_status_emoji?: string | null;

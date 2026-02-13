@@ -41,3 +41,86 @@ pub fn size_bucket(actual_size: u64) -> i32 {
         _ => 100,                     // ≤100MB → bucket 100
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_x25519_key_correct_length() {
+        assert!(validate_x25519_key(&[0u8; 32]));
+    }
+
+    #[test]
+    fn validate_x25519_key_too_short() {
+        assert!(!validate_x25519_key(&[0u8; 16]));
+    }
+
+    #[test]
+    fn validate_x25519_key_too_long() {
+        assert!(!validate_x25519_key(&[0u8; 64]));
+    }
+
+    #[test]
+    fn validate_x25519_key_empty() {
+        assert!(!validate_x25519_key(&[]));
+    }
+
+    #[test]
+    fn random_bytes_returns_correct_length() {
+        assert_eq!(random_bytes(0).len(), 0);
+        assert_eq!(random_bytes(16).len(), 16);
+        assert_eq!(random_bytes(64).len(), 64);
+    }
+
+    #[test]
+    fn random_bytes_are_not_all_zero() {
+        // 32 random bytes should not all be zero (probability ~2^-256)
+        let bytes = random_bytes(32);
+        assert!(bytes.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn generate_invite_code_is_12_chars() {
+        let code = generate_invite_code();
+        assert_eq!(code.len(), 12);
+    }
+
+    #[test]
+    fn generate_invite_code_is_url_safe() {
+        let code = generate_invite_code();
+        assert!(code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn generate_invite_code_unique() {
+        let a = generate_invite_code();
+        let b = generate_invite_code();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn size_bucket_small_file() {
+        assert_eq!(size_bucket(0), 1);
+        assert_eq!(size_bucket(500_000), 1);
+        assert_eq!(size_bucket(1_048_576), 1);
+    }
+
+    #[test]
+    fn size_bucket_medium_file() {
+        assert_eq!(size_bucket(1_048_577), 5);
+        assert_eq!(size_bucket(5_242_880), 5);
+    }
+
+    #[test]
+    fn size_bucket_large_file() {
+        assert_eq!(size_bucket(5_242_881), 25);
+        assert_eq!(size_bucket(26_214_400), 25);
+    }
+
+    #[test]
+    fn size_bucket_very_large_file() {
+        assert_eq!(size_bucket(26_214_401), 100);
+        assert_eq!(size_bucket(100_000_000), 100);
+    }
+}

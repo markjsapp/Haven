@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback, Fragment } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, Fragment, lazy, Suspense } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { Permission } from "@haven/core";
@@ -7,7 +7,7 @@ import MessageAttachments from "./MessageAttachments.js";
 import MessageBody from "./MessageBody.js";
 import LinkPreviewCard from "./LinkPreviewCard.js";
 import ConfirmDialog from "./ConfirmDialog.js";
-import ProfilePopup from "./ProfilePopup.js";
+const ProfilePopup = lazy(() => import("./ProfilePopup.js"));
 import Avatar from "./Avatar.js";
 import { parseNamesFromMeta, parseChannelDisplay } from "../lib/channel-utils.js";
 import EmojiPicker from "./EmojiPicker.js";
@@ -422,12 +422,14 @@ export default function MessageList() {
         />
       )}
       {profilePopup && (
-        <ProfilePopup
-          userId={profilePopup.userId}
-          serverId={currentChannel?.server_id ?? undefined}
-          position={{ top: profilePopup.top, left: profilePopup.left }}
-          onClose={() => setProfilePopup(null)}
-        />
+        <Suspense fallback={null}>
+          <ProfilePopup
+            userId={profilePopup.userId}
+            serverId={currentChannel?.server_id ?? undefined}
+            position={{ top: profilePopup.top, left: profilePopup.left }}
+            onClose={() => setProfilePopup(null)}
+          />
+        </Suspense>
       )}
       {contextMenu && (
         <MessageContextMenu

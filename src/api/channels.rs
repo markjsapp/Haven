@@ -19,7 +19,7 @@ pub async fn create_channel(
     Json(req): Json<CreateChannelRequest>,
 ) -> AppResult<Json<ChannelResponse>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
@@ -36,7 +36,7 @@ pub async fn create_channel(
     let position = req.position.unwrap_or(0);
 
     let channel = queries::create_channel(
-        &state.db,
+        state.db.write(),
         Some(server_id),
         &encrypted_meta,
         channel_type,
@@ -46,7 +46,7 @@ pub async fn create_channel(
     .await?;
 
     // Add creator to the channel
-    queries::add_channel_member(&state.db, channel.id, user_id).await?;
+    queries::add_channel_member(state.db.write(), channel.id, user_id).await?;
 
     Ok(Json(ChannelResponse {
         id: channel.id,
@@ -70,18 +70,18 @@ pub async fn join_channel(
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     // Verify the channel exists
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
 
     // If the channel belongs to a server, verify server membership
     if let Some(server_id) = channel.server_id {
-        if !queries::is_server_member(&state.db, server_id, user_id).await? {
+        if !queries::is_server_member(state.db.read(), server_id, user_id).await? {
             return Err(AppError::Forbidden("Not a member of the server".into()));
         }
     }
 
-    queries::add_channel_member(&state.db, channel_id, user_id).await?;
+    queries::add_channel_member(state.db.write(), channel_id, user_id).await?;
 
     Ok(Json(serde_json::json!({ "message": "Joined channel" })))
 }
@@ -95,12 +95,12 @@ pub async fn create_dm(
     Json(req): Json<CreateDmRequest>,
 ) -> AppResult<Json<ChannelResponse>> {
     // Verify target user exists
-    let target = queries::find_user_by_id(&state.db, req.target_user_id)
+    let target = queries::find_user_by_id(state.db.read(), req.target_user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
     // Check for existing DM channel between these two users
-    if let Some(existing) = queries::find_dm_channel(&state.db, user_id, req.target_user_id).await? {
+    if let Some(existing) = queries::find_dm_channel(state.db.read(), user_id, req.target_user_id).await? {
         return Ok(Json(ChannelResponse {
             id: existing.id,
             server_id: None,
@@ -120,15 +120,15 @@ pub async fn create_dm(
     let dm_status = match target.dm_privacy.as_str() {
         "everyone" => "active",
         "friends_only" => {
-            if queries::are_friends(&state.db, user_id, req.target_user_id).await? {
+            if queries::are_friends(state.db.read(), user_id, req.target_user_id).await? {
                 "active"
             } else {
                 "pending"
             }
         }
         "server_members" => {
-            if queries::are_friends(&state.db, user_id, req.target_user_id).await?
-                || queries::share_server(&state.db, user_id, req.target_user_id).await?
+            if queries::are_friends(state.db.read(), user_id, req.target_user_id).await?
+                || queries::share_server(state.db.read(), user_id, req.target_user_id).await?
             {
                 "active"
             } else {
@@ -145,23 +145,23 @@ pub async fn create_dm(
     )
     .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
 
-    let channel = queries::create_channel(&state.db, None, &encrypted_meta, "dm", 0, None).await?;
+    let channel = queries::create_channel(state.db.write(), None, &encrypted_meta, "dm", 0, None).await?;
 
     // Set dm_status
     if dm_status != "active" {
-        queries::set_dm_status(&state.db, channel.id, dm_status).await?;
+        queries::set_dm_status(state.db.write(), channel.id, dm_status).await?;
     }
 
     // Add both users
-    queries::add_channel_member(&state.db, channel.id, user_id).await?;
-    queries::add_channel_member(&state.db, channel.id, req.target_user_id).await?;
+    queries::add_channel_member(state.db.write(), channel.id, user_id).await?;
+    queries::add_channel_member(state.db.write(), channel.id, req.target_user_id).await?;
 
     // If pending, notify the target user via WS
     if dm_status == "pending" {
         send_to_user(&state, req.target_user_id, WsServerMessage::DmRequestReceived {
             channel_id: channel.id,
             from_user_id: user_id,
-        });
+        }).await;
     }
 
     Ok(Json(ChannelResponse {
@@ -185,7 +185,7 @@ pub async fn list_dm_channels(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
 ) -> AppResult<Json<Vec<ChannelResponse>>> {
-    let channels = queries::get_user_dm_channels(&state.db, user_id).await?;
+    let channels = queries::get_user_dm_channels(state.db.read(), user_id).await?;
     let responses: Vec<ChannelResponse> = channels
         .into_iter()
         .map(|ch| ChannelResponse {
@@ -213,7 +213,7 @@ pub async fn update_channel(
     Path(channel_id): Path<Uuid>,
     Json(req): Json<UpdateChannelRequest>,
 ) -> AppResult<Json<ChannelResponse>> {
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
 
@@ -222,7 +222,7 @@ pub async fn update_channel(
         .ok_or(AppError::Forbidden("Cannot rename DM channels".into()))?;
 
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
@@ -235,7 +235,7 @@ pub async fn update_channel(
     )
     .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
 
-    let updated = queries::update_channel_meta(&state.db, channel_id, &encrypted_meta).await?;
+    let updated = queries::update_channel_meta(state.db.write(), channel_id, &encrypted_meta).await?;
 
     Ok(Json(ChannelResponse {
         id: updated.id,
@@ -261,7 +261,7 @@ pub async fn reorder_channels(
     Json(req): Json<ReorderChannelsRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
@@ -273,7 +273,7 @@ pub async fn reorder_channels(
         .iter()
         .map(|p| (p.id, p.position, p.category_id))
         .collect();
-    queries::reorder_channels(&state.db, server_id, &order).await?;
+    queries::reorder_channels(state.db.write(), server_id, &order).await?;
 
     Ok(Json(serde_json::json!({ "message": "Channels reordered" })))
 }
@@ -285,7 +285,7 @@ pub async fn delete_channel(
     AuthUser(user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
 
@@ -293,14 +293,14 @@ pub async fn delete_channel(
         .ok_or(AppError::Forbidden("Cannot delete DM channels".into()))?;
 
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
     )
     .await?;
 
-    queries::delete_channel(&state.db, channel_id).await?;
+    queries::delete_channel(state.db.write(), channel_id).await?;
 
     Ok(Json(serde_json::json!({ "message": "Channel deleted" })))
 }
@@ -313,11 +313,11 @@ pub async fn list_channel_members(
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<ChannelMemberInfo>>> {
     // Verify caller can access the channel
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
-    let members = queries::get_channel_members_info(&state.db, channel_id).await?;
+    let members = queries::get_channel_members_info(state.db.read(), channel_id).await?;
     Ok(Json(members))
 }
 
@@ -341,7 +341,7 @@ pub async fn create_group_dm(
         if member_id == user_id {
             continue; // Skip self if accidentally included
         }
-        if !queries::are_friends(&state.db, user_id, member_id).await? {
+        if !queries::are_friends(state.db.read(), user_id, member_id).await? {
             return Err(AppError::Validation(format!(
                 "User {} is not your friend",
                 member_id
@@ -355,17 +355,17 @@ pub async fn create_group_dm(
     )
     .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
 
-    let channel = queries::create_channel(&state.db, None, &encrypted_meta, "group", 0, None).await?;
+    let channel = queries::create_channel(state.db.write(), None, &encrypted_meta, "group", 0, None).await?;
 
     // Add creator
-    queries::add_channel_member(&state.db, channel.id, user_id).await?;
+    queries::add_channel_member(state.db.write(), channel.id, user_id).await?;
 
     // Add all other members
     for &member_id in &req.member_ids {
         if member_id == user_id {
             continue;
         }
-        queries::add_channel_member(&state.db, channel.id, member_id).await?;
+        queries::add_channel_member(state.db.write(), channel.id, member_id).await?;
     }
 
     Ok(Json(ChannelResponse {
@@ -390,7 +390,7 @@ pub async fn leave_channel(
     AuthUser(user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
 
@@ -398,24 +398,24 @@ pub async fn leave_channel(
         return Err(AppError::Validation("Can only leave group DM channels".into()));
     }
 
-    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+    if !queries::is_channel_member(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
     // Look up username before removing
-    let user = queries::find_user_by_id(&state.db, user_id).await?;
+    let user = queries::find_user_by_id(state.db.read(), user_id).await?;
     let username = user
         .as_ref()
         .map(|u| u.display_name.as_deref().unwrap_or(&u.username).to_string())
         .unwrap_or_else(|| "Someone".to_string());
 
     // Remove the user from the channel
-    queries::remove_channel_member(&state.db, channel_id, user_id).await?;
+    queries::remove_channel_member(state.db.write(), channel_id, user_id).await?;
 
     // Check if channel is now empty
-    let remaining = queries::get_channel_member_ids(&state.db, channel_id).await?;
+    let remaining = queries::get_channel_member_ids(state.db.read(), channel_id).await?;
     if remaining.is_empty() {
-        queries::delete_channel(&state.db, channel_id).await?;
+        queries::delete_channel(state.db.write(), channel_id).await?;
     } else {
         // Insert system message about the user leaving
         let body = serde_json::json!({
@@ -424,7 +424,7 @@ pub async fn leave_channel(
             "user_id": user_id.to_string(),
         });
         if let Ok(sys_msg) = queries::insert_system_message(
-            &state.db, channel_id, &body.to_string(),
+            state.db.write(), channel_id, &body.to_string(),
         ).await {
             let response: MessageResponse = sys_msg.into();
             if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
@@ -444,7 +444,7 @@ pub async fn add_group_member(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<AddGroupMemberRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
 
@@ -452,21 +452,21 @@ pub async fn add_group_member(
         return Err(AppError::Validation("Can only add members to group DM channels".into()));
     }
 
-    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+    if !queries::is_channel_member(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
-    if queries::is_channel_member(&state.db, channel_id, body.user_id).await? {
+    if queries::is_channel_member(state.db.read(), channel_id, body.user_id).await? {
         return Err(AppError::Validation("User is already a member".into()));
     }
 
     // Cap at 10 members
-    let members = queries::get_channel_member_ids(&state.db, channel_id).await?;
+    let members = queries::get_channel_member_ids(state.db.read(), channel_id).await?;
     if members.len() >= 10 {
         return Err(AppError::Validation("Group DM cannot have more than 10 members".into()));
     }
 
-    queries::add_channel_member(&state.db, channel_id, body.user_id).await?;
+    queries::add_channel_member(state.db.write(), channel_id, body.user_id).await?;
 
     Ok(Json(serde_json::json!({ "added": true })))
 }
@@ -489,11 +489,12 @@ pub struct UpdateChannelRequest {
     pub encrypted_meta: String, // base64
 }
 
-/// Send a WS message to a specific user (all their connections).
-fn send_to_user(state: &AppState, user_id: Uuid, msg: WsServerMessage) {
+/// Send a WS message to a specific user (all their connections + Redis pub/sub).
+async fn send_to_user(state: &AppState, user_id: Uuid, msg: WsServerMessage) {
     if let Some(conns) = state.connections.get(&user_id) {
         for tx in conns.iter() {
             let _ = tx.send(msg.clone());
         }
     }
+    crate::pubsub::publish_user_event(&mut state.redis.clone(), user_id, &msg).await;
 }

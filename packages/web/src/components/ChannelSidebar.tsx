@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
@@ -18,7 +18,7 @@ import CreateGroupDm from "./CreateGroupDm.js";
 import CreateChannelModal from "./CreateChannelModal.js";
 import ConfirmDialog from "./ConfirmDialog.js";
 import UserPanel from "./UserPanel.js";
-import ServerSettings from "./ServerSettings.js";
+const ServerSettings = lazy(() => import("./ServerSettings.js"));
 import VoiceChannelPreview from "./VoiceChannelPreview.js";
 import ChannelPermissionsEditor from "./ChannelPermissionsEditor.js";
 import { useVoiceStore } from "../store/voice.js";
@@ -568,6 +568,20 @@ function ServerView({ serverId }: { serverId: string }) {
   const serverChannels = channels.filter((ch) => ch.server_id === serverId);
   const { can, isOwner } = usePermissions(serverId);
   const canManageChannels = can(Permission.MANAGE_CHANNELS);
+
+  // Auto-select a channel when switching to a server with no active channel
+  useEffect(() => {
+    if (serverChannels.length === 0) return;
+    const currentInServer = currentChannelId && serverChannels.some((ch) => ch.id === currentChannelId);
+    if (currentInServer) return;
+
+    // Prefer the system channel, then fall back to first text channel
+    const systemId = server?.system_channel_id;
+    const target = (systemId && serverChannels.find((ch) => ch.id === systemId))
+      || serverChannels.find((ch) => ch.channel_type === "text")
+      || serverChannels[0];
+    if (target) selectChannel(target.id);
+  }, [serverId, serverChannels.length]);
 
   // Group channels by category, sorted by position
   const { uncategorized, categorized } = useMemo(() => {
@@ -1172,10 +1186,12 @@ function ServerView({ serverId }: { serverId: string }) {
       )}
 
       {showSettings && server && (
-        <ServerSettings
-          serverId={serverId}
-          onClose={() => setShowSettings(false)}
-        />
+        <Suspense fallback={null}>
+          <ServerSettings
+            serverId={serverId}
+            onClose={() => setShowSettings(false)}
+          />
+        </Suspense>
       )}
 
       {permissionsChannelId && (

@@ -4,6 +4,23 @@ use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
 
+// ─── Pagination ────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct PaginationQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+impl PaginationQuery {
+    /// Returns clamped limit (default 50, max 100) and offset (default 0).
+    pub fn resolve(&self) -> (i64, i64) {
+        let limit = self.limit.unwrap_or(50).clamp(1, 100);
+        let offset = self.offset.unwrap_or(0).max(0);
+        (limit, offset)
+    }
+}
+
 // ─── User ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -17,6 +34,7 @@ pub struct User {
     pub signed_prekey: Vec<u8>,    // Signed pre-key (public)
     pub signed_prekey_sig: Vec<u8>, // Signature over the signed pre-key
     pub totp_secret: Option<String>,
+    pub pending_totp_secret: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub about_me: Option<String>,
@@ -24,6 +42,7 @@ pub struct User {
     pub custom_status_emoji: Option<String>,
     pub avatar_url: Option<String>,
     pub dm_privacy: String, // "everyone", "friends_only", "server_members"
+    pub encrypted_profile: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,6 +55,8 @@ pub struct UserPublic {
     pub custom_status: Option<String>,
     pub custom_status_emoji: Option<String>,
     pub created_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encrypted_profile: Option<String>, // base64
 }
 
 impl From<User> for UserPublic {
@@ -49,6 +70,9 @@ impl From<User> for UserPublic {
             custom_status: u.custom_status,
             custom_status_emoji: u.custom_status_emoji,
             created_at: u.created_at,
+            encrypted_profile: u.encrypted_profile.map(|v| {
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &v)
+            }),
         }
     }
 }
@@ -731,6 +755,8 @@ pub struct UserProfileResponse {
     pub mutual_server_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roles: Option<Vec<RoleResponse>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encrypted_profile: Option<String>, // base64
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -747,6 +773,35 @@ pub struct UpdateProfileRequest {
     pub about_me: Option<String>,
     pub custom_status: Option<String>,
     pub custom_status_emoji: Option<String>,
+    pub encrypted_profile: Option<String>, // base64-encoded encrypted blob
+}
+
+// ─── Profile Key Distribution ───────────────────────
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct ProfileKeyDistribution {
+    pub id: Uuid,
+    pub from_user_id: Uuid,
+    pub to_user_id: Uuid,
+    pub encrypted_profile_key: Vec<u8>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileKeyDistributionEntry {
+    pub to_user_id: Uuid,
+    pub encrypted_profile_key: String, // base64
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DistributeProfileKeysRequest {
+    pub distributions: Vec<ProfileKeyDistributionEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProfileKeyResponse {
+    pub from_user_id: Uuid,
+    pub encrypted_profile_key: String, // base64
 }
 
 // ─── Blocked Users ───────────────────────────────────

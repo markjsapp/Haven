@@ -19,12 +19,12 @@ pub async fn get_key_bundle(
     Path(user_id): Path<Uuid>,
 ) -> AppResult<Json<KeyBundle>> {
     // Fetch the target user
-    let user = queries::find_user_by_id(&state.db, user_id)
+    let user = queries::find_user_by_id(state.db.read(), user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
     // Try to consume a one-time prekey
-    let one_time_prekey = queries::consume_prekey(&state.db, user_id).await?;
+    let one_time_prekey = queries::consume_prekey(state.db.write(), user_id).await?;
 
     let bundle = KeyBundle {
         identity_key: base64::Engine::encode(
@@ -48,7 +48,7 @@ pub async fn get_key_bundle(
     };
 
     // Log a warning if prekeys are running low
-    if let Ok(remaining) = queries::count_unused_prekeys(&state.db, user_id).await {
+    if let Ok(remaining) = queries::count_unused_prekeys(state.db.read(), user_id).await {
         if remaining < 10 {
             tracing::warn!(
                 "User {} has only {} prekeys remaining. Client should replenish.",
@@ -77,7 +77,7 @@ pub async fn upload_prekeys(
     }
 
     // Get current max key_id for this user to continue the sequence
-    let current_count = queries::count_unused_prekeys(&state.db, user_id).await?;
+    let current_count = queries::count_unused_prekeys(state.db.read(), user_id).await?;
     let start_id = current_count as i32;
 
     let prekeys: Result<Vec<(i32, Vec<u8>)>, _> = req
@@ -94,9 +94,9 @@ pub async fn upload_prekeys(
         })
         .collect();
 
-    queries::insert_prekeys(&state.db, user_id, &prekeys?).await?;
+    queries::insert_prekeys(state.db.write(), user_id, &prekeys?).await?;
 
-    let total = queries::count_unused_prekeys(&state.db, user_id).await?;
+    let total = queries::count_unused_prekeys(state.db.read(), user_id).await?;
 
     Ok(Json(serde_json::json!({
         "message": "Prekeys uploaded",
@@ -131,16 +131,16 @@ pub async fn update_identity_keys(
     .map_err(|_| AppError::Validation("Invalid signed_prekey_signature encoding".into()))?;
 
     // Check if the identity key actually changed — if so, old SKDMs are undecryptable
-    let user = queries::find_user_by_id(&state.db, user_id)
+    let user = queries::find_user_by_id(state.db.read(), user_id)
         .await?
         .ok_or(AppError::NotFound("User not found".into()))?;
 
     if user.identity_key != identity_key {
         // Identity key changed: clear all pending SKDMs encrypted with the old key
-        queries::clear_sender_key_distributions_for_user(&state.db, user_id).await?;
+        queries::clear_sender_key_distributions_for_user(state.db.write(), user_id).await?;
     }
 
-    queries::update_user_keys(&state.db, user_id, &identity_key, &signed_prekey, &signed_prekey_sig).await?;
+    queries::update_user_keys(state.db.write(), user_id, &identity_key, &signed_prekey, &signed_prekey_sig).await?;
 
     Ok(Json(serde_json::json!({ "message": "Keys updated" })))
 }
@@ -151,7 +151,7 @@ pub async fn prekey_count(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
-    let count = queries::count_unused_prekeys(&state.db, user_id).await?;
+    let count = queries::count_unused_prekeys(state.db.read(), user_id).await?;
 
     Ok(Json(serde_json::json!({
         "count": count,

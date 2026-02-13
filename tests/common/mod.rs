@@ -30,16 +30,31 @@ impl TestApp {
             host: "127.0.0.1".into(),
             port: 0,
             database_url: String::new(),
+            database_replica_url: String::new(),
             db_max_connections: 5,
             redis_url: "redis://127.0.0.1:6379".into(),
             jwt_secret: "test-jwt-secret-that-is-long-enough-for-hmac".into(),
             jwt_expiry_hours: 24,
             refresh_token_expiry_days: 30,
+            storage_backend: "local".into(),
             storage_dir: "/tmp/haven-test-storage".into(),
             storage_encryption_key: "0".repeat(64),
+            s3_endpoint: String::new(),
+            s3_bucket: String::new(),
+            s3_access_key: String::new(),
+            s3_secret_key: String::new(),
+            s3_region: String::new(),
+            cors_origins: "*".into(),
             max_requests_per_minute: 10000,
             max_ws_connections_per_user: 10,
+            broadcast_channel_capacity: 4096,
             max_upload_size_bytes: 10_000_000,
+            cdn_enabled: false,
+            cdn_base_url: String::new(),
+            cdn_presign_expiry_secs: 3600,
+            livekit_url: String::new(),
+            livekit_api_key: String::new(),
+            livekit_api_secret: String::new(),
         };
 
         std::fs::create_dir_all(&config.storage_dir).ok();
@@ -52,13 +67,20 @@ impl TestApp {
             .await
             .expect("Failed to connect to Redis — is docker-compose up?");
 
+        let storage = haven_backend::storage::Storage::Local {
+            dir: std::path::PathBuf::from(&config.storage_dir),
+            encryption_key: storage_key,
+        };
+
         let state = AppState {
-            db: pool,
+            db: haven_backend::db::DbPools::from_single(pool),
             redis,
             config,
             storage_key,
+            storage,
             connections: Arc::new(DashMap::new()),
             channel_broadcasts: Arc::new(DashMap::new()),
+            pubsub_subscriptions: haven_backend::pubsub::empty_subscriptions(),
         };
 
         TestApp { state }
@@ -66,6 +88,11 @@ impl TestApp {
 
     /// Get a fresh clone of the router for a `oneshot` request.
     fn router(&self) -> Router {
+        build_router(self.state.clone())
+    }
+
+    /// Get a router suitable for `axum::serve` (WS integration tests).
+    pub fn router_clone(&self) -> Router {
         build_router(self.state.clone())
     }
 

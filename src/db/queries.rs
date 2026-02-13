@@ -62,6 +62,23 @@ pub async fn find_user_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<User>>
     Ok(user)
 }
 
+/// Cached variant — checks Redis first, falls back to DB, caches for 5 min.
+pub async fn find_user_by_id_cached(
+    pool: &PgPool,
+    redis: &mut redis::aio::ConnectionManager,
+    id: Uuid,
+) -> AppResult<Option<User>> {
+    let key = format!("haven:user:{}", id);
+    if let Some(user) = crate::cache::get_cached::<User>(redis, &key).await {
+        return Ok(Some(user));
+    }
+    let user = find_user_by_id(pool, id).await?;
+    if let Some(ref u) = user {
+        crate::cache::set_cached(redis, &key, u, 300).await;
+    }
+    Ok(user)
+}
+
 pub async fn update_user_keys(
     pool: &PgPool,
     user_id: Uuid,
@@ -90,8 +107,29 @@ pub async fn set_user_totp_secret(pool: &PgPool, user_id: Uuid, secret: &str) ->
     Ok(())
 }
 
+/// Store TOTP secret in the pending column (not yet verified).
+pub async fn set_pending_totp_secret(pool: &PgPool, user_id: Uuid, secret: &str) -> AppResult<()> {
+    sqlx::query("UPDATE users SET pending_totp_secret = $1, updated_at = NOW() WHERE id = $2")
+        .bind(secret)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Promote pending TOTP secret to active after successful verification.
+pub async fn promote_pending_totp(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE users SET totp_secret = pending_totp_secret, pending_totp_secret = NULL, updated_at = NOW() WHERE id = $1"
+    )
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn clear_user_totp_secret(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
-    sqlx::query("UPDATE users SET totp_secret = NULL, updated_at = NOW() WHERE id = $1")
+    sqlx::query("UPDATE users SET totp_secret = NULL, pending_totp_secret = NULL, updated_at = NOW() WHERE id = $1")
         .bind(user_id)
         .execute(pool)
         .await?;
@@ -246,6 +284,23 @@ pub async fn find_server_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Serv
         .bind(id)
         .fetch_optional(pool)
         .await?;
+    Ok(server)
+}
+
+/// Cached variant — checks Redis first, falls back to DB, caches for 5 min.
+pub async fn find_server_by_id_cached(
+    pool: &PgPool,
+    redis: &mut redis::aio::ConnectionManager,
+    id: Uuid,
+) -> AppResult<Option<Server>> {
+    let key = format!("haven:server:{}", id);
+    if let Some(server) = crate::cache::get_cached::<Server>(redis, &key).await {
+        return Ok(Some(server));
+    }
+    let server = find_server_by_id(pool, id).await?;
+    if let Some(ref s) = server {
+        crate::cache::set_cached(redis, &key, s, 300).await;
+    }
     Ok(server)
 }
 
@@ -409,11 +464,13 @@ pub async fn update_channel_meta(
 }
 
 pub async fn delete_channel(pool: &PgPool, channel_id: Uuid) -> AppResult<()> {
-    // Delete members first (FK), then messages, then the channel
+    // Delete members first, then message children, then messages, then the channel
     sqlx::query("DELETE FROM channel_members WHERE channel_id = $1")
         .bind(channel_id)
         .execute(pool)
         .await?;
+    // Clean up child rows before deleting messages (no FK cascade on partitioned table)
+    cleanup_channel_message_children(pool, channel_id).await?;
     sqlx::query("DELETE FROM messages WHERE channel_id = $1")
         .bind(channel_id)
         .execute(pool)
@@ -450,6 +507,28 @@ pub async fn add_channel_member(
     .fetch_one(pool)
     .await?;
     Ok(member)
+}
+
+/// Bulk-insert a user into all channels belonging to a server (single query).
+pub async fn add_channel_members_bulk(
+    pool: &PgPool,
+    server_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<u64> {
+    let result = sqlx::query(
+        r#"
+        INSERT INTO channel_members (id, channel_id, user_id, joined_at)
+        SELECT gen_random_uuid(), c.id, $1, NOW()
+        FROM channels c
+        WHERE c.server_id = $2
+        ON CONFLICT (channel_id, user_id) DO UPDATE SET joined_at = EXCLUDED.joined_at
+        "#,
+    )
+    .bind(user_id)
+    .bind(server_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 pub async fn is_channel_member(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -> AppResult<bool> {
@@ -610,6 +689,58 @@ pub async fn update_message_body(
     msg.ok_or_else(|| AppError::Forbidden("Cannot edit this message".into()))
 }
 
+/// Clean up child rows that previously relied on FK CASCADE from messages.
+/// Must be called before deleting messages (partitioned tables can't have FK refs).
+async fn cleanup_message_children(pool: &PgPool, message_id: Uuid) -> AppResult<()> {
+    sqlx::query("DELETE FROM attachments WHERE message_id = $1")
+        .bind(message_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM reactions WHERE message_id = $1")
+        .bind(message_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM pinned_messages WHERE message_id = $1")
+        .bind(message_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM reports WHERE message_id = $1")
+        .bind(message_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Clean up child rows for all messages in a channel.
+/// Used when deleting a channel (bulk message delete).
+async fn cleanup_channel_message_children(pool: &PgPool, channel_id: Uuid) -> AppResult<()> {
+    sqlx::query(
+        "DELETE FROM attachments WHERE message_id IN (SELECT id FROM messages WHERE channel_id = $1)"
+    )
+    .bind(channel_id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE channel_id = $1)"
+    )
+    .bind(channel_id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "DELETE FROM pinned_messages WHERE channel_id = $1"
+    )
+    .bind(channel_id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "DELETE FROM reports WHERE channel_id = $1"
+    )
+    .bind(channel_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Delete a message. Only the original sender can delete.
 /// Returns the deleted message (for getting channel_id).
 pub async fn delete_message(
@@ -617,6 +748,9 @@ pub async fn delete_message(
     message_id: Uuid,
     sender_id: Uuid,
 ) -> AppResult<Message> {
+    // Clean up child rows (no FK cascade on partitioned table)
+    cleanup_message_children(pool, message_id).await?;
+
     let msg = sqlx::query_as::<_, Message>(
         r#"
         DELETE FROM messages
@@ -637,6 +771,9 @@ pub async fn delete_message_admin(
     pool: &PgPool,
     message_id: Uuid,
 ) -> AppResult<Message> {
+    // Clean up child rows (no FK cascade on partitioned table)
+    cleanup_message_children(pool, message_id).await?;
+
     let msg = sqlx::query_as::<_, Message>(
         r#"
         DELETE FROM messages
@@ -691,11 +828,55 @@ pub async fn get_channel_messages(
 }
 
 /// Purge expired messages (called by background worker).
+/// Cleans up child rows first since FK cascades were removed for partitioning.
 pub async fn purge_expired_messages(pool: &PgPool) -> AppResult<u64> {
+    let expired_condition = "message_id IN (SELECT id FROM messages WHERE expires_at IS NOT NULL AND expires_at < NOW())";
+    sqlx::query(&format!("DELETE FROM attachments WHERE {}", expired_condition))
+        .execute(pool)
+        .await?;
+    sqlx::query(&format!("DELETE FROM reactions WHERE {}", expired_condition))
+        .execute(pool)
+        .await?;
+    sqlx::query(&format!("DELETE FROM pinned_messages WHERE {}", expired_condition))
+        .execute(pool)
+        .await?;
+    sqlx::query(&format!("DELETE FROM reports WHERE {}", expired_condition))
+        .execute(pool)
+        .await?;
     let result = sqlx::query("DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < NOW()")
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
+}
+
+/// Ensure monthly message partitions exist for the next 3 months.
+/// Called by a daily background worker. Uses CREATE TABLE IF NOT EXISTS
+/// so duplicate calls are safe.
+pub async fn ensure_future_partitions(pool: &PgPool) -> AppResult<()> {
+    use chrono::Datelike;
+
+    let now = Utc::now();
+    for month_offset in 0..3 {
+        let target = now
+            .checked_add_months(chrono::Months::new(month_offset))
+            .unwrap_or(now);
+        let name = format!("messages_y{}m{:02}", target.year(), target.month());
+        let start = format!("{}-{:02}-01", target.year(), target.month());
+        let next = target
+            .checked_add_months(chrono::Months::new(1))
+            .unwrap_or(target);
+        let end = format!("{}-{:02}-01", next.year(), next.month());
+
+        let sql = format!(
+            "CREATE TABLE IF NOT EXISTS {} PARTITION OF messages FOR VALUES FROM ('{}') TO ('{}')",
+            name, start, end
+        );
+        // Ignore errors — partition may already exist or overlap with default
+        if let Err(e) = sqlx::query(&sql).execute(pool).await {
+            tracing::debug!("Partition {} already exists or overlaps: {}", name, e);
+        }
+    }
+    Ok(())
 }
 
 // ─── Attachments ───────────────────────────────────────
@@ -791,11 +972,13 @@ pub async fn find_invite_by_code(pool: &PgPool, code: &str) -> AppResult<Option<
     Ok(invite)
 }
 
-pub async fn get_server_invites(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<Invite>> {
+pub async fn get_server_invites(pool: &PgPool, server_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<Invite>> {
     let invites = sqlx::query_as::<_, Invite>(
-        "SELECT * FROM invites WHERE server_id = $1 ORDER BY created_at DESC",
+        "SELECT * FROM invites WHERE server_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
     )
     .bind(server_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
     Ok(invites)
@@ -992,8 +1175,10 @@ pub async fn get_channel_member_identity_keys(
 pub async fn get_server_members(
     pool: &PgPool,
     server_id: Uuid,
+    limit: i64,
+    offset: i64,
 ) -> AppResult<Vec<ServerMemberResponse>> {
-    // Step 1: Get members
+    // Step 1: Get members (paginated)
     let rows: Vec<(Uuid, String, Option<String>, Option<String>, DateTime<Utc>, Option<String>)> =
         sqlx::query_as(
             r#"
@@ -1002,9 +1187,12 @@ pub async fn get_server_members(
             INNER JOIN users u ON u.id = sm.user_id
             WHERE sm.server_id = $1
             ORDER BY sm.joined_at ASC
+            LIMIT $2 OFFSET $3
             "#,
         )
         .bind(server_id)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(pool)
         .await?;
 
@@ -1078,6 +1266,7 @@ pub async fn update_user_profile(
     about_me: Option<&str>,
     custom_status: Option<&str>,
     custom_status_emoji: Option<&str>,
+    encrypted_profile: Option<&[u8]>,
 ) -> AppResult<User> {
     let user = sqlx::query_as::<_, User>(
         r#"
@@ -1086,6 +1275,7 @@ pub async fn update_user_profile(
             about_me = $3,
             custom_status = $4,
             custom_status_emoji = $5,
+            encrypted_profile = COALESCE($6, encrypted_profile),
             updated_at = NOW()
         WHERE id = $1
         RETURNING *
@@ -1096,6 +1286,7 @@ pub async fn update_user_profile(
     .bind(about_me)
     .bind(custom_status)
     .bind(custom_status_emoji)
+    .bind(encrypted_profile)
     .fetch_one(pool)
     .await?;
     Ok(user)
@@ -1149,7 +1340,7 @@ pub async fn is_blocked(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> Ap
     Ok(row.0)
 }
 
-pub async fn get_blocked_users(pool: &PgPool, blocker_id: Uuid) -> AppResult<Vec<BlockedUserResponse>> {
+pub async fn get_blocked_users(pool: &PgPool, blocker_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<BlockedUserResponse>> {
     let rows = sqlx::query_as::<_, BlockedUserResponse>(
         r#"
         SELECT bu.blocked_id AS user_id, u.username, u.display_name, u.avatar_url, bu.created_at AS blocked_at
@@ -1157,9 +1348,12 @@ pub async fn get_blocked_users(pool: &PgPool, blocker_id: Uuid) -> AppResult<Vec
         INNER JOIN users u ON u.id = bu.blocked_id
         WHERE bu.blocker_id = $1
         ORDER BY bu.created_at DESC
+        LIMIT $2 OFFSET $3
         "#,
     )
     .bind(blocker_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -1505,6 +1699,22 @@ pub async fn get_member_permissions(
     Ok((is_owner, effective))
 }
 
+/// Cached variant — checks Redis first, falls back to DB, caches for 2 min.
+pub async fn get_member_permissions_cached(
+    pool: &PgPool,
+    redis: &mut redis::aio::ConnectionManager,
+    server_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<(bool, i64)> {
+    let key = format!("haven:perms:{}:{}", server_id, user_id);
+    if let Some((is_owner, perms)) = crate::cache::get_cached::<(bool, i64)>(redis, &key).await {
+        return Ok((is_owner, perms));
+    }
+    let result = get_member_permissions(pool, server_id, user_id).await?;
+    crate::cache::set_cached(redis, &key, &result, 120).await;
+    Ok(result)
+}
+
 /// Check if a user has a required permission on a server. Returns error if not.
 pub async fn require_server_permission(
     pool: &PgPool,
@@ -1689,38 +1899,32 @@ pub async fn share_server(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> AppResul
     Ok(row.0)
 }
 
-pub async fn get_friends_list(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<FriendResponse>> {
-    // Get friendships where user is requester
-    let mut friends: Vec<FriendResponse> = sqlx::query_as::<_, FriendResponse>(
+pub async fn get_friends_list(pool: &PgPool, user_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<FriendResponse>> {
+    let friends: Vec<FriendResponse> = sqlx::query_as::<_, FriendResponse>(
         r#"
-        SELECT f.id, f.addressee_id AS user_id, u.username, u.display_name, u.avatar_url,
-               f.status, FALSE AS is_incoming, f.created_at
-        FROM friendships f
-        INNER JOIN users u ON u.id = f.addressee_id
-        WHERE f.requester_id = $1
-        ORDER BY f.created_at DESC
+        SELECT * FROM (
+            SELECT f.id, f.addressee_id AS user_id, u.username, u.display_name, u.avatar_url,
+                   f.status, FALSE AS is_incoming, f.created_at
+            FROM friendships f
+            INNER JOIN users u ON u.id = f.addressee_id
+            WHERE f.requester_id = $1
+            UNION ALL
+            SELECT f.id, f.requester_id AS user_id, u.username, u.display_name, u.avatar_url,
+                   f.status, TRUE AS is_incoming, f.created_at
+            FROM friendships f
+            INNER JOIN users u ON u.id = f.requester_id
+            WHERE f.addressee_id = $1
+        ) AS combined
+        ORDER BY created_at DESC
+        LIMIT $2 OFFSET $3
         "#,
     )
     .bind(user_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
 
-    // Get friendships where user is addressee
-    let incoming: Vec<FriendResponse> = sqlx::query_as::<_, FriendResponse>(
-        r#"
-        SELECT f.id, f.requester_id AS user_id, u.username, u.display_name, u.avatar_url,
-               f.status, TRUE AS is_incoming, f.created_at
-        FROM friendships f
-        INNER JOIN users u ON u.id = f.requester_id
-        WHERE f.addressee_id = $1
-        ORDER BY f.created_at DESC
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-
-    friends.extend(incoming);
     Ok(friends)
 }
 
@@ -1839,13 +2043,15 @@ pub async fn remove_ban(pool: &PgPool, server_id: Uuid, user_id: Uuid) -> AppRes
     Ok(())
 }
 
-pub async fn list_bans(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<crate::models::BanResponse>> {
+pub async fn list_bans(pool: &PgPool, server_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<crate::models::BanResponse>> {
     let rows = sqlx::query_as::<_, (Uuid, Uuid, Option<String>, Uuid, chrono::DateTime<chrono::Utc>, String)>(
         "SELECT b.id, b.user_id, b.reason, b.banned_by, b.created_at, u.username \
          FROM bans b JOIN users u ON u.id = b.user_id \
-         WHERE b.server_id = $1 ORDER BY b.created_at DESC"
+         WHERE b.server_id = $1 ORDER BY b.created_at DESC LIMIT $2 OFFSET $3"
     )
     .bind(server_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
 
@@ -2033,4 +2239,49 @@ pub async fn update_member_nickname(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+// ─── Profile Key Distribution ───────────────────────
+
+pub async fn distribute_profile_keys_bulk(
+    pool: &PgPool,
+    from_user_id: Uuid,
+    distributions: &[(Uuid, Vec<u8>)],
+) -> AppResult<()> {
+    for (to_user_id, encrypted_key) in distributions {
+        sqlx::query(
+            r#"
+            INSERT INTO profile_key_distributions (from_user_id, to_user_id, encrypted_profile_key)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (from_user_id, to_user_id)
+            DO UPDATE SET encrypted_profile_key = EXCLUDED.encrypted_profile_key,
+                          created_at = NOW()
+            "#,
+        )
+        .bind(from_user_id)
+        .bind(to_user_id)
+        .bind(encrypted_key)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}
+
+pub async fn get_profile_key(
+    pool: &PgPool,
+    from_user_id: Uuid,
+    to_user_id: Uuid,
+) -> AppResult<Option<ProfileKeyDistribution>> {
+    let dist = sqlx::query_as::<_, ProfileKeyDistribution>(
+        r#"
+        SELECT id, from_user_id, to_user_id, encrypted_profile_key, created_at
+        FROM profile_key_distributions
+        WHERE from_user_id = $1 AND to_user_id = $2
+        "#,
+    )
+    .bind(from_user_id)
+    .bind(to_user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(dist)
 }

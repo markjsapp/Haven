@@ -27,14 +27,14 @@ pub async fn get_messages(
     Query(params): Query<MessageQuery>,
 ) -> AppResult<Json<Vec<MessageResponse>>> {
     // Verify membership
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
     let limit = params.limit.unwrap_or(50).min(100); // Cap at 100
 
     let messages =
-        queries::get_channel_messages(&state.db, channel_id, params.before, limit).await?;
+        queries::get_channel_messages(state.db.read(), channel_id, params.before, limit).await?;
 
     let responses: Vec<MessageResponse> = messages.into_iter().map(|m| m.into()).collect();
 
@@ -49,15 +49,15 @@ pub async fn get_channel_reactions(
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<ReactionGroup>>> {
     // Verify membership
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
     // Get recent message IDs for this channel
-    let messages = queries::get_channel_messages(&state.db, channel_id, None, 50).await?;
+    let messages = queries::get_channel_messages(state.db.read(), channel_id, None, 50).await?;
     let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
 
-    let reactions = queries::get_reactions_for_messages(&state.db, &message_ids).await?;
+    let reactions = queries::get_reactions_for_messages(state.db.read(), &message_ids).await?;
 
     // Group by (message_id, emoji)
     let mut groups: std::collections::HashMap<(Uuid, String), Vec<Uuid>> = std::collections::HashMap::new();
@@ -91,7 +91,7 @@ pub async fn send_message(
     Json(req): Json<SendMessageRequest>,
 ) -> AppResult<Json<MessageResponse>> {
     // Verify membership
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
@@ -108,7 +108,7 @@ pub async fn send_message(
     .map_err(|_| AppError::Validation("Invalid encrypted_body encoding".into()))?;
 
     let message = queries::insert_message(
-        &state.db,
+        state.db.write(),
         channel_id,
         &sender_token,
         &encrypted_body,
@@ -122,7 +122,7 @@ pub async fn send_message(
     let response: MessageResponse = message.into();
 
     // Fan out via WebSocket to channel members
-    if let Ok(member_ids) = queries::get_channel_member_ids(&state.db, channel_id).await {
+    if let Ok(member_ids) = queries::get_channel_member_ids(state.db.read(), channel_id).await {
         for member_id in member_ids {
             if let Some(conns) = state.connections.get(&member_id) {
                 for sender in conns.iter() {
@@ -131,6 +131,9 @@ pub async fn send_message(
             }
         }
     }
+    // Also publish to Redis for cross-instance delivery
+    let channel_msg = WsServerMessage::NewMessage(response.clone());
+    crate::pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &channel_msg).await;
 
     Ok(Json(response))
 }
@@ -142,11 +145,11 @@ pub async fn get_pins(
     AuthUser(user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<MessageResponse>>> {
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
-    let messages = queries::get_pinned_messages(&state.db, channel_id).await?;
+    let messages = queries::get_pinned_messages(state.db.read(), channel_id).await?;
     let responses: Vec<MessageResponse> = messages.into_iter().map(|m| m.into()).collect();
     Ok(Json(responses))
 }
@@ -158,10 +161,10 @@ pub async fn get_pin_ids(
     AuthUser(user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<Uuid>>> {
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
-    let ids = queries::get_pinned_message_ids(&state.db, channel_id).await?;
+    let ids = queries::get_pinned_message_ids(state.db.read(), channel_id).await?;
     Ok(Json(ids))
 }

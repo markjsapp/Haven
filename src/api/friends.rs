@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use uuid::Uuid;
@@ -15,8 +15,10 @@ use crate::AppState;
 pub async fn list_friends(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
+    Query(pagination): Query<PaginationQuery>,
 ) -> AppResult<Json<Vec<FriendResponse>>> {
-    let friends = queries::get_friends_list(&state.db, user_id).await?;
+    let (limit, offset) = pagination.resolve();
+    let friends = queries::get_friends_list(state.db.read(), user_id, limit, offset).await?;
     Ok(Json(friends))
 }
 
@@ -28,7 +30,7 @@ pub async fn send_friend_request(
     Json(req): Json<FriendRequestBody>,
 ) -> AppResult<Json<FriendResponse>> {
     // Find target user
-    let target = queries::find_user_by_username(&state.db, &req.username)
+    let target = queries::find_user_by_username(state.db.read(), &req.username)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
@@ -37,31 +39,31 @@ pub async fn send_friend_request(
     }
 
     // Check if blocked
-    if queries::is_blocked(&state.db, target.id, user_id).await? {
+    if queries::is_blocked(state.db.read(), target.id, user_id).await? {
         return Err(AppError::Forbidden("Cannot send friend request to this user".into()));
     }
 
     // Check for existing friendship
-    if let Some(existing) = queries::find_friendship(&state.db, user_id, target.id).await? {
+    if let Some(existing) = queries::find_friendship(state.db.read(), user_id, target.id).await? {
         if existing.status == "accepted" {
             return Err(AppError::Validation("Already friends".into()));
         }
         // If there's a pending request FROM them TO us, auto-accept
         if existing.requester_id == target.id && existing.status == "pending" {
-            let accepted = queries::accept_friend_request(&state.db, existing.id).await?;
-            let requester = queries::find_user_by_id(&state.db, accepted.requester_id)
+            let accepted = queries::accept_friend_request(state.db.write(), existing.id).await?;
+            let requester = queries::find_user_by_id(state.db.read(), accepted.requester_id)
                 .await?
                 .ok_or(AppError::UserNotFound)?;
 
             // Notify the original requester that we accepted
             send_to_user(&state, target.id, WsServerMessage::FriendRequestAccepted {
                 user_id,
-                username: queries::find_user_by_id(&state.db, user_id)
+                username: queries::find_user_by_id(state.db.read(), user_id)
                     .await?
                     .map(|u| u.username.clone())
                     .unwrap_or_default(),
                 friendship_id: accepted.id,
-            });
+            }).await;
 
             return Ok(Json(FriendResponse {
                 id: accepted.id,
@@ -77,10 +79,10 @@ pub async fn send_friend_request(
         return Err(AppError::Validation("Friend request already pending".into()));
     }
 
-    let friendship = queries::send_friend_request(&state.db, user_id, target.id).await?;
+    let friendship = queries::send_friend_request(state.db.write(), user_id, target.id).await?;
 
     // Look up our username
-    let requester_user = queries::find_user_by_id(&state.db, user_id)
+    let requester_user = queries::find_user_by_id(state.db.read(), user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
@@ -89,7 +91,7 @@ pub async fn send_friend_request(
         from_user_id: user_id,
         from_username: requester_user.username.clone(),
         friendship_id: friendship.id,
-    });
+    }).await;
 
     Ok(Json(FriendResponse {
         id: friendship.id,
@@ -109,7 +111,7 @@ pub async fn accept_friend_request(
     AuthUser(user_id): AuthUser,
     Path(friendship_id): Path<Uuid>,
 ) -> AppResult<Json<FriendResponse>> {
-    let friendship = queries::find_friendship_by_id(&state.db, friendship_id)
+    let friendship = queries::find_friendship_by_id(state.db.read(), friendship_id)
         .await?
         .ok_or(AppError::NotFound("Friend request not found".into()))?;
 
@@ -121,13 +123,13 @@ pub async fn accept_friend_request(
         return Err(AppError::Validation("Request is not pending".into()));
     }
 
-    let accepted = queries::accept_friend_request(&state.db, friendship_id).await?;
+    let accepted = queries::accept_friend_request(state.db.write(), friendship_id).await?;
 
-    let requester = queries::find_user_by_id(&state.db, accepted.requester_id)
+    let requester = queries::find_user_by_id(state.db.read(), accepted.requester_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
-    let accepter = queries::find_user_by_id(&state.db, user_id)
+    let accepter = queries::find_user_by_id(state.db.read(), user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
@@ -136,7 +138,7 @@ pub async fn accept_friend_request(
         user_id,
         username: accepter.username,
         friendship_id: accepted.id,
-    });
+    }).await;
 
     Ok(Json(FriendResponse {
         id: accepted.id,
@@ -156,7 +158,7 @@ pub async fn decline_friend_request(
     AuthUser(user_id): AuthUser,
     Path(friendship_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let friendship = queries::find_friendship_by_id(&state.db, friendship_id)
+    let friendship = queries::find_friendship_by_id(state.db.read(), friendship_id)
         .await?
         .ok_or(AppError::NotFound("Friend request not found".into()))?;
 
@@ -168,7 +170,7 @@ pub async fn decline_friend_request(
         return Err(AppError::Validation("Request is not pending".into()));
     }
 
-    queries::delete_friendship(&state.db, friendship_id).await?;
+    queries::delete_friendship(state.db.write(), friendship_id).await?;
     Ok(Json(serde_json::json!({ "message": "Friend request declined" })))
 }
 
@@ -179,7 +181,7 @@ pub async fn remove_friend(
     AuthUser(user_id): AuthUser,
     Path(friendship_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let friendship = queries::find_friendship_by_id(&state.db, friendship_id)
+    let friendship = queries::find_friendship_by_id(state.db.read(), friendship_id)
         .await?
         .ok_or(AppError::NotFound("Friendship not found".into()))?;
 
@@ -194,12 +196,12 @@ pub async fn remove_friend(
         friendship.requester_id
     };
 
-    queries::delete_friendship(&state.db, friendship_id).await?;
+    queries::delete_friendship(state.db.write(), friendship_id).await?;
 
     // Notify the other user
     send_to_user(&state, other_user_id, WsServerMessage::FriendRemoved {
         user_id,
-    });
+    }).await;
 
     Ok(Json(serde_json::json!({ "message": "Friend removed" })))
 }
@@ -210,7 +212,7 @@ pub async fn list_dm_requests(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
 ) -> AppResult<Json<Vec<ChannelResponse>>> {
-    let channels = queries::get_pending_dm_channels(&state.db, user_id).await?;
+    let channels = queries::get_pending_dm_channels(state.db.read(), user_id).await?;
     let responses: Vec<ChannelResponse> = channels
         .into_iter()
         .map(|ch| ChannelResponse {
@@ -238,7 +240,7 @@ pub async fn handle_dm_request(
     Path(channel_id): Path<Uuid>,
     Json(req): Json<DmRequestAction>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
 
@@ -250,17 +252,17 @@ pub async fn handle_dm_request(
     }
 
     // Verify user is a member
-    if !queries::is_channel_member(&state.db, channel_id, user_id).await? {
+    if !queries::is_channel_member(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
     match req.action.as_str() {
         "accept" => {
-            queries::set_dm_status(&state.db, channel_id, "active").await?;
+            queries::set_dm_status(state.db.write(), channel_id, "active").await?;
             Ok(Json(serde_json::json!({ "message": "DM request accepted" })))
         }
         "decline" => {
-            queries::set_dm_status(&state.db, channel_id, "declined").await?;
+            queries::set_dm_status(state.db.write(), channel_id, "declined").await?;
             Ok(Json(serde_json::json!({ "message": "DM request declined" })))
         }
         _ => Err(AppError::Validation("action must be 'accept' or 'decline'".into())),
@@ -282,15 +284,16 @@ pub async fn update_dm_privacy(
         }
     }
 
-    queries::update_dm_privacy(&state.db, user_id, &req.dm_privacy).await?;
+    queries::update_dm_privacy(state.db.write(), user_id, &req.dm_privacy).await?;
     Ok(Json(serde_json::json!({ "dm_privacy": req.dm_privacy })))
 }
 
-/// Send a WS message to a specific user (all their connections).
-fn send_to_user(state: &AppState, user_id: Uuid, msg: WsServerMessage) {
+/// Send a WS message to a specific user (all their connections + Redis pub/sub).
+async fn send_to_user(state: &AppState, user_id: Uuid, msg: WsServerMessage) {
     if let Some(conns) = state.connections.get(&user_id) {
         for tx in conns.iter() {
             let _ = tx.send(msg.clone());
         }
     }
+    crate::pubsub::publish_user_event(&mut state.redis.clone(), user_id, &msg).await;
 }

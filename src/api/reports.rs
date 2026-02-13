@@ -13,7 +13,7 @@ pub async fn create_report(
     Json(req): Json<CreateReportRequest>,
 ) -> AppResult<Json<ReportResponse>> {
     // Verify user can access the channel
-    if !queries::can_access_channel(&state.db, req.channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), req.channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
@@ -22,7 +22,7 @@ pub async fn create_report(
     }
 
     let report = queries::create_report(
-        &state.db,
+        state.db.write(),
         user_id,
         req.message_id,
         req.channel_id,

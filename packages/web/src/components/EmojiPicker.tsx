@@ -1,6 +1,15 @@
-import { useRef, useEffect } from "react";
-import data from "@emoji-mart/data";
-import Picker from "@emoji-mart/react";
+import { useRef, useEffect, lazy, Suspense } from "react";
+
+const LazyPicker = lazy(() =>
+  Promise.all([import("@emoji-mart/data"), import("@emoji-mart/react")]).then(
+    ([dataModule, pickerModule]) => ({
+      default: (props: Record<string, unknown>) => {
+        const Picker = pickerModule.default;
+        return <Picker data={dataModule.default} {...props} />;
+      },
+    })
+  )
+);
 
 interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
@@ -30,19 +39,20 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
 
   return (
     <div className="emoji-picker" ref={ref}>
-      <Picker
-        data={data}
-        onEmojiSelect={(emoji: { native: string }) => {
-          onSelect(emoji.native);
-          onClose();
-        }}
-        theme="dark"
-        set="native"
-        previewPosition="none"
-        skinTonePosition="search"
-        perLine={8}
-        maxFrequentRows={2}
-      />
+      <Suspense fallback={<div className="emoji-picker-loading" />}>
+        <LazyPicker
+          onEmojiSelect={(emoji: { native: string }) => {
+            onSelect(emoji.native);
+            onClose();
+          }}
+          theme="dark"
+          set="native"
+          previewPosition="none"
+          skinTonePosition="search"
+          perLine={8}
+          maxFrequentRows={2}
+        />
+      </Suspense>
     </div>
   );
 }

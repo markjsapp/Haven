@@ -49,7 +49,11 @@
       "Bash(python3:*)",
       "Bash(npm view:*)",
       "WebFetch(domain:tiptap.dev)",
-      "Bash(sort:*)"
+      "Bash(sort:*)",
+      "Bash(cargo install:*)",
+      "Bash(cargo llvm-cov:*)",
+      "Bash(cargo clean:*)",
+      "Bash(git add:*)"
     ]
   }
 }

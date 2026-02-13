@@ -12,7 +12,7 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws", "macros", "multipart"] }
 axum-extra = { version = "0.9", features = ["typed-header"] }
 tower = { version = "0.4", features = ["full"] }
-tower-http = { version = "0.5", features = ["cors", "trace", "limit", "compression-gzip"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "limit", "compression-gzip", "set-header"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -45,10 +45,10 @@ dotenvy = "0.15"
 # Validation
 validator = { version = "0.18", features = ["derive"] }
 
-# AWS SDK for S3 (uncomment when deploying to production)
-# aws-sdk-s3 = "1"
-# aws-config = "1"
-# aws-credential-types = "1"
+# AWS SDK for S3
+aws-sdk-s3 = "1"
+aws-config = "1"
+aws-credential-types = "1"
 
 # Local storage encryption (AES-256-GCM at rest)
 aes-gcm = "0.10"
@@ -73,3 +73,5 @@ livekit-api = "0.4"
 
 [dev-dependencies]
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+totp-rs = { version = "5", features = ["gen_secret"] }
+tempfile = "3"

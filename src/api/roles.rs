@@ -17,11 +17,11 @@ pub async fn list_roles(
     AuthUser(user_id): AuthUser,
     Path(server_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<RoleResponse>>> {
-    if !queries::is_server_member(&state.db, server_id, user_id).await? {
+    if !queries::is_server_member(state.db.read(), server_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this server".into()));
     }
 
-    let roles = queries::get_server_roles(&state.db, server_id).await?;
+    let roles = queries::get_server_roles(state.db.read(), server_id).await?;
     let responses: Vec<RoleResponse> = roles.into_iter().map(RoleResponse::from).collect();
     Ok(Json(responses))
 }
@@ -34,7 +34,7 @@ pub async fn create_role(
     Json(req): Json<CreateRoleRequest>,
 ) -> AppResult<Json<RoleResponse>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_ROLES,
@@ -50,7 +50,7 @@ pub async fn create_role(
     let position = req.position.unwrap_or(0);
 
     let role = queries::create_role(
-        &state.db,
+        state.db.write(),
         server_id,
         &req.name,
         req.color.as_deref(),
@@ -70,10 +70,10 @@ pub async fn update_role(
     Path((server_id, role_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateRoleRequest>,
 ) -> AppResult<Json<RoleResponse>> {
-    let (is_owner, _) = queries::get_member_permissions(&state.db, server_id, user_id).await?;
+    let (is_owner, _) = queries::get_member_permissions(state.db.read(), server_id, user_id).await?;
     if !is_owner {
         queries::require_server_permission(
-            &state.db,
+            state.db.read(),
             server_id,
             user_id,
             permissions::MANAGE_ROLES,
@@ -81,7 +81,7 @@ pub async fn update_role(
         .await?;
     }
 
-    let target_role = queries::find_role_by_id(&state.db, role_id)
+    let target_role = queries::find_role_by_id(state.db.read(), role_id)
         .await?
         .ok_or(AppError::NotFound("Role not found".into()))?;
     if target_role.server_id != server_id {
@@ -90,7 +90,7 @@ pub async fn update_role(
 
     // Hierarchy check: non-owner can only edit roles below their highest position
     if !is_owner {
-        let my_roles = queries::get_member_roles(&state.db, server_id, user_id).await?;
+        let my_roles = queries::get_member_roles(state.db.read(), server_id, user_id).await?;
         let my_highest = my_roles.iter().map(|r| r.position).max().unwrap_or(0);
         if target_role.position >= my_highest {
             return Err(AppError::Forbidden("Cannot edit a role at or above your position".into()));
@@ -100,7 +100,7 @@ pub async fn update_role(
     let perms: Option<i64> = req.permissions.as_deref().and_then(|s| s.parse().ok());
 
     let updated = queries::update_role(
-        &state.db,
+        state.db.write(),
         role_id,
         req.name.as_deref(),
         req.color.as_ref().map(|c| Some(c.as_str())),
@@ -108,6 +108,12 @@ pub async fn update_role(
         req.position,
     )
     .await?;
+
+    // Invalidate all permission caches for this server (role changed affects everyone)
+    crate::cache::invalidate_pattern(
+        &mut state.redis.clone(),
+        &format!("haven:perms:{}:*", server_id),
+    ).await;
 
     Ok(Json(RoleResponse::from(updated)))
 }
@@ -118,10 +124,10 @@ pub async fn delete_role(
     AuthUser(user_id): AuthUser,
     Path((server_id, role_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let (is_owner, _) = queries::get_member_permissions(&state.db, server_id, user_id).await?;
+    let (is_owner, _) = queries::get_member_permissions(state.db.read(), server_id, user_id).await?;
     if !is_owner {
         queries::require_server_permission(
-            &state.db,
+            state.db.read(),
             server_id,
             user_id,
             permissions::MANAGE_ROLES,
@@ -129,7 +135,7 @@ pub async fn delete_role(
         .await?;
     }
 
-    let target_role = queries::find_role_by_id(&state.db, role_id)
+    let target_role = queries::find_role_by_id(state.db.read(), role_id)
         .await?
         .ok_or(AppError::NotFound("Role not found".into()))?;
     if target_role.server_id != server_id {
@@ -140,14 +146,21 @@ pub async fn delete_role(
     }
 
     if !is_owner {
-        let my_roles = queries::get_member_roles(&state.db, server_id, user_id).await?;
+        let my_roles = queries::get_member_roles(state.db.read(), server_id, user_id).await?;
         let my_highest = my_roles.iter().map(|r| r.position).max().unwrap_or(0);
         if target_role.position >= my_highest {
             return Err(AppError::Forbidden("Cannot delete a role at or above your position".into()));
         }
     }
 
-    queries::delete_role(&state.db, role_id).await?;
+    queries::delete_role(state.db.write(), role_id).await?;
+
+    // Invalidate all permission caches for this server
+    crate::cache::invalidate_pattern(
+        &mut state.redis.clone(),
+        &format!("haven:perms:{}:*", server_id),
+    ).await;
+
     Ok(Json(serde_json::json!({ "message": "Role deleted" })))
 }
 
@@ -158,10 +171,10 @@ pub async fn assign_role(
     Path((server_id, target_user_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<AssignRoleRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let (is_owner, _) = queries::get_member_permissions(&state.db, server_id, user_id).await?;
+    let (is_owner, _) = queries::get_member_permissions(state.db.read(), server_id, user_id).await?;
     if !is_owner {
         queries::require_server_permission(
-            &state.db,
+            state.db.read(),
             server_id,
             user_id,
             permissions::MANAGE_ROLES,
@@ -169,7 +182,7 @@ pub async fn assign_role(
         .await?;
     }
 
-    let role = queries::find_role_by_id(&state.db, req.role_id)
+    let role = queries::find_role_by_id(state.db.read(), req.role_id)
         .await?
         .ok_or(AppError::NotFound("Role not found".into()))?;
     if role.server_id != server_id {
@@ -177,14 +190,21 @@ pub async fn assign_role(
     }
 
     if !is_owner {
-        let my_roles = queries::get_member_roles(&state.db, server_id, user_id).await?;
+        let my_roles = queries::get_member_roles(state.db.read(), server_id, user_id).await?;
         let my_highest = my_roles.iter().map(|r| r.position).max().unwrap_or(0);
         if role.position >= my_highest {
             return Err(AppError::Forbidden("Cannot assign a role at or above your position".into()));
         }
     }
 
-    queries::assign_role(&state.db, server_id, target_user_id, req.role_id).await?;
+    queries::assign_role(state.db.write(), server_id, target_user_id, req.role_id).await?;
+
+    // Invalidate permission cache for target user
+    crate::cache::invalidate(
+        &mut state.redis.clone(),
+        &format!("haven:perms:{}:{}", server_id, target_user_id),
+    ).await;
+
     Ok(Json(serde_json::json!({ "message": "Role assigned" })))
 }
 
@@ -194,10 +214,10 @@ pub async fn unassign_role(
     AuthUser(user_id): AuthUser,
     Path((server_id, target_user_id, role_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let (is_owner, _) = queries::get_member_permissions(&state.db, server_id, user_id).await?;
+    let (is_owner, _) = queries::get_member_permissions(state.db.read(), server_id, user_id).await?;
     if !is_owner {
         queries::require_server_permission(
-            &state.db,
+            state.db.read(),
             server_id,
             user_id,
             permissions::MANAGE_ROLES,
@@ -205,7 +225,7 @@ pub async fn unassign_role(
         .await?;
     }
 
-    let role = queries::find_role_by_id(&state.db, role_id)
+    let role = queries::find_role_by_id(state.db.read(), role_id)
         .await?
         .ok_or(AppError::NotFound("Role not found".into()))?;
     if role.server_id != server_id {
@@ -213,14 +233,21 @@ pub async fn unassign_role(
     }
 
     if !is_owner {
-        let my_roles = queries::get_member_roles(&state.db, server_id, user_id).await?;
+        let my_roles = queries::get_member_roles(state.db.read(), server_id, user_id).await?;
         let my_highest = my_roles.iter().map(|r| r.position).max().unwrap_or(0);
         if role.position >= my_highest {
             return Err(AppError::Forbidden("Cannot remove a role at or above your position".into()));
         }
     }
 
-    queries::remove_role(&state.db, server_id, target_user_id, role_id).await?;
+    queries::remove_role(state.db.write(), server_id, target_user_id, role_id).await?;
+
+    // Invalidate permission cache for target user
+    crate::cache::invalidate(
+        &mut state.redis.clone(),
+        &format!("haven:perms:{}:{}", server_id, target_user_id),
+    ).await;
+
     Ok(Json(serde_json::json!({ "message": "Role removed" })))
 }
 
@@ -230,17 +257,17 @@ pub async fn list_overwrites(
     AuthUser(user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<OverwriteResponse>>> {
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
     let server_id = channel.server_id
         .ok_or(AppError::Forbidden("Not a server channel".into()))?;
 
-    if !queries::is_server_member(&state.db, server_id, user_id).await? {
+    if !queries::is_server_member(state.db.read(), server_id, user_id).await? {
         return Err(AppError::Forbidden("Not a server member".into()));
     }
 
-    let overwrites = queries::get_channel_overwrites(&state.db, channel_id).await?;
+    let overwrites = queries::get_channel_overwrites(state.db.read(), channel_id).await?;
     let responses: Vec<OverwriteResponse> = overwrites.into_iter().map(OverwriteResponse::from).collect();
     Ok(Json(responses))
 }
@@ -252,14 +279,14 @@ pub async fn set_overwrite(
     Path(channel_id): Path<Uuid>,
     Json(req): Json<SetOverwriteRequest>,
 ) -> AppResult<Json<OverwriteResponse>> {
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
     let server_id = channel.server_id
         .ok_or(AppError::Forbidden("Not a server channel".into()))?;
 
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
@@ -274,7 +301,7 @@ pub async fn set_overwrite(
     let deny: i64 = req.deny_bits.parse().map_err(|_| AppError::Validation("Invalid deny_bits".into()))?;
 
     let overwrite = queries::set_channel_overwrite(
-        &state.db,
+        state.db.write(),
         channel_id,
         &req.target_type,
         req.target_id,
@@ -292,20 +319,20 @@ pub async fn delete_overwrite(
     AuthUser(user_id): AuthUser,
     Path((channel_id, target_type, target_id)): Path<(Uuid, String, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
     let server_id = channel.server_id
         .ok_or(AppError::Forbidden("Not a server channel".into()))?;
 
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
     )
     .await?;
 
-    queries::delete_channel_overwrite(&state.db, channel_id, &target_type, target_id).await?;
+    queries::delete_channel_overwrite(state.db.write(), channel_id, &target_type, target_id).await?;
     Ok(Json(serde_json::json!({ "message": "Overwrite removed" })))
 }

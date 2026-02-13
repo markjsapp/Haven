@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use chrono::Utc;
@@ -22,7 +22,7 @@ pub async fn create_invite(
     Json(req): Json<CreateInviteRequest>,
 ) -> AppResult<Json<InviteResponse>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::CREATE_INVITES,
@@ -37,7 +37,7 @@ pub async fn create_invite(
     });
 
     let invite = queries::create_invite(
-        &state.db,
+        state.db.write(),
         server_id,
         user_id,
         &code,
@@ -55,16 +55,18 @@ pub async fn list_invites(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(server_id): Path<Uuid>,
+    Query(pagination): Query<PaginationQuery>,
 ) -> AppResult<Json<Vec<InviteResponse>>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_INVITES,
     )
     .await?;
 
-    let invites = queries::get_server_invites(&state.db, server_id).await?;
+    let (limit, offset) = pagination.resolve();
+    let invites = queries::get_server_invites(state.db.read(), server_id, limit, offset).await?;
     let responses: Vec<InviteResponse> = invites.into_iter().map(InviteResponse::from).collect();
 
     Ok(Json(responses))
@@ -78,14 +80,14 @@ pub async fn delete_invite(
     Path((server_id, invite_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_INVITES,
     )
     .await?;
 
-    queries::delete_invite(&state.db, invite_id).await?;
+    queries::delete_invite(state.db.write(), invite_id).await?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
@@ -98,7 +100,7 @@ pub async fn join_by_invite(
     Path(code): Path<String>,
 ) -> AppResult<Json<ServerResponse>> {
     // Find the invite
-    let invite = queries::find_invite_by_code(&state.db, &code)
+    let invite = queries::find_invite_by_code(state.db.read(), &code)
         .await?
         .ok_or(AppError::NotFound("Invalid invite code".into()))?;
 
@@ -117,30 +119,28 @@ pub async fn join_by_invite(
     }
 
     // Check if banned
-    if queries::is_banned(&state.db, invite.server_id, user_id).await? {
+    if queries::is_banned(state.db.read(), invite.server_id, user_id).await? {
         return Err(AppError::Forbidden("You are banned from this server".into()));
     }
 
     // Check if already a member
-    if queries::is_server_member(&state.db, invite.server_id, user_id).await? {
+    if queries::is_server_member(state.db.read(), invite.server_id, user_id).await? {
         return Err(AppError::Validation("Already a member of this server".into()));
     }
 
     // Add user to the server
     let member_role = b"member";
-    queries::add_server_member(&state.db, invite.server_id, user_id, member_role).await?;
+    queries::add_server_member(state.db.write(), invite.server_id, user_id, member_role).await?;
 
-    // Add user to all server channels
-    let channels = queries::get_server_channels(&state.db, invite.server_id).await?;
-    for channel in &channels {
-        queries::add_channel_member(&state.db, channel.id, user_id).await?;
-    }
+    // Add user to all server channels (single bulk INSERT)
+    queries::add_channel_members_bulk(state.db.write(), invite.server_id, user_id).await?;
+    let channels = queries::get_server_channels(state.db.read(), invite.server_id).await?;
 
     // Increment invite use count
-    queries::increment_invite_uses(&state.db, invite.id).await?;
+    queries::increment_invite_uses(state.db.write(), invite.id).await?;
 
     // Return the server info (need it for system_channel_id)
-    let server = queries::find_server_by_id(&state.db, invite.server_id)
+    let server = queries::find_server_by_id(state.db.read(), invite.server_id)
         .await?
         .ok_or(AppError::Internal(anyhow::anyhow!("Server not found after join")))?;
 
@@ -149,7 +149,7 @@ pub async fn join_by_invite(
         .and_then(|id| channels.iter().find(|c| c.id == id))
         .or(channels.first());
     if let Some(target_channel) = sys_channel {
-        let user = queries::find_user_by_id(&state.db, user_id).await?.unwrap();
+        let user = queries::find_user_by_id(state.db.read(), user_id).await?.unwrap();
         let username = user.display_name.as_deref().unwrap_or(&user.username);
         let body = serde_json::json!({
             "event": "member_joined",
@@ -157,7 +157,7 @@ pub async fn join_by_invite(
             "user_id": user_id.to_string(),
         });
         if let Ok(sys_msg) = queries::insert_system_message(
-            &state.db, target_channel.id, &body.to_string(),
+            state.db.write(), target_channel.id, &body.to_string(),
         ).await {
             let response: MessageResponse = sys_msg.into();
             if let Some(broadcaster) = state.channel_broadcasts.get(&target_channel.id) {
@@ -166,7 +166,7 @@ pub async fn join_by_invite(
         }
     }
 
-    let (_, perms) = queries::get_member_permissions(&state.db, server.id, user_id).await?;
+    let (_, perms) = queries::get_member_permissions(state.db.read(), server.id, user_id).await?;
 
     Ok(Json(ServerResponse {
         id: server.id,
@@ -187,12 +187,14 @@ pub async fn list_members(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(server_id): Path<Uuid>,
+    Query(pagination): Query<PaginationQuery>,
 ) -> AppResult<Json<Vec<ServerMemberResponse>>> {
-    if !queries::is_server_member(&state.db, server_id, user_id).await? {
+    if !queries::is_server_member(state.db.read(), server_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this server".into()));
     }
 
-    let members = queries::get_server_members(&state.db, server_id).await?;
+    let (limit, offset) = pagination.resolve();
+    let members = queries::get_server_members(state.db.read(), server_id, limit, offset).await?;
     Ok(Json(members))
 }
 
@@ -204,7 +206,7 @@ pub async fn kick_member(
     Path((server_id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::KICK_MEMBERS,
@@ -216,16 +218,16 @@ pub async fn kick_member(
     }
 
     // Look up username before removing
-    let target_user = queries::find_user_by_id(&state.db, target_user_id).await?;
+    let target_user = queries::find_user_by_id(state.db.read(), target_user_id).await?;
     let target_name = target_user
         .as_ref()
         .map(|u| u.display_name.as_deref().unwrap_or(&u.username))
         .unwrap_or("Unknown");
 
-    queries::remove_server_member(&state.db, server_id, target_user_id).await?;
+    queries::remove_server_member(state.db.write(), server_id, target_user_id).await?;
 
     // Insert system message in the first server channel
-    let channels = queries::get_server_channels(&state.db, server_id).await?;
+    let channels = queries::get_server_channels(state.db.read(), server_id).await?;
     if let Some(first_channel) = channels.first() {
         let body = serde_json::json!({
             "event": "member_kicked",
@@ -233,7 +235,7 @@ pub async fn kick_member(
             "user_id": target_user_id.to_string(),
         });
         if let Ok(sys_msg) = queries::insert_system_message(
-            &state.db, first_channel.id, &body.to_string(),
+            state.db.write(), first_channel.id, &body.to_string(),
         ).await {
             let response: MessageResponse = sys_msg.into();
             if let Some(broadcaster) = state.channel_broadcasts.get(&first_channel.id) {

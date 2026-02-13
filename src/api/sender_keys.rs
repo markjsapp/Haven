@@ -19,7 +19,7 @@ pub async fn distribute_sender_keys(
     Json(req): Json<DistributeSenderKeyRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
     // Verify membership
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
@@ -45,20 +45,22 @@ pub async fn distribute_sender_keys(
     let count = distributions.len();
 
     queries::insert_sender_key_distributions(
-        &state.db,
+        state.db.write(),
         channel_id,
         user_id,
         &distributions,
     )
     .await?;
 
-    // Notify affected recipients via their WebSocket connections
+    // Notify affected recipients via their WebSocket connections + Redis pub/sub
+    let sk_msg = WsServerMessage::SenderKeysUpdated { channel_id };
     for (to_user_id, _, _) in &distributions {
         if let Some(conns) = state.connections.get(to_user_id) {
             for sender in conns.iter() {
-                let _ = sender.send(WsServerMessage::SenderKeysUpdated { channel_id });
+                let _ = sender.send(sk_msg.clone());
             }
         }
+        crate::pubsub::publish_user_event(&mut state.redis.clone(), *to_user_id, &sk_msg).await;
     }
 
     Ok(Json(serde_json::json!({ "distributed": count })))
@@ -75,11 +77,11 @@ pub async fn get_sender_keys(
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<SenderKeyDistributionResponse>>> {
     // Verify membership
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
-    let skdms = queries::get_sender_key_distributions(&state.db, channel_id, user_id).await?;
+    let skdms = queries::get_sender_key_distributions(state.db.read(), channel_id, user_id).await?;
 
     let responses: Vec<SenderKeyDistributionResponse> = skdms
         .iter()
@@ -107,12 +109,12 @@ pub async fn get_channel_member_keys(
     AuthUser(user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<ChannelMemberKeyInfo>>> {
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
     let member_keys =
-        queries::get_channel_member_identity_keys(&state.db, channel_id, user_id).await?;
+        queries::get_channel_member_identity_keys(state.db.read(), channel_id, user_id).await?;
 
     let results: Vec<ChannelMemberKeyInfo> = member_keys
         .iter()

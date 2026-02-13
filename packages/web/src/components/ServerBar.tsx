@@ -46,8 +46,9 @@ export default function ServerBar() {
     setError("");
     try {
       const meta = JSON.stringify({ name: serverName.trim() });
-      await api.createServer({ encrypted_meta: btoa(meta) });
+      const newServer = await api.createServer({ encrypted_meta: btoa(meta) });
       await loadChannels();
+      selectServer(newServer.id);
       setServerName("");
       setShowCreate(false);
     } catch (err: any) {

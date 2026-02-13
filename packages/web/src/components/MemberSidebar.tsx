@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
 import { useChatStore } from "../store/chat.js";
-import ProfilePopup from "./ProfilePopup.js";
+const ProfilePopup = lazy(() => import("./ProfilePopup.js"));
 import FullProfileCard from "./FullProfileCard.js";
 import UserContextMenu from "./UserContextMenu.js";
 import EditMemberRolesModal from "./EditMemberRolesModal.js";
@@ -125,12 +125,14 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
       </div>
 
       {profilePopup && (
-        <ProfilePopup
-          userId={profilePopup.userId}
-          serverId={serverId}
-          position={profilePopup.position}
-          onClose={() => setProfilePopup(null)}
-        />
+        <Suspense fallback={null}>
+          <ProfilePopup
+            userId={profilePopup.userId}
+            serverId={serverId}
+            position={profilePopup.position}
+            onClose={() => setProfilePopup(null)}
+          />
+        </Suspense>
       )}
 
       {contextMenu && (

@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
-import ProfilePopup from "./ProfilePopup.js";
+const ProfilePopup = lazy(() => import("./ProfilePopup.js"));
 import ConfirmDialog from "./ConfirmDialog.js";
 import Avatar from "./Avatar.js";
 import type { ChannelMemberInfo } from "@haven/core";
@@ -185,11 +185,13 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
       </div>
 
       {profilePopup && (
-        <ProfilePopup
-          userId={profilePopup.userId}
-          position={profilePopup.position}
-          onClose={() => setProfilePopup(null)}
-        />
+        <Suspense fallback={null}>
+          <ProfilePopup
+            userId={profilePopup.userId}
+            position={profilePopup.position}
+            onClose={() => setProfilePopup(null)}
+          />
+        </Suspense>
       )}
 
       {confirmLeave && (

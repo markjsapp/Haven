@@ -21,8 +21,8 @@ pub async fn register(
     // Hash password
     let password_hash = auth::hash_password(&req.password)?;
 
-    // Hash email if provided
-    let email_hash = req.email.as_deref().map(auth::hash_email);
+    // Hash email if provided (HMAC-SHA256 with server secret to resist rainbow tables)
+    let email_hash = req.email.as_deref().map(|e| auth::hash_email(e, &state.config.jwt_secret));
 
     // Decode crypto keys from base64
     let identity_key = base64::Engine::decode(
@@ -45,7 +45,7 @@ pub async fn register(
 
     // Create user
     let user = queries::create_user(
-        &state.db,
+        state.db.write(),
         &req.username,
         req.display_name.as_deref(),
         email_hash.as_deref(),
@@ -72,7 +72,7 @@ pub async fn register(
             })
             .collect();
 
-        queries::insert_prekeys(&state.db, user.id, &prekeys?).await?;
+        queries::insert_prekeys(state.db.write(), user.id, &prekeys?).await?;
     }
 
     // Generate tokens
@@ -81,7 +81,7 @@ pub async fn register(
     let refresh_hash = auth::hash_refresh_token(&refresh_token);
 
     let expiry = Utc::now() + Duration::days(state.config.refresh_token_expiry_days);
-    queries::store_refresh_token(&state.db, user.id, &refresh_hash, expiry).await?;
+    queries::store_refresh_token(state.db.write(), user.id, &refresh_hash, expiry).await?;
 
     Ok(Json(AuthResponse {
         access_token,
@@ -96,7 +96,7 @@ pub async fn login(
     Json(req): Json<LoginRequest>,
 ) -> AppResult<Json<AuthResponse>> {
     // Find user
-    let user = queries::find_user_by_username(&state.db, &req.username)
+    let user = queries::find_user_by_username(state.db.read(), &req.username)
         .await?
         .ok_or(AppError::AuthError("Invalid username or password".into()))?;
 
@@ -122,7 +122,7 @@ pub async fn login(
     let refresh_hash = auth::hash_refresh_token(&refresh_token);
 
     let expiry = Utc::now() + Duration::days(state.config.refresh_token_expiry_days);
-    queries::store_refresh_token(&state.db, user.id, &refresh_hash, expiry).await?;
+    queries::store_refresh_token(state.db.write(), user.id, &refresh_hash, expiry).await?;
 
     Ok(Json(AuthResponse {
         access_token,
@@ -139,15 +139,15 @@ pub async fn refresh_token(
     let token_hash = auth::hash_refresh_token(&req.refresh_token);
 
     // Find and validate refresh token
-    let stored_token = queries::find_refresh_token(&state.db, &token_hash)
+    let stored_token = queries::find_refresh_token(state.db.read(), &token_hash)
         .await?
         .ok_or(AppError::AuthError("Invalid or expired refresh token".into()))?;
 
     // Revoke old token (rotation)
-    queries::revoke_refresh_token(&state.db, &token_hash).await?;
+    queries::revoke_refresh_token(state.db.write(), &token_hash).await?;
 
     // Get user
-    let user = queries::find_user_by_id(&state.db, stored_token.user_id)
+    let user = queries::find_user_by_id(state.db.read(), stored_token.user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
@@ -157,7 +157,7 @@ pub async fn refresh_token(
     let new_refresh_hash = auth::hash_refresh_token(&new_refresh_token);
 
     let expiry = Utc::now() + Duration::days(state.config.refresh_token_expiry_days);
-    queries::store_refresh_token(&state.db, user.id, &new_refresh_hash, expiry).await?;
+    queries::store_refresh_token(state.db.write(), user.id, &new_refresh_hash, expiry).await?;
 
     Ok(Json(AuthResponse {
         access_token,
@@ -172,7 +172,7 @@ pub async fn logout(
     AuthUser(user_id): AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
     // Revoke all refresh tokens for this user
-    queries::revoke_all_user_refresh_tokens(&state.db, user_id).await?;
+    queries::revoke_all_user_refresh_tokens(state.db.write(), user_id).await?;
 
     // Broadcast offline presence and clean up voice state
     crate::ws::broadcast_presence(user_id, "offline", &state).await;
@@ -186,7 +186,7 @@ pub async fn totp_setup(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
 ) -> AppResult<Json<TotpSetupResponse>> {
-    let user = queries::find_user_by_id(&state.db, user_id)
+    let user = queries::find_user_by_id(state.db.read(), user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
@@ -196,9 +196,9 @@ pub async fn totp_setup(
 
     let (secret, uri) = auth::generate_totp_secret(&user.username)?;
 
-    // Store secret temporarily (not confirmed yet — in a real app you'd use
-    // a pending_totp field or a separate table until verified)
-    queries::set_user_totp_secret(&state.db, user_id, &secret).await?;
+    // Store in pending column — NOT active until user verifies with a valid code.
+    // This prevents lockout if the setup dialog is closed before scanning the QR.
+    queries::set_pending_totp_secret(state.db.write(), user_id, &secret).await?;
 
     Ok(Json(TotpSetupResponse {
         secret,
@@ -207,22 +207,29 @@ pub async fn totp_setup(
 }
 
 /// POST /api/v1/auth/totp/verify
+/// Verifies the user can produce a valid TOTP code, then promotes the
+/// pending secret to active.
 pub async fn totp_verify(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Json(req): Json<TotpVerifyRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let user = queries::find_user_by_id(&state.db, user_id)
+    let user = queries::find_user_by_id(state.db.read(), user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
+    // Check pending secret first (setup flow), then active secret (re-verify flow)
     let secret = user
-        .totp_secret
+        .pending_totp_secret
+        .or(user.totp_secret)
         .ok_or(AppError::BadRequest("TOTP not set up".into()))?;
 
     if !auth::verify_totp(&secret, &req.code)? {
         return Err(AppError::AuthError("Invalid TOTP code".into()));
     }
+
+    // Promote pending secret to active (idempotent if already active)
+    queries::promote_pending_totp(state.db.write(), user_id).await?;
 
     Ok(Json(serde_json::json!({ "message": "TOTP verified and enabled" })))
 }
@@ -239,7 +246,7 @@ pub async fn change_password(
     }
 
     // Fetch user and verify current password
-    let user = queries::find_user_by_id(&state.db, user_id)
+    let user = queries::find_user_by_id(state.db.read(), user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
@@ -249,10 +256,10 @@ pub async fn change_password(
 
     // Hash and save new password
     let new_hash = auth::hash_password(&req.new_password)?;
-    queries::update_user_password(&state.db, user_id, &new_hash).await?;
+    queries::update_user_password(state.db.write(), user_id, &new_hash).await?;
 
     // Revoke all refresh tokens (force re-login everywhere)
-    queries::revoke_all_user_refresh_tokens(&state.db, user_id).await?;
+    queries::revoke_all_user_refresh_tokens(state.db.write(), user_id).await?;
 
     Ok(Json(serde_json::json!({ "message": "Password changed" })))
 }
@@ -262,6 +269,6 @@ pub async fn totp_disable(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
-    queries::clear_user_totp_secret(&state.db, user_id).await?;
+    queries::clear_user_totp_secret(state.db.write(), user_id).await?;
     Ok(Json(serde_json::json!({ "message": "TOTP disabled" })))
 }

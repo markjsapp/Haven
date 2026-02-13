@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use sqlx::PgPool;
 
-use haven_backend::{build_router, config::AppConfig, db, AppState};
+use haven_backend::{build_router, config::AppConfig, db::{self, DbPools}, pubsub, storage::Storage, AppState};
 
 // ─── Main ──────────────────────────────────────────────
 
@@ -25,8 +24,8 @@ async fn main() {
     let config = AppConfig::from_env();
     tracing::info!("Starting Haven backend on {}:{}", config.host, config.port);
 
-    // Initialize database
-    let db = db::init_pool(&config).await;
+    // Initialize database pools (primary + optional replica)
+    let db = DbPools::init(&config).await;
 
     // Initialize Redis
     let redis_client = redis::Client::open(config.redis_url.as_str())
@@ -46,25 +45,24 @@ async fn main() {
         tracing::info!("Cleared stale presence entries");
     }
 
-    // Initialize local file storage
-    std::fs::create_dir_all(&config.storage_dir)
-        .expect("Failed to create storage directory");
-    let storage_key_bytes = hex::decode(&config.storage_encryption_key)
-        .expect("STORAGE_ENCRYPTION_KEY must be valid hex");
-    let storage_key: [u8; 32] = storage_key_bytes
-        .try_into()
-        .expect("STORAGE_ENCRYPTION_KEY must be exactly 32 bytes (64 hex chars)");
-    tracing::info!("Local storage initialized at {}", config.storage_dir);
+    // Initialize storage backend (local or S3 based on config)
+    let storage = Storage::from_config(&config).await;
+    let storage_key = *storage.encryption_key();
 
-    // Build application state
-    let state = AppState {
+    // Build application state (pubsub_subscriptions added after start_subscriber)
+    let mut state = AppState {
         db: db.clone(),
         redis,
         config: config.clone(),
         storage_key,
+        storage,
         connections: Arc::new(DashMap::new()),
         channel_broadcasts: Arc::new(DashMap::new()),
+        pubsub_subscriptions: pubsub::empty_subscriptions(),
     };
+
+    // Start Redis pub/sub subscriber and store the subscriptions handle
+    state.pubsub_subscriptions = pubsub::start_subscriber(state.clone());
 
     // Spawn background workers
     spawn_background_workers(db.clone());
@@ -114,8 +112,10 @@ async fn shutdown_signal() {
 
 // ─── Background Workers ────────────────────────────────
 
-fn spawn_background_workers(pool: PgPool) {
+fn spawn_background_workers(db: DbPools) {
+    let pool = db.primary().clone();
     let pool2 = pool.clone();
+    let pool3 = pool.clone();
 
     // Worker: Purge expired messages every 60 seconds
     tokio::spawn(async move {
@@ -147,6 +147,22 @@ fn spawn_background_workers(pool: PgPool) {
                     tracing::error!("Failed to purge expired refresh tokens: {}", e);
                 }
                 _ => {}
+            }
+        }
+    });
+
+    // Worker: Ensure message partitions exist 3 months ahead (runs daily)
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(86400));
+        loop {
+            interval.tick().await;
+            match db::queries::ensure_future_partitions(&pool3).await {
+                Ok(()) => {
+                    tracing::debug!("Partition maintenance completed");
+                }
+                Err(e) => {
+                    tracing::error!("Partition maintenance failed: {}", e);
+                }
             }
         }
     });

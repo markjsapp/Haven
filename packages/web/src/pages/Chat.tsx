@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
@@ -9,7 +9,7 @@ import MessageList from "../components/MessageList.js";
 import MessageInput from "../components/MessageInput.js";
 import FriendsList from "../components/FriendsList.js";
 import DmRequestBanner from "../components/DmRequestBanner.js";
-import UserSettings from "../components/UserSettings.js";
+const UserSettings = lazy(() => import("../components/UserSettings.js"));
 import DmMemberSidebar from "../components/DmMemberSidebar.js";
 import PinnedMessagesPanel from "../components/PinnedMessagesPanel.js";
 import SearchPanel from "../components/SearchPanel.js";
@@ -273,7 +273,7 @@ export default function Chat() {
       {pinnedPanelOpen && currentChannelId && <PinnedMessagesPanel channelId={currentChannelId} />}
       {searchPanelOpen && <SearchPanel />}
 
-      {showUserSettings && <UserSettings />}
+      {showUserSettings && <Suspense fallback={null}><UserSettings /></Suspense>}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use uuid::Uuid;
@@ -20,7 +20,7 @@ pub async fn ban_member(
     Json(body): Json<CreateBanRequest>,
 ) -> AppResult<Json<BanResponse>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::BAN_MEMBERS,
@@ -33,7 +33,7 @@ pub async fn ban_member(
 
     // Create the ban record
     let ban = queries::create_ban(
-        &state.db,
+        state.db.write(),
         server_id,
         target_user_id,
         body.reason.as_deref(),
@@ -42,10 +42,10 @@ pub async fn ban_member(
     .await?;
 
     // Also kick them from the server if they are a member
-    let _ = queries::remove_server_member(&state.db, server_id, target_user_id).await;
+    let _ = queries::remove_server_member(state.db.write(), server_id, target_user_id).await;
 
     // Look up username for response
-    let target = queries::find_user_by_id(&state.db, target_user_id)
+    let target = queries::find_user_by_id(state.db.read(), target_user_id)
         .await?
         .ok_or(AppError::NotFound("User not found".into()))?;
 
@@ -67,14 +67,14 @@ pub async fn revoke_ban(
     Path((server_id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::BAN_MEMBERS,
     )
     .await?;
 
-    queries::remove_ban(&state.db, server_id, target_user_id).await?;
+    queries::remove_ban(state.db.write(), server_id, target_user_id).await?;
 
     Ok(Json(serde_json::json!({ "unbanned": true })))
 }
@@ -85,15 +85,17 @@ pub async fn list_bans(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(server_id): Path<Uuid>,
+    Query(pagination): Query<PaginationQuery>,
 ) -> AppResult<Json<Vec<BanResponse>>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::BAN_MEMBERS,
     )
     .await?;
 
-    let bans = queries::list_bans(&state.db, server_id).await?;
+    let (limit, offset) = pagination.resolve();
+    let bans = queries::list_bans(state.db.read(), server_id, limit, offset).await?;
     Ok(Json(bans))
 }

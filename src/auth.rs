@@ -44,11 +44,16 @@ pub fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
 }
 
 /// Hash an email for storage (one-way, for account recovery matching).
-pub fn hash_email(email: &str) -> String {
+/// Uses HMAC-SHA256 with the server's JWT secret as key to prevent rainbow table attacks.
+pub fn hash_email(email: &str, secret: &str) -> String {
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<Sha256>;
+
     let normalized = email.trim().to_lowercase();
-    let mut hasher = Sha256::new();
-    hasher.update(normalized.as_bytes());
-    format!("{:x}", hasher.finalize())
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC can accept key of any size");
+    mac.update(normalized.as_bytes());
+    format!("{:x}", mac.finalize().into_bytes())
 }
 
 // ─── JWT Token Generation ──────────────────────────────
@@ -155,4 +160,185 @@ pub fn verify_totp(secret_b32: &str, code: &str) -> AppResult<bool> {
     .map_err(|e| AppError::Internal(anyhow::anyhow!("TOTP creation failed: {}", e)))?;
 
     Ok(totp.check_current(code).unwrap_or(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AppConfig;
+
+    fn test_config() -> AppConfig {
+        AppConfig::test_default()
+    }
+
+    // ─── Password Hashing ───────────────────────────────
+
+    #[test]
+    fn hash_password_produces_argon2_hash() {
+        let hash = hash_password("mypassword").unwrap();
+        assert!(hash.starts_with("$argon2"));
+    }
+
+    #[test]
+    fn hash_password_different_salts() {
+        let h1 = hash_password("same").unwrap();
+        let h2 = hash_password("same").unwrap();
+        assert_ne!(h1, h2); // different salts
+    }
+
+    #[test]
+    fn verify_password_correct() {
+        let hash = hash_password("correcthorse").unwrap();
+        assert!(verify_password("correcthorse", &hash).unwrap());
+    }
+
+    #[test]
+    fn verify_password_incorrect() {
+        let hash = hash_password("correcthorse").unwrap();
+        assert!(!verify_password("wronghorse", &hash).unwrap());
+    }
+
+    // ─── Email Hashing ──────────────────────────────────
+
+    #[test]
+    fn hash_email_deterministic() {
+        let h1 = hash_email("test@example.com", "secret");
+        let h2 = hash_email("test@example.com", "secret");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_email_case_insensitive() {
+        let h1 = hash_email("Test@Example.COM", "secret");
+        let h2 = hash_email("test@example.com", "secret");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_email_trims_whitespace() {
+        let h1 = hash_email("  test@example.com  ", "secret");
+        let h2 = hash_email("test@example.com", "secret");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_email_different_secrets() {
+        let h1 = hash_email("test@example.com", "secret1");
+        let h2 = hash_email("test@example.com", "secret2");
+        assert_ne!(h1, h2);
+    }
+
+    // ─── JWT Tokens ─────────────────────────────────────
+
+    #[test]
+    fn generate_and_validate_access_token() {
+        let config = test_config();
+        let user_id = Uuid::new_v4();
+        let token = generate_access_token(user_id, &config).unwrap();
+        let claims = validate_access_token(&token, &config).unwrap();
+        assert_eq!(claims.sub, user_id.to_string());
+    }
+
+    #[test]
+    fn validate_token_wrong_secret_fails() {
+        let config = test_config();
+        let user_id = Uuid::new_v4();
+        let token = generate_access_token(user_id, &config).unwrap();
+
+        let mut bad_config = test_config();
+        bad_config.jwt_secret = "completely-different-secret-key-for-testing".into();
+        assert!(validate_access_token(&token, &bad_config).is_err());
+    }
+
+    #[test]
+    fn validate_token_garbage_fails() {
+        let config = test_config();
+        assert!(validate_access_token("not.a.jwt", &config).is_err());
+    }
+
+    #[test]
+    fn user_id_from_claims_valid() {
+        let user_id = Uuid::new_v4();
+        let claims = Claims {
+            sub: user_id.to_string(),
+            exp: 99999999999,
+            iat: 0,
+            jti: Uuid::new_v4().to_string(),
+        };
+        assert_eq!(user_id_from_claims(&claims).unwrap(), user_id);
+    }
+
+    #[test]
+    fn user_id_from_claims_invalid_uuid() {
+        let claims = Claims {
+            sub: "not-a-uuid".into(),
+            exp: 99999999999,
+            iat: 0,
+            jti: Uuid::new_v4().to_string(),
+        };
+        assert!(user_id_from_claims(&claims).is_err());
+    }
+
+    // ─── Refresh Tokens ─────────────────────────────────
+
+    #[test]
+    fn refresh_token_is_unique() {
+        let t1 = generate_refresh_token();
+        let t2 = generate_refresh_token();
+        assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn refresh_token_not_empty() {
+        let t = generate_refresh_token();
+        assert!(!t.is_empty());
+        assert!(t.len() > 20); // 48 bytes base64 = 64 chars
+    }
+
+    #[test]
+    fn hash_refresh_token_deterministic() {
+        let t = generate_refresh_token();
+        let h1 = hash_refresh_token(&t);
+        let h2 = hash_refresh_token(&t);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_refresh_token_different_inputs() {
+        let h1 = hash_refresh_token("token_a");
+        let h2 = hash_refresh_token("token_b");
+        assert_ne!(h1, h2);
+    }
+
+    // ─── TOTP ───────────────────────────────────────────
+
+    #[test]
+    fn generate_totp_secret_returns_secret_and_uri() {
+        let (secret, uri) = generate_totp_secret("testuser").unwrap();
+        assert!(!secret.is_empty());
+        assert!(uri.contains("otpauth://"));
+        assert!(uri.contains("Haven"));
+        assert!(uri.contains("testuser"));
+    }
+
+    #[test]
+    fn verify_totp_correct_code() {
+        let (secret, _) = generate_totp_secret("testuser").unwrap();
+        // Generate a valid code from the same secret
+        use totp_rs::{Algorithm, Secret, TOTP};
+        let s = Secret::Encoded(secret.clone());
+        let totp = TOTP::new(
+            Algorithm::SHA1, 6, 1, 30,
+            s.to_bytes().unwrap(),
+            Some("Haven".into()), "testuser".into(),
+        ).unwrap();
+        let code = totp.generate_current().unwrap();
+        assert!(verify_totp(&secret, &code).unwrap());
+    }
+
+    #[test]
+    fn verify_totp_wrong_code() {
+        let (secret, _) = generate_totp_secret("testuser").unwrap();
+        assert!(!verify_totp(&secret, "000000").unwrap());
+    }
 }

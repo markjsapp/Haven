@@ -138,6 +138,8 @@ function mapDmChannelPeer(channel: ChannelResponse, myUserId: string): void {
 const pendingAcks: string[] = [];
 // Real message IDs we've sent — used to skip our own NewMessage broadcast
 const ownMessageIds = new Set<string>();
+// Message IDs we've edited — skip re-decryption on our own MessageEdited broadcast
+const ownEditIds = new Set<string>();
 
 export const useChatStore = create<ChatState>((set, get) => ({
   servers: [],
@@ -769,7 +771,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
 
     ws.editMessage(messageId, encryptedBody);
-    set({ editingMessageId: null });
+
+    // Optimistic update: apply the edit locally for the sender immediately
+    ownEditIds.add(messageId);
+    set((state) => {
+      const channelMsgs = state.messages[currentChannelId];
+      if (!channelMsgs) return { editingMessageId: null };
+      return {
+        editingMessageId: null,
+        messages: {
+          ...state.messages,
+          [currentChannelId]: channelMsgs.map((m) =>
+            m.id === messageId
+              ? { ...m, text, edited: true, contentType: formatting?.contentType, formatting: formatting?.data }
+              : m,
+          ),
+        },
+      };
+    });
   },
 
   deleteMessage(messageId: string) {
@@ -903,6 +922,17 @@ function appendMessage(
   return { messages: { ...state.messages, [channelId]: updated } };
 }
 
+/** Clear a specific user from the typing indicator for a channel. */
+function clearTypingForUser(channelId: string, userId: string): void {
+  useChatStore.setState((state) => {
+    const channelTyping = state.typingUsers[channelId];
+    if (!channelTyping || channelTyping.length === 0) return state;
+    const filtered = channelTyping.filter((t) => t.userId !== userId);
+    if (filtered.length === channelTyping.length) return state;
+    return { typingUsers: { ...state.typingUsers, [channelId]: filtered } };
+  });
+}
+
 async function handleIncomingMessage(raw: MessageResponse) {
   // Skip our own messages — already displayed via optimistic insert
   if (ownMessageIds.has(raw.id)) {
@@ -959,6 +989,8 @@ async function handleIncomingMessage(raw: MessageResponse) {
     msg.edited = raw.edited;
     msg.replyToId = raw.reply_to_id;
     cacheMessage(msg);
+    // Clear typing indicator for this sender — they just sent a message
+    clearTypingForUser(raw.channel_id, msg.senderId);
     useChatStore.setState((state) => appendMessage(state, raw.channel_id, msg));
   } catch (err) {
     console.warn("[E2EE] WS message decryption failed", raw.id, err);
@@ -979,6 +1011,12 @@ async function handleIncomingMessage(raw: MessageResponse) {
 
 async function handleMessageEdited(payload: { message_id: string; channel_id: string; encrypted_body: string }) {
   const { channel_id, message_id, encrypted_body } = payload;
+
+  // Skip re-decryption for our own edits — already applied optimistically
+  if (ownEditIds.has(message_id)) {
+    ownEditIds.delete(message_id);
+    return;
+  }
 
   useChatStore.setState((state) => {
     const channelMsgs = state.messages[channel_id];
@@ -1006,7 +1044,9 @@ async function handleMessageEdited(payload: { message_id: string; channel_id: st
             ),
           },
         }));
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn("[E2EE] Failed to decrypt edited message", message_id, err);
+      });
 
       // Immediately mark as edited with placeholder
       return { ...msg, edited: true, raw: updatedRaw };

@@ -504,6 +504,20 @@ export class HavenApi {
     return res.json() as Promise<import("../types.js").UserPublic>;
   }
 
+  // ─── Profile Key Distribution ────────────────────
+
+  async distributeProfileKeys(
+    req: import("../types.js").DistributeProfileKeysRequest
+  ): Promise<{ distributed: number }> {
+    return this.put(`/api/v1/users/profile-keys`, req);
+  }
+
+  async getProfileKey(
+    userId: string
+  ): Promise<import("../types.js").ProfileKeyResponse> {
+    return this.get(`/api/v1/users/${userId}/profile-key`);
+  }
+
   // ─── Friends ──────────────────────────────────────
 
   async listFriends(): Promise<FriendResponse[]> {

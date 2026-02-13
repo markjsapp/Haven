@@ -4,6 +4,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod cache;
 pub mod config;
 pub mod crypto;
 pub mod db;
@@ -11,20 +12,25 @@ pub mod errors;
 pub mod middleware;
 pub mod models;
 pub mod permissions;
+pub mod pubsub;
 pub mod storage;
 pub mod ws;
 
 use axum::{
     extract::DefaultBodyLimit,
+    http::{header, HeaderValue, Method},
+    middleware as axum_mw,
     routing::{delete, get, post, put},
     Router,
 };
-use sqlx::PgPool;
 use tower_http::{
     compression::CompressionLayer,
-    cors::{Any, CorsLayer},
+    cors::{AllowOrigin, CorsLayer},
+    set_header::SetResponseHeaderLayer,
     trace::TraceLayer,
 };
+
+use middleware::{rate_limit_middleware, RateLimiter};
 
 use config::AppConfig;
 use ws::{ChannelBroadcastMap, ConnectionMap};
@@ -33,27 +39,72 @@ use ws::{ChannelBroadcastMap, ConnectionMap};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: PgPool,
+    pub db: db::DbPools,
     pub redis: redis::aio::ConnectionManager,
     pub config: AppConfig,
     pub storage_key: [u8; 32],
+    pub storage: storage::Storage,
     pub connections: ConnectionMap,
     pub channel_broadcasts: ChannelBroadcastMap,
+    pub pubsub_subscriptions: pubsub::PubSubSubscriptions,
 }
 
 // ─── Router ────────────────────────────────────────────
 
 pub fn build_router(state: AppState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    // ─── CORS ──────────────────────────────────────────
+    let cors = if state.config.cors_origins == "*" {
+        // Dev/test mode: allow all origins
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::any())
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::PATCH,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
+            .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+    } else {
+        // Production: whitelist specific origins
+        let origins: Vec<HeaderValue> = state
+            .config
+            .cors_origins
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::PATCH,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
+            .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+    };
 
-    // Auth routes (no authentication required)
+    // ─── Rate Limiting ─────────────────────────────────
+    // Global: per-IP, based on config max_requests_per_minute
+    let global_limiter = RateLimiter::new(state.config.max_requests_per_minute, 60);
+    middleware::spawn_rate_limit_cleanup(global_limiter.clone());
+
+    // Stricter limit for auth endpoints (10 req/min per IP to resist brute-force)
+    let auth_limiter = RateLimiter::new(10, 60);
+
+    // Auth routes (no authentication required) — stricter rate limit
+    let auth_limiter_clone = auth_limiter.clone();
     let auth_routes = Router::new()
         .route("/register", post(api::auth_routes::register))
         .route("/login", post(api::auth_routes::login))
-        .route("/refresh", post(api::auth_routes::refresh_token));
+        .route("/refresh", post(api::auth_routes::refresh_token))
+        .layer(axum_mw::from_fn(move |req, next| {
+            let limiter = auth_limiter_clone.clone();
+            rate_limit_middleware(limiter, req, next)
+        }));
 
     // Auth routes (authentication required)
     let auth_protected = Router::new()
@@ -81,7 +132,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/search", get(api::users::get_user_by_username))
         .route("/profile", put(api::users::update_profile))
         .route("/avatar", post(api::users::upload_avatar))
-        .route("/blocked", get(api::users::get_blocked_users));
+        .route("/blocked", get(api::users::get_blocked_users))
+        .route("/profile-keys", put(api::users::distribute_profile_keys))
+        .route("/:user_id/profile-key", get(api::users::get_profile_key));
 
     // Server routes
     let server_routes = Router::new()
@@ -271,6 +324,18 @@ pub fn build_router(state: AppState) -> Router {
             get(api::voice::get_participants),
         );
 
+    // Background task: prune broadcast channels with no subscribers
+    {
+        let broadcasts = state.channel_broadcasts.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                broadcasts.retain(|_, tx| tx.receiver_count() > 0);
+            }
+        });
+    }
+
     // Assemble the full API
     let api = Router::new()
         .nest("/auth", auth_routes.merge(auth_protected))
@@ -294,7 +359,32 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health_check))
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
+        .layer(axum_mw::from_fn(move |req, next| {
+            let limiter = global_limiter.clone();
+            rate_limit_middleware(limiter, req, next)
+        }))
         .layer(cors)
+        // ─── Security Headers ──────────────────────────
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("x-xss-protection"),
+            HeaderValue::from_static("1; mode=block"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("referrer-policy"),
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("permissions-policy"),
+            HeaderValue::from_static("camera=(), microphone=(self), geolocation=()"),
+        ))
         .with_state(state)
 }
 

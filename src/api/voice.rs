@@ -27,7 +27,7 @@ pub async fn join_voice(
     }
 
     // Verify channel exists and is type "voice"
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
@@ -36,7 +36,7 @@ pub async fn join_voice(
     }
 
     // Verify user can access this channel
-    if !queries::can_access_channel(&state.db, channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
         return Err(AppError::Forbidden(
             "Not a member of this channel".into(),
         ));
@@ -153,7 +153,7 @@ pub async fn get_participants(
     let mut participants = Vec::new();
     for id_str in &member_ids {
         if let Ok(uid) = Uuid::parse_str(id_str) {
-            if let Ok(Some(user)) = queries::find_user_by_id(&state.db, uid).await {
+            if let Ok(Some(user)) = queries::find_user_by_id(state.db.read(), uid).await {
                 participants.push(VoiceParticipantResponse {
                     user_id: uid,
                     username: user.username,
@@ -206,7 +206,7 @@ async fn broadcast_voice_state(
     joined: bool,
 ) {
     // Look up username for the event
-    let username = match queries::find_user_by_id(&state.db, user_id).await {
+    let username = match queries::find_user_by_id(state.db.read(), user_id).await {
         Ok(Some(user)) => user.display_name.unwrap_or(user.username),
         _ => return,
     };
@@ -223,9 +223,9 @@ async fn broadcast_voice_state(
     }
 
     // Also broadcast to all channels in the same server so sidebar can update
-    if let Ok(Some(channel)) = queries::find_channel_by_id(&state.db, channel_id).await {
+    if let Ok(Some(channel)) = queries::find_channel_by_id(state.db.read(), channel_id).await {
         if let Some(server_id) = channel.server_id {
-            if let Ok(channels) = queries::get_server_channels(&state.db, server_id).await {
+            if let Ok(channels) = queries::get_server_channels(state.db.read(), server_id).await {
                 for ch in channels {
                     if ch.id != channel_id {
                         if let Some(broadcaster) = state.channel_broadcasts.get(&ch.id) {

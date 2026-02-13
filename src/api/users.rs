@@ -2,11 +2,10 @@ use axum::{
     body::Bytes,
     extract::{Path, Query, State},
     http::{header, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Redirect},
     Json,
 };
 use serde::Deserialize;
-use std::path::Path as FilePath;
 use uuid::Uuid;
 
 use crate::db::queries;
@@ -34,7 +33,7 @@ pub async fn get_user_by_username(
     AuthUser(_user_id): AuthUser,
     Query(query): Query<UserSearchQuery>,
 ) -> AppResult<Json<UserPublic>> {
-    let user = queries::find_user_by_username(&state.db, &query.username).await?;
+    let user = queries::find_user_by_username(state.db.read(), &query.username).await?;
     let user = user.ok_or(AppError::UserNotFound)?;
     Ok(Json(UserPublic::from(user)))
 }
@@ -46,11 +45,11 @@ pub async fn get_profile(
     Path(user_id): Path<Uuid>,
     Query(query): Query<ProfileQuery>,
 ) -> AppResult<Json<UserProfileResponse>> {
-    let user = queries::find_user_by_id(&state.db, user_id)
+    let user = queries::find_user_by_id_cached(state.db.read(), &mut state.redis.clone(), user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
-    let is_blocked = queries::is_blocked(&state.db, requester_id, user_id).await?;
+    let is_blocked = queries::is_blocked(state.db.read(), requester_id, user_id).await?;
 
     // Friendship status
     let mut is_friend = false;
@@ -58,7 +57,7 @@ pub async fn get_profile(
     let mut friendship_id: Option<Uuid> = None;
 
     if requester_id != user_id {
-        if let Some(friendship) = queries::find_friendship(&state.db, requester_id, user_id).await? {
+        if let Some(friendship) = queries::find_friendship(state.db.read(), requester_id, user_id).await? {
             friendship_id = Some(friendship.id);
             if friendship.status == "accepted" {
                 is_friend = true;
@@ -75,9 +74,9 @@ pub async fn get_profile(
 
     // Mutual friends & servers (skip for own profile)
     let (mutual_friend_count, mutual_friends, mutual_server_count) = if requester_id != user_id {
-        let friends = queries::get_mutual_friends(&state.db, requester_id, user_id).await?;
+        let friends = queries::get_mutual_friends(state.db.read(), requester_id, user_id).await?;
         let count = friends.len() as i64;
-        let server_count = queries::get_mutual_server_count(&state.db, requester_id, user_id).await?;
+        let server_count = queries::get_mutual_server_count(state.db.read(), requester_id, user_id).await?;
         (count, friends, server_count)
     } else {
         (0, vec![], 0)
@@ -85,11 +84,15 @@ pub async fn get_profile(
 
     // Server roles (only when server_id provided)
     let roles = if let Some(server_id) = query.server_id {
-        let member_roles = queries::get_member_roles(&state.db, server_id, user_id).await?;
+        let member_roles = queries::get_member_roles(state.db.read(), server_id, user_id).await?;
         Some(member_roles.into_iter().map(RoleResponse::from).collect())
     } else {
         None
     };
+
+    let encrypted_profile = user.encrypted_profile.as_ref().map(|v| {
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v)
+    });
 
     Ok(Json(UserProfileResponse {
         id: user.id,
@@ -108,6 +111,7 @@ pub async fn get_profile(
         mutual_friends,
         mutual_server_count,
         roles,
+        encrypted_profile,
     }))
 }
 
@@ -117,15 +121,29 @@ pub async fn update_profile(
     AuthUser(user_id): AuthUser,
     Json(req): Json<UpdateProfileRequest>,
 ) -> AppResult<Json<UserPublic>> {
+    // Decode encrypted_profile if provided
+    let encrypted_profile_bytes = if let Some(ref ep) = req.encrypted_profile {
+        Some(
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, ep)
+                .map_err(|_| AppError::Validation("Invalid encrypted_profile encoding".into()))?,
+        )
+    } else {
+        None
+    };
+
     let user = queries::update_user_profile(
-        &state.db,
+        state.db.write(),
         user_id,
         req.display_name.as_deref(),
         req.about_me.as_deref(),
         req.custom_status.as_deref(),
         req.custom_status_emoji.as_deref(),
+        encrypted_profile_bytes.as_deref(),
     )
     .await?;
+
+    // Invalidate user cache
+    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:user:{}", user_id)).await;
 
     Ok(Json(UserPublic::from(user)))
 }
@@ -146,16 +164,28 @@ pub async fn upload_avatar(
         )));
     }
 
-    // Store encrypted to disk using user_id-based storage key
+    // Store using user_id-based storage key
     let storage_key = storage::obfuscated_key(&state.storage_key, &format!("avatar:{}", user_id));
-    let storage_dir = FilePath::new(&state.config.storage_dir);
-    storage::store_blob(storage_dir, &storage_key, &body, &state.storage_key)
-        .await
-        .map_err(|e| AppError::BadRequest(format!("Failed to store avatar: {}", e)))?;
+    if state.config.cdn_enabled {
+        state
+            .storage
+            .store_blob_raw(&storage_key, &body)
+            .await
+            .map_err(|e| AppError::BadRequest(format!("Failed to store avatar: {}", e)))?;
+    } else {
+        state
+            .storage
+            .store_blob(&storage_key, &body)
+            .await
+            .map_err(|e| AppError::BadRequest(format!("Failed to store avatar: {}", e)))?;
+    }
 
     // Update avatar_url in DB to the download endpoint
     let avatar_url = format!("/api/v1/users/{}/avatar", user_id);
-    let user = queries::update_user_avatar(&state.db, user_id, &avatar_url).await?;
+    let user = queries::update_user_avatar(state.db.write(), user_id, &avatar_url).await?;
+
+    // Invalidate user cache
+    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:user:{}", user_id)).await;
 
     Ok(Json(UserPublic::from(user)))
 }
@@ -166,7 +196,7 @@ pub async fn get_avatar(
     Path(user_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
     // Verify user exists and has an avatar
-    let user = queries::find_user_by_id(&state.db, user_id)
+    let user = queries::find_user_by_id(state.db.read(), user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
@@ -174,24 +204,58 @@ pub async fn get_avatar(
         return Err(AppError::NotFound("No avatar set".into()));
     }
 
-    // Load from disk
     let storage_key = storage::obfuscated_key(&state.storage_key, &format!("avatar:{}", user_id));
-    let storage_dir = FilePath::new(&state.config.storage_dir);
-    let data = storage::load_blob(storage_dir, &storage_key, &state.storage_key)
-        .await
-        .map_err(|_| AppError::NotFound("Avatar file not found".into()))?;
 
-    // Detect content type from magic bytes
-    let content_type = detect_image_type(&data);
+    if state.config.cdn_enabled {
+        // CDN mode: try to return a presigned URL redirect
+        if let Some(url) = state
+            .storage
+            .presign_url(
+                &storage_key,
+                state.config.cdn_presign_expiry_secs,
+                &state.config.cdn_base_url,
+            )
+            .await
+        {
+            return Ok(Redirect::temporary(&url).into_response());
+        }
 
-    Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, content_type),
-            (header::CACHE_CONTROL, "public, max-age=3600".to_string()),
-        ],
-        data,
-    ))
+        // Fallback for local storage: serve raw bytes directly
+        let data = state
+            .storage
+            .load_blob_raw(&storage_key)
+            .await
+            .map_err(|_| AppError::NotFound("Avatar file not found".into()))?;
+
+        let content_type = detect_image_type(&data);
+        Ok((
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "public, max-age=3600".to_string()),
+            ],
+            data,
+        )
+            .into_response())
+    } else {
+        // Standard mode: decrypt server-side and return
+        let data = state
+            .storage
+            .load_blob(&storage_key)
+            .await
+            .map_err(|_| AppError::NotFound("Avatar file not found".into()))?;
+
+        let content_type = detect_image_type(&data);
+        Ok((
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "public, max-age=3600".to_string()),
+            ],
+            data,
+        )
+            .into_response())
+    }
 }
 
 fn detect_image_type(data: &[u8]) -> String {
@@ -219,11 +283,11 @@ pub async fn block_user(
     }
 
     // Verify target user exists
-    queries::find_user_by_id(&state.db, blocked_id)
+    queries::find_user_by_id(state.db.read(), blocked_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
-    queries::block_user(&state.db, blocker_id, blocked_id).await?;
+    queries::block_user(state.db.write(), blocker_id, blocked_id).await?;
     Ok(Json(()))
 }
 
@@ -233,7 +297,7 @@ pub async fn unblock_user(
     AuthUser(blocker_id): AuthUser,
     Path(blocked_id): Path<Uuid>,
 ) -> AppResult<Json<()>> {
-    queries::unblock_user(&state.db, blocker_id, blocked_id).await?;
+    queries::unblock_user(state.db.write(), blocker_id, blocked_id).await?;
     Ok(Json(()))
 }
 
@@ -241,7 +305,48 @@ pub async fn unblock_user(
 pub async fn get_blocked_users(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
+    Query(pagination): Query<PaginationQuery>,
 ) -> AppResult<Json<Vec<BlockedUserResponse>>> {
-    let blocked = queries::get_blocked_users(&state.db, user_id).await?;
+    let (limit, offset) = pagination.resolve();
+    let blocked = queries::get_blocked_users(state.db.read(), user_id, limit, offset).await?;
     Ok(Json(blocked))
+}
+
+/// PUT /api/v1/users/profile-keys — distribute profile keys to contacts
+pub async fn distribute_profile_keys(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Json(req): Json<DistributeProfileKeysRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    let mut distributions = Vec::new();
+    for entry in &req.distributions {
+        let key_bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            &entry.encrypted_profile_key,
+        )
+        .map_err(|_| AppError::Validation("Invalid encrypted_profile_key encoding".into()))?;
+        distributions.push((entry.to_user_id, key_bytes));
+    }
+
+    queries::distribute_profile_keys_bulk(state.db.write(), user_id, &distributions).await?;
+    Ok(Json(serde_json::json!({ "distributed": distributions.len() })))
+}
+
+/// GET /api/v1/users/:user_id/profile-key — get the profile key for a specific user
+pub async fn get_profile_key(
+    State(state): State<AppState>,
+    AuthUser(requester_id): AuthUser,
+    Path(from_user_id): Path<Uuid>,
+) -> AppResult<Json<ProfileKeyResponse>> {
+    let dist = queries::get_profile_key(state.db.read(), from_user_id, requester_id)
+        .await?
+        .ok_or(AppError::NotFound("Profile key not found".into()))?;
+
+    Ok(Json(ProfileKeyResponse {
+        from_user_id: dist.from_user_id,
+        encrypted_profile_key: base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &dist.encrypted_profile_key,
+        ),
+    }))
 }

@@ -1,10 +1,8 @@
-use std::path::Path;
-
 use axum::{
     body::Bytes,
     extract::{Path as AxumPath, State},
     http::{header, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Redirect},
     Json,
 };
 use uuid::Uuid;
@@ -17,7 +15,9 @@ use crate::storage;
 use crate::AppState;
 
 /// POST /api/v1/attachments/upload
-/// Receives encrypted blob bytes, encrypts at rest, and stores locally.
+/// Receives encrypted blob bytes, stores them.
+/// When CDN is enabled, stores raw (no server-side encryption — client-side E2EE is sufficient).
+/// When CDN is disabled, applies server-side AES-256-GCM encryption at rest.
 pub async fn upload(
     State(state): State<AppState>,
     AuthUser(_user_id): AuthUser,
@@ -38,17 +38,23 @@ pub async fn upload(
     let attachment_id = Uuid::new_v4();
     let storage_key = storage::obfuscated_key(&state.storage_key, &attachment_id.to_string());
 
-    // Encrypt at rest and write to disk
-    storage::store_blob(
-        Path::new(&state.config.storage_dir),
-        &storage_key,
-        &body,
-        &state.storage_key,
-    )
-    .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to store attachment: {}", e)))?;
+    if state.config.cdn_enabled {
+        // CDN mode: store raw bytes (client-side E2EE is sufficient)
+        state
+            .storage
+            .store_blob_raw(&storage_key, &body)
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to store attachment: {}", e)))?;
+    } else {
+        // Standard mode: encrypt at rest with server-side AES
+        state
+            .storage
+            .store_blob(&storage_key, &body)
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to store attachment: {}", e)))?;
+    }
 
-    tracing::debug!("Stored attachment {} ({} bytes)", attachment_id, body.len());
+    tracing::debug!("Stored attachment {} ({} bytes, cdn={})", attachment_id, body.len(), state.config.cdn_enabled);
 
     Ok(Json(UploadResponse {
         attachment_id,
@@ -57,38 +63,67 @@ pub async fn upload(
 }
 
 /// GET /api/v1/attachments/:attachment_id
-/// Reads encrypted-at-rest blob from disk, decrypts server-side layer, returns raw bytes.
+/// When CDN is enabled, returns a presigned S3 URL redirect (or raw bytes for local storage).
+/// When CDN is disabled, decrypts server-side encryption and returns raw bytes.
 pub async fn download(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     AxumPath(attachment_id): AxumPath<Uuid>,
 ) -> AppResult<impl IntoResponse> {
     // Look up the attachment
-    let att = queries::find_attachment_by_id(&state.db, attachment_id)
+    let att = queries::find_attachment_by_id(state.db.read(), attachment_id)
         .await?
         .ok_or(AppError::NotFound("Attachment not found".into()))?;
 
     // Verify the user has access to the message's channel
-    let message = queries::find_message_by_id(&state.db, att.message_id)
+    let message = queries::find_message_by_id(state.db.read(), att.message_id)
         .await?
         .ok_or(AppError::NotFound("Message not found".into()))?;
 
-    if !queries::can_access_channel(&state.db, message.channel_id, user_id).await? {
+    if !queries::can_access_channel(state.db.read(), message.channel_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
-    // Read and decrypt server-side encryption from disk
-    let data = storage::load_blob(
-        Path::new(&state.config.storage_dir),
-        &att.storage_key,
-        &state.storage_key,
-    )
-    .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to load attachment: {}", e)))?;
+    if state.config.cdn_enabled {
+        // CDN mode: try to return a presigned URL redirect
+        if let Some(url) = state
+            .storage
+            .presign_url(
+                &att.storage_key,
+                state.config.cdn_presign_expiry_secs,
+                &state.config.cdn_base_url,
+            )
+            .await
+        {
+            return Ok(Redirect::temporary(&url).into_response());
+        }
 
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/octet-stream")],
-        data,
-    ))
+        // Fallback for local storage: serve raw bytes directly
+        let data = state
+            .storage
+            .load_blob_raw(&att.storage_key)
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to load attachment: {}", e)))?;
+
+        Ok((
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/octet-stream")],
+            data,
+        )
+            .into_response())
+    } else {
+        // Standard mode: decrypt server-side encryption and return bytes
+        let data = state
+            .storage
+            .load_blob(&att.storage_key)
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to load attachment: {}", e)))?;
+
+        Ok((
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/octet-stream")],
+            data,
+        )
+            .into_response())
+    }
 }

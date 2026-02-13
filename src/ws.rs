@@ -19,6 +19,7 @@ use crate::auth::{validate_access_token, user_id_from_claims};
 use crate::db::queries;
 use crate::errors::AppError;
 use crate::models::{MessageResponse, WsClientMessage, WsServerMessage};
+use crate::pubsub;
 use crate::AppState;
 
 /// Tracks all connected clients. Maps user_id -> list of sender channels.
@@ -82,6 +83,9 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
 
     tracing::info!("WebSocket connected: user={}", user_id);
 
+    // Track this user in Redis pub/sub for cross-instance delivery
+    pubsub::subscribe_redis_user(&state, user_id).await;
+
     // Always broadcast online — handles reconnect-before-disconnect race on page refresh
     broadcast_presence(user_id, "online", &state).await;
 
@@ -124,12 +128,19 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
         _ = recv_task => {},
     }
 
-    // Cleanup: abort all subscription tasks
-    {
+    // Cleanup: abort all subscription tasks and prune empty broadcasts
+    let subscribed_channels: Vec<Uuid> = {
         let mut subs = subscriptions.lock().await;
+        let channel_ids: Vec<Uuid> = subs.keys().copied().collect();
         for (_, handle) in subs.drain() {
             handle.abort();
         }
+        channel_ids
+    };
+
+    // Remove broadcast entries that have no remaining subscribers
+    for channel_id in subscribed_channels {
+        state.channel_broadcasts.remove_if(&channel_id, |_, tx| tx.receiver_count() == 0);
     }
 
     // Cleanup: remove this connection
@@ -150,6 +161,8 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
         broadcast_presence(user_id, "offline", &state).await;
         // Clean up voice state — remove from any voice channel
         crate::api::voice::cleanup_voice_state(&state, user_id).await;
+        // Unsubscribe from Redis user channel
+        pubsub::unsubscribe_redis_user(&state, user_id).await;
     }
 
     tracing::info!("WebSocket disconnected: user={}", user_id);
@@ -281,7 +294,7 @@ async fn handle_send_message(
     reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
 ) {
     // Verify user can access the channel (channel member or server member)
-    match queries::can_access_channel(&state.db, channel_id, user_id).await {
+    match queries::can_access_channel(state.db.read(), channel_id, user_id).await {
         Ok(true) => {}
         Ok(false) => {
             let _ = reply_tx.send(WsServerMessage::Error {
@@ -329,7 +342,7 @@ async fn handle_send_message(
 
     // Persist message
     let message = match queries::insert_message(
-        &state.db,
+        state.db.write(),
         channel_id,
         &sender_token_bytes,
         &encrypted_body_bytes,
@@ -354,7 +367,7 @@ async fn handle_send_message(
     if let Some(ids) = attachment_ids {
         for att_id in ids {
             let storage_key = crate::storage::obfuscated_key(&state.storage_key, &att_id.to_string());
-            if let Err(e) = queries::link_attachment(&state.db, att_id, message.id, &storage_key).await {
+            if let Err(e) = queries::link_attachment(state.db.write(), att_id, message.id, &storage_key).await {
                 tracing::error!("Failed to link attachment {}: {}", att_id, e);
             }
         }
@@ -368,9 +381,12 @@ async fn handle_send_message(
     });
 
     // Fan out to all channel subscribers via broadcast
+    let new_msg = WsServerMessage::NewMessage(msg_response);
     if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
-        let _ = broadcaster.send(WsServerMessage::NewMessage(msg_response));
+        let _ = broadcaster.send(new_msg.clone());
     }
+    // Publish to Redis for cross-instance delivery
+    pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &new_msg).await;
 }
 
 /// Handle a Subscribe command: join a channel broadcast group.
@@ -382,7 +398,7 @@ async fn handle_subscribe(
     subscriptions: &Arc<tokio::sync::Mutex<HashMap<Uuid, JoinHandle<()>>>>,
 ) {
     // Verify membership (channel member or server member)
-    match queries::can_access_channel(&state.db, channel_id, user_id).await {
+    match queries::can_access_channel(state.db.read(), channel_id, user_id).await {
         Ok(true) => {}
         Ok(false) => {
             let _ = reply_tx.send(WsServerMessage::Error {
@@ -406,7 +422,7 @@ async fn handle_subscribe(
         .channel_broadcasts
         .entry(channel_id)
         .or_insert_with(|| {
-            let (tx, _) = broadcast::channel(256);
+            let (tx, _) = broadcast::channel(state.config.broadcast_channel_capacity);
             tx
         });
 
@@ -426,6 +442,9 @@ async fn handle_subscribe(
 
         subscriptions.lock().await.insert(channel_id, handle);
     }
+
+    // Track in Redis pub/sub for cross-instance delivery
+    pubsub::subscribe_redis_channel(state, channel_id).await;
 
     let _ = reply_tx.send(WsServerMessage::Subscribed { channel_id });
 }
@@ -469,7 +488,7 @@ async fn handle_set_status(
         .await;
 
     // Broadcast to all channels this user belongs to
-    let channel_ids = match queries::get_user_channel_ids(&state.db, user_id).await {
+    let channel_ids = match queries::get_user_channel_ids(state.db.read(), user_id).await {
         Ok(ids) => ids,
         Err(_) => return,
     };
@@ -479,28 +498,33 @@ async fn handle_set_status(
         status: broadcast_status.to_string(),
     };
 
-    for channel_id in channel_ids {
-        if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
+    for channel_id in &channel_ids {
+        if let Some(broadcaster) = state.channel_broadcasts.get(channel_id) {
             let _ = broadcaster.send(msg.clone());
         }
+    }
+    for channel_id in channel_ids {
+        pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &msg).await;
     }
 }
 
 /// Handle typing indicator — ephemeral, no persistence.
 async fn handle_typing(user_id: Uuid, channel_id: Uuid, state: &AppState) {
-    // Look up username for display
-    let username = match queries::find_user_by_id(&state.db, user_id).await {
+    // Look up username for display (cached)
+    let username = match queries::find_user_by_id_cached(state.db.read(), &mut state.redis.clone(), user_id).await {
         Ok(Some(user)) => user.display_name.unwrap_or(user.username),
         _ => return, // Can't resolve user — skip
     };
 
+    let typing_msg = WsServerMessage::UserTyping {
+        channel_id,
+        user_id,
+        username,
+    };
     if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
-        let _ = broadcaster.send(WsServerMessage::UserTyping {
-            channel_id,
-            user_id,
-            username,
-        });
+        let _ = broadcaster.send(typing_msg.clone());
     }
+    pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &typing_msg).await;
 }
 
 /// Handle an EditMessage command: verify ownership, update DB, broadcast.
@@ -525,7 +549,7 @@ async fn handle_edit_message(
     };
 
     let message = match queries::update_message_body(
-        &state.db,
+        state.db.write(),
         message_id,
         user_id,
         &encrypted_body_bytes,
@@ -547,13 +571,15 @@ async fn handle_edit_message(
     );
 
     // Broadcast edit to all channel subscribers
+    let edit_msg = WsServerMessage::MessageEdited {
+        message_id: message.id,
+        channel_id: message.channel_id,
+        encrypted_body: edited_body,
+    };
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {
-        let _ = broadcaster.send(WsServerMessage::MessageEdited {
-            message_id: message.id,
-            channel_id: message.channel_id,
-            encrypted_body: edited_body,
-        });
+        let _ = broadcaster.send(edit_msg.clone());
     }
+    pubsub::publish_channel_event(&mut state.redis.clone(), message.channel_id, &edit_msg).await;
 }
 
 /// Handle a DeleteMessage command: verify ownership or server admin, delete from DB, broadcast.
@@ -564,11 +590,11 @@ async fn handle_delete_message(
     reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
 ) {
     // Try deleting as sender first (fast path)
-    let message = match queries::delete_message(&state.db, message_id, user_id).await {
+    let message = match queries::delete_message(state.db.write(), message_id, user_id).await {
         Ok(m) => m,
         Err(_) => {
             // Sender check failed — check if user is the server owner
-            let msg = match queries::find_message_by_id(&state.db, message_id).await {
+            let msg = match queries::find_message_by_id(state.db.read(), message_id).await {
                 Ok(Some(m)) => m,
                 Ok(None) => {
                     let _ = reply_tx.send(WsServerMessage::Error {
@@ -585,7 +611,7 @@ async fn handle_delete_message(
             };
 
             // Get the channel's server_id
-            let channel = match queries::find_channel_by_id(&state.db, msg.channel_id).await {
+            let channel = match queries::find_channel_by_id(state.db.read(), msg.channel_id).await {
                 Ok(Some(c)) => c,
                 _ => {
                     let _ = reply_tx.send(WsServerMessage::Error {
@@ -607,7 +633,7 @@ async fn handle_delete_message(
             };
 
             // Check if user is the server owner
-            let server = match queries::find_server_by_id(&state.db, server_id).await {
+            let server = match queries::find_server_by_id(state.db.read(), server_id).await {
                 Ok(Some(s)) if s.owner_id == user_id => s,
                 _ => {
                     let _ = reply_tx.send(WsServerMessage::Error {
@@ -619,7 +645,7 @@ async fn handle_delete_message(
             let _ = server; // used above in the guard
 
             // User is the server owner — delete unconditionally
-            match queries::delete_message_admin(&state.db, message_id).await {
+            match queries::delete_message_admin(state.db.write(), message_id).await {
                 Ok(m) => m,
                 Err(e) => {
                     let _ = reply_tx.send(WsServerMessage::Error {
@@ -632,12 +658,14 @@ async fn handle_delete_message(
     };
 
     // Broadcast deletion to all channel subscribers
+    let del_msg = WsServerMessage::MessageDeleted {
+        message_id: message.id,
+        channel_id: message.channel_id,
+    };
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {
-        let _ = broadcaster.send(WsServerMessage::MessageDeleted {
-            message_id: message.id,
-            channel_id: message.channel_id,
-        });
+        let _ = broadcaster.send(del_msg.clone());
     }
+    pubsub::publish_channel_event(&mut state.redis.clone(), message.channel_id, &del_msg).await;
 }
 
 /// Handle an AddReaction command: persist and broadcast.
@@ -649,7 +677,7 @@ async fn handle_add_reaction(
     reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
 ) {
     // Look up the message to get its channel_id
-    let message = match queries::find_message_by_id(&state.db, message_id).await {
+    let message = match queries::find_message_by_id(state.db.read(), message_id).await {
         Ok(Some(m)) => m,
         Ok(None) => {
             let _ = reply_tx.send(WsServerMessage::Error {
@@ -666,7 +694,7 @@ async fn handle_add_reaction(
     };
 
     // Persist the reaction
-    if let Err(e) = queries::add_reaction(&state.db, message_id, user_id, emoji).await {
+    if let Err(e) = queries::add_reaction(state.db.write(), message_id, user_id, emoji).await {
         let _ = reply_tx.send(WsServerMessage::Error {
             message: format!("Failed to add reaction: {}", e),
         });
@@ -674,14 +702,16 @@ async fn handle_add_reaction(
     }
 
     // Broadcast to all channel subscribers
+    let react_msg = WsServerMessage::ReactionAdded {
+        message_id,
+        channel_id: message.channel_id,
+        user_id,
+        emoji: emoji.to_string(),
+    };
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {
-        let _ = broadcaster.send(WsServerMessage::ReactionAdded {
-            message_id,
-            channel_id: message.channel_id,
-            user_id,
-            emoji: emoji.to_string(),
-        });
+        let _ = broadcaster.send(react_msg.clone());
     }
+    pubsub::publish_channel_event(&mut state.redis.clone(), message.channel_id, &react_msg).await;
 }
 
 /// Handle a RemoveReaction command: delete and broadcast.
@@ -693,7 +723,7 @@ async fn handle_remove_reaction(
     reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
 ) {
     // Look up the message to get its channel_id
-    let message = match queries::find_message_by_id(&state.db, message_id).await {
+    let message = match queries::find_message_by_id(state.db.read(), message_id).await {
         Ok(Some(m)) => m,
         Ok(None) => {
             let _ = reply_tx.send(WsServerMessage::Error {
@@ -710,7 +740,7 @@ async fn handle_remove_reaction(
     };
 
     // Delete the reaction
-    match queries::remove_reaction(&state.db, message_id, user_id, emoji).await {
+    match queries::remove_reaction(state.db.write(), message_id, user_id, emoji).await {
         Ok(false) => return, // Didn't exist — no-op
         Err(e) => {
             let _ = reply_tx.send(WsServerMessage::Error {
@@ -722,14 +752,16 @@ async fn handle_remove_reaction(
     }
 
     // Broadcast to all channel subscribers
+    let unreact_msg = WsServerMessage::ReactionRemoved {
+        message_id,
+        channel_id: message.channel_id,
+        user_id,
+        emoji: emoji.to_string(),
+    };
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {
-        let _ = broadcaster.send(WsServerMessage::ReactionRemoved {
-            message_id,
-            channel_id: message.channel_id,
-            user_id,
-            emoji: emoji.to_string(),
-        });
+        let _ = broadcaster.send(unreact_msg.clone());
     }
+    pubsub::publish_channel_event(&mut state.redis.clone(), message.channel_id, &unreact_msg).await;
 }
 
 /// Broadcast a presence update (online/offline) to all channels the user belongs to,
@@ -756,7 +788,7 @@ pub(crate) async fn broadcast_presence(user_id: Uuid, status: &str, state: &AppS
     }
 
     // Get all channels this user belongs to and broadcast
-    let channel_ids = match queries::get_user_channel_ids(&state.db, user_id).await {
+    let channel_ids = match queries::get_user_channel_ids(state.db.read(), user_id).await {
         Ok(ids) => ids,
         Err(e) => {
             tracing::warn!("Failed to get user channels for presence: {}", e);
@@ -769,10 +801,14 @@ pub(crate) async fn broadcast_presence(user_id: Uuid, status: &str, state: &AppS
         status: status.to_string(),
     };
 
-    for ch_id in channel_ids {
-        if let Some(broadcaster) = state.channel_broadcasts.get(&ch_id) {
+    for ch_id in &channel_ids {
+        if let Some(broadcaster) = state.channel_broadcasts.get(ch_id) {
             let _ = broadcaster.send(msg.clone());
         }
+    }
+    // Publish presence to all subscribed channels via Redis
+    for ch_id in channel_ids {
+        pubsub::publish_channel_event(&mut state.redis.clone(), ch_id, &msg).await;
     }
 }
 
@@ -784,7 +820,7 @@ async fn handle_pin_message(
     state: &AppState,
     reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
 ) {
-    match queries::can_access_channel(&state.db, channel_id, user_id).await {
+    match queries::can_access_channel(state.db.read(), channel_id, user_id).await {
         Ok(true) => {}
         Ok(false) => {
             let _ = reply_tx.send(WsServerMessage::Error {
@@ -799,7 +835,7 @@ async fn handle_pin_message(
     }
 
     // Verify the message belongs to this channel
-    match queries::find_message_by_id(&state.db, message_id).await {
+    match queries::find_message_by_id(state.db.read(), message_id).await {
         Ok(Some(m)) if m.channel_id == channel_id => {}
         _ => {
             let _ = reply_tx.send(WsServerMessage::Error {
@@ -809,18 +845,20 @@ async fn handle_pin_message(
         }
     }
 
-    match queries::pin_message(&state.db, channel_id, message_id, user_id).await {
+    match queries::pin_message(state.db.write(), channel_id, message_id, user_id).await {
         Ok(_) => {
+            let pin_msg = WsServerMessage::MessagePinned {
+                channel_id,
+                message_id,
+                pinned_by: user_id,
+            };
             if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
-                let _ = broadcaster.send(WsServerMessage::MessagePinned {
-                    channel_id,
-                    message_id,
-                    pinned_by: user_id,
-                });
+                let _ = broadcaster.send(pin_msg.clone());
             }
+            pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &pin_msg).await;
 
             // Insert system message for pin
-            if let Ok(Some(user)) = queries::find_user_by_id(&state.db, user_id).await {
+            if let Ok(Some(user)) = queries::find_user_by_id(state.db.read(), user_id).await {
                 let username = user.display_name.as_deref().unwrap_or(&user.username);
                 let body = serde_json::json!({
                     "event": "message_pinned",
@@ -828,12 +866,14 @@ async fn handle_pin_message(
                     "user_id": user_id.to_string(),
                 });
                 if let Ok(sys_msg) = queries::insert_system_message(
-                    &state.db, channel_id, &body.to_string(),
+                    state.db.write(), channel_id, &body.to_string(),
                 ).await {
                     let response: MessageResponse = sys_msg.into();
+                    let sys_ws_msg = WsServerMessage::NewMessage(response);
                     if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
-                        let _ = broadcaster.send(WsServerMessage::NewMessage(response));
+                        let _ = broadcaster.send(sys_ws_msg.clone());
                     }
+                    pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &sys_ws_msg).await;
                 }
             }
         }
@@ -851,7 +891,7 @@ async fn handle_unpin_message(
     state: &AppState,
     reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
 ) {
-    match queries::can_access_channel(&state.db, channel_id, user_id).await {
+    match queries::can_access_channel(state.db.read(), channel_id, user_id).await {
         Ok(true) => {}
         Ok(false) => {
             let _ = reply_tx.send(WsServerMessage::Error {
@@ -865,17 +905,19 @@ async fn handle_unpin_message(
         }
     }
 
-    match queries::unpin_message(&state.db, channel_id, message_id).await {
+    match queries::unpin_message(state.db.write(), channel_id, message_id).await {
         Ok(true) => {
+            let unpin_msg = WsServerMessage::MessageUnpinned {
+                channel_id,
+                message_id,
+            };
             if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
-                let _ = broadcaster.send(WsServerMessage::MessageUnpinned {
-                    channel_id,
-                    message_id,
-                });
+                let _ = broadcaster.send(unpin_msg.clone());
             }
+            pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &unpin_msg).await;
 
             // Insert system message for unpin
-            if let Ok(Some(user)) = queries::find_user_by_id(&state.db, user_id).await {
+            if let Ok(Some(user)) = queries::find_user_by_id(state.db.read(), user_id).await {
                 let username = user.display_name.as_deref().unwrap_or(&user.username);
                 let body = serde_json::json!({
                     "event": "message_unpinned",
@@ -883,12 +925,14 @@ async fn handle_unpin_message(
                     "user_id": user_id.to_string(),
                 });
                 if let Ok(sys_msg) = queries::insert_system_message(
-                    &state.db, channel_id, &body.to_string(),
+                    state.db.write(), channel_id, &body.to_string(),
                 ).await {
                     let response: MessageResponse = sys_msg.into();
+                    let sys_ws_msg = WsServerMessage::NewMessage(response);
                     if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
-                        let _ = broadcaster.send(WsServerMessage::NewMessage(response));
+                        let _ = broadcaster.send(sys_ws_msg.clone());
                     }
+                    pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &sys_ws_msg).await;
                 }
             }
         }

@@ -17,11 +17,11 @@ pub async fn list_categories(
     AuthUser(user_id): AuthUser,
     Path(server_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<CategoryResponse>>> {
-    if !queries::is_server_member(&state.db, server_id, user_id).await? {
+    if !queries::is_server_member(state.db.read(), server_id, user_id).await? {
         return Err(AppError::Forbidden("Not a member of this server".into()));
     }
 
-    let cats = queries::get_server_categories(&state.db, server_id).await?;
+    let cats = queries::get_server_categories(state.db.read(), server_id).await?;
     let responses: Vec<CategoryResponse> = cats.into_iter().map(CategoryResponse::from).collect();
     Ok(Json(responses))
 }
@@ -34,7 +34,7 @@ pub async fn create_category(
     Json(req): Json<CreateCategoryRequest>,
 ) -> AppResult<Json<CategoryResponse>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
@@ -42,7 +42,7 @@ pub async fn create_category(
     .await?;
 
     let position = req.position.unwrap_or(0);
-    let cat = queries::create_category(&state.db, server_id, &req.name, position).await?;
+    let cat = queries::create_category(state.db.write(), server_id, &req.name, position).await?;
     Ok(Json(CategoryResponse::from(cat)))
 }
 
@@ -54,7 +54,7 @@ pub async fn reorder_categories(
     Json(req): Json<ReorderCategoriesRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
@@ -62,7 +62,7 @@ pub async fn reorder_categories(
     .await?;
 
     let order: Vec<(Uuid, i32)> = req.order.iter().map(|p| (p.id, p.position)).collect();
-    queries::reorder_categories(&state.db, server_id, &order).await?;
+    queries::reorder_categories(state.db.write(), server_id, &order).await?;
 
     Ok(Json(serde_json::json!({ "message": "Categories reordered" })))
 }
@@ -75,14 +75,14 @@ pub async fn update_category(
     Json(req): Json<UpdateCategoryRequest>,
 ) -> AppResult<Json<CategoryResponse>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
     )
     .await?;
 
-    let cat = queries::find_category_by_id(&state.db, category_id)
+    let cat = queries::find_category_by_id(state.db.read(), category_id)
         .await?
         .ok_or(AppError::NotFound("Category not found".into()))?;
     if cat.server_id != server_id {
@@ -90,7 +90,7 @@ pub async fn update_category(
     }
 
     let updated = queries::update_category(
-        &state.db,
+        state.db.write(),
         category_id,
         req.name.as_deref(),
         req.position,
@@ -106,21 +106,21 @@ pub async fn delete_category(
     Path((server_id, category_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
     )
     .await?;
 
-    let cat = queries::find_category_by_id(&state.db, category_id)
+    let cat = queries::find_category_by_id(state.db.read(), category_id)
         .await?
         .ok_or(AppError::NotFound("Category not found".into()))?;
     if cat.server_id != server_id {
         return Err(AppError::NotFound("Category not found".into()));
     }
 
-    queries::delete_category(&state.db, category_id).await?;
+    queries::delete_category(state.db.write(), category_id).await?;
     Ok(Json(serde_json::json!({ "message": "Category deleted" })))
 }
 
@@ -131,7 +131,7 @@ pub async fn set_channel_category(
     Path(channel_id): Path<Uuid>,
     Json(req): Json<SetChannelCategoryRequest>,
 ) -> AppResult<Json<ChannelResponse>> {
-    let channel = queries::find_channel_by_id(&state.db, channel_id)
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
         .await?
         .ok_or(AppError::NotFound("Channel not found".into()))?;
 
@@ -139,7 +139,7 @@ pub async fn set_channel_category(
         .ok_or(AppError::Forbidden("Cannot set category on DM channels".into()))?;
 
     queries::require_server_permission(
-        &state.db,
+        state.db.read(),
         server_id,
         user_id,
         permissions::MANAGE_CHANNELS,
@@ -148,7 +148,7 @@ pub async fn set_channel_category(
 
     // If setting a category, verify it exists and belongs to same server
     if let Some(cat_id) = req.category_id {
-        let cat = queries::find_category_by_id(&state.db, cat_id)
+        let cat = queries::find_category_by_id(state.db.read(), cat_id)
             .await?
             .ok_or(AppError::NotFound("Category not found".into()))?;
         if cat.server_id != server_id {
@@ -156,7 +156,7 @@ pub async fn set_channel_category(
         }
     }
 
-    let updated = queries::set_channel_category(&state.db, channel_id, req.category_id).await?;
+    let updated = queries::set_channel_category(state.db.write(), channel_id, req.category_id).await?;
 
     Ok(Json(ChannelResponse {
         id: updated.id,

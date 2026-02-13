@@ -33,3 +33,12 @@ export {
   senderKeyEncrypt,
   senderKeyDecrypt,
 } from "./sender-keys.js";
+export {
+  generateProfileKey,
+  encryptProfile,
+  decryptProfile,
+  encryptProfileKeyFor,
+  decryptProfileKey,
+  encryptProfileToBase64,
+  decryptProfileFromBase64,
+} from "./profile.js";
