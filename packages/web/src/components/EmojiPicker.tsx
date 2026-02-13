@@ -38,7 +38,7 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
   }, [onClose]);
 
   return (
-    <div className="emoji-picker" ref={ref}>
+    <div className="emoji-picker" ref={ref} role="dialog" aria-label="Emoji picker">
       <Suspense fallback={<div className="emoji-picker-loading" />}>
         <LazyPicker
           onEmojiSelect={(emoji: { native: string }) => {

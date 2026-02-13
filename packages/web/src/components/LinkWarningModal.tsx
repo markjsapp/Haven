@@ -1,3 +1,6 @@
+import { useRef } from "react";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
+
 interface LinkWarningModalProps {
   url: string;
   onConfirm: () => void;
@@ -5,10 +8,13 @@ interface LinkWarningModalProps {
 }
 
 export default function LinkWarningModal({ url, onConfirm, onCancel }: LinkWarningModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
+
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-dialog link-warning-dialog" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">Leaving Haven</h3>
+    <div className="modal-overlay" onClick={onCancel} role="presentation">
+      <div className="modal-dialog link-warning-dialog" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="link-warning-title">
+        <h3 className="modal-title" id="link-warning-title">Leaving Haven</h3>
         <p className="link-warning-subtitle">
           You are about to visit an external website. Make sure you trust this link before continuing.
         </p>

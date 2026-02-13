@@ -7,6 +7,149 @@
   padding: 0;
 }
 
+/* ─── Accessibility ───────────────────────────────── */
+
+/* Global focus indicator — WCAG 2.4.11: 2px thick, 3:1 contrast */
+:focus-visible {
+  outline: 2px solid var(--text-link, #00a8fc);
+  outline-offset: 2px;
+}
+
+/* Remove focus ring for mouse users (only show for keyboard nav) */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Screen-reader only — visually hidden but accessible */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip nav link — visible only on focus */
+.skip-nav {
+  position: absolute;
+  top: -100%;
+  left: 16px;
+  z-index: 10000;
+  padding: 8px 16px;
+  background: var(--blurple);
+  color: #fff;
+  border-radius: 4px;
+  font-size: 14px;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-nav:focus {
+  top: 8px;
+}
+
+/* Reduced motion — honors OS preference OR user toggle */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+[data-reduced-motion] *, [data-reduced-motion] *::before, [data-reduced-motion] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* High contrast mode */
+[data-high-contrast] {
+  --text-muted: #b5bac1;
+  --text-secondary: #dbdee1;
+  --interactive-normal: #dbdee1;
+  --interactive-muted: #a2a4a6;
+  --border-subtle: #5c5e66;
+  --divider: #5c5e66;
+}
+
+/* Accessibility font: OpenDyslexic */
+@font-face {
+  font-family: "OpenDyslexic";
+  src: url("https://cdn.jsdelivr.net/npm/open-dyslexic@1.0.3/open-dyslexic-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "OpenDyslexic";
+  src: url("https://cdn.jsdelivr.net/npm/open-dyslexic@1.0.3/open-dyslexic-bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Accessibility font: Atkinson Hyperlegible */
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  src: url("https://cdn.jsdelivr.net/npm/@fontsource/atkinson-hyperlegible@5.0.0/files/atkinson-hyperlegible-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  src: url("https://cdn.jsdelivr.net/npm/@fontsource/atkinson-hyperlegible@5.0.0/files/atkinson-hyperlegible-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+[data-a11y-font="opendyslexic"] {
+  font-family: "OpenDyslexic", sans-serif !important;
+}
+[data-a11y-font="atkinson"] {
+  font-family: "Atkinson Hyperlegible", sans-serif !important;
+}
+
+/* WCAG 2.2 AA contrast ratios — audited 2026-02-13
+ *
+ * Normal text (<18pt / <14pt bold) needs 4.5:1.
+ * Large text (>=18pt / >=14pt bold) needs 3:1.
+ * UI components & graphical objects need 3:1.
+ *
+ * Pairing                                        Ratio   Req    Status
+ * -----------------------------------------------------------------------
+ * --text-normal (#dbdee1) on --bg-primary         9.36:1  4.5:1  PASS
+ * --text-header (#f2f3f5) on --bg-primary        11.39:1  3.0:1  PASS
+ * --text-muted (#949ba4)  on --bg-primary         4.50:1  4.5:1  PASS
+ * --text-muted (#949ba4)  on --bg-secondary       4.92:1  4.5:1  PASS
+ * --text-secondary (#b5bac1) on --bg-primary      6.48:1  4.5:1  PASS
+ * --text-link (#00a8fc)   on --bg-primary         4.82:1  4.5:1  PASS
+ * --interactive-normal (#b5bac1) on --bg-primary  6.48:1  3.0:1  PASS
+ * --interactive-muted (#828688)  on --bg-primary  3.44:1  3.0:1  PASS
+ * --interactive-muted (#828688)  on --bg-input    3.09:1  3.0:1  PASS
+ * --red (#f27377)         on --bg-primary         4.51:1  4.5:1  PASS
+ * --red (#f27377)         on --bg-secondary       4.92:1  4.5:1  PASS
+ * --green (#23b15a)       on --bg-primary         4.52:1  4.5:1  PASS
+ * --green (#23b15a)       on --bg-secondary       4.93:1  4.5:1  PASS
+ *
+ * Fixed (was failing):
+ *   --interactive-muted  #4e5058 -> #828688  (1.57:1 -> 3.44:1 on bg-primary)
+ *   --red/--status-danger #f23f43 -> #f27377 (3.35:1 -> 4.51:1 on bg-primary)
+ *   --green              #23a55a -> #23b15a  (3.97:1 -> 4.52:1 on bg-primary)
+ *   hljs-comment         #768390 -> #7b8895  (4.25:1 -> 4.55:1 on bg-tertiary)
+ *   perm-tri-deny        #f04747 -> #f07575  (3.43:1 -> 4.52:1 on bg-primary)
+ *
+ * Note: Disabled UI controls (--interactive-muted) are exempt from WCAG 1.4.3
+ * per the inactive-component exception, but the value was raised to 3:1 for
+ * placeholder text and UI-component compliance.
+ */
+
 :root {
   /* Backgrounds — Discord dark theme (2023+) */
   --bg-tertiary: #1e1f22;
@@ -29,17 +172,17 @@
   --interactive-normal: #b5bac1;
   --interactive-hover: #dbdee1;
   --interactive-active: #ffffff;
-  --interactive-muted: #4e5058;
+  --interactive-muted: #828688;
 
   /* Brand */
   --blurple: #5865f2;
   --blurple-hover: #4752c4;
-  --green: #23a55a;
+  --green: #23b15a;
   --yellow: #f0b232;
-  --red: #f23f43;
+  --red: #f27377;
 
   /* State colors */
-  --status-danger: #f23f43;
+  --status-danger: #f27377;
   --bg-modifier-hover: #3a3c41;
 
   /* Borders */
@@ -588,7 +731,8 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.02em;
   cursor: pointer;
-  padding: 0;
+  padding: 4px 0;
+  min-height: 24px;
 }
 
 .category-collapse-btn:hover {
@@ -1051,8 +1195,8 @@ body {
   padding: 0 4px;
   line-height: 1;
   border-radius: 4px;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1634,8 +1778,13 @@ body {
   color: var(--text-muted);
   font-size: 16px;
   cursor: pointer;
-  padding: 0 2px;
+  padding: 4px;
   line-height: 1;
+  min-width: 24px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .pending-upload-remove:hover {
@@ -1779,6 +1928,7 @@ body {
 /* ─── Rich Message Rendering ─────────────────────── */
 .message-rich {
   word-wrap: break-word;
+  white-space: normal;
 }
 
 .message-rich p {
@@ -2120,7 +2270,7 @@ body {
 .message-rich pre code .hljs-string { color: #96d0ff; }
 
 .tiptap-input pre code .hljs-comment,
-.message-rich pre code .hljs-comment { color: #768390; font-style: italic; }
+.message-rich pre code .hljs-comment { color: #7b8895; font-style: italic; }
 
 .tiptap-input pre code .hljs-number,
 .tiptap-input pre code .hljs-literal,
@@ -2152,7 +2302,7 @@ body {
 .message-rich pre code .hljs-params { color: var(--text-normal); }
 
 .tiptap-input pre code .hljs-meta,
-.message-rich pre code .hljs-meta { color: #768390; }
+.message-rich pre code .hljs-meta { color: #7b8895; }
 
 /* ─── Message Actions (hover bar) ───────────────── */
 .message {
@@ -2185,9 +2335,14 @@ body {
   color: var(--interactive-normal);
   font-size: 12px;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 6px 8px;
   border-radius: 3px;
   line-height: 1;
+  min-width: 24px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: background 0.1s, color 0.1s;
 }
 
@@ -3009,8 +3164,8 @@ em-emoji-picker {
 
 .perm-tri-deny {
   background: rgba(240, 71, 71, 0.15);
-  color: #f04747;
-  border-color: #f04747;
+  color: #f07575;
+  border-color: #f07575;
 }
 
 .overwrite-indicator {
@@ -3652,6 +3807,13 @@ em-emoji-picker {
   font-size: 14px;
   color: var(--text-muted);
   margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: -4px;
   line-height: 1.4;
 }
 

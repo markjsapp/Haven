@@ -130,11 +130,11 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose 
   const selectedPerms = selectedRoleId ? editState[selectedRoleId] : null;
 
   return (
-    <div className="server-settings-overlay" onClick={onClose}>
-      <div className="server-settings-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="server-settings-overlay" onClick={onClose} role="presentation">
+      <div className="server-settings-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Channel Permissions">
         <div className="server-settings-header">
           <h3>Channel Permissions</h3>
-          <button className="btn-ghost" onClick={onClose}>&times;</button>
+          <button className="btn-ghost" onClick={onClose} aria-label="Close">&times;</button>
         </div>
 
         <div className="role-settings">

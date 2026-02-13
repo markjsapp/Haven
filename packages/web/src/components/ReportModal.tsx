@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 interface ReportModalProps {
   messageId: string;
@@ -13,6 +14,8 @@ export default function ReportModal({ messageId, channelId, onClose }: ReportMod
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const { api } = useAuthStore.getState();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,9 +41,9 @@ export default function ReportModal({ messageId, channelId, onClose }: ReportMod
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <h3>Report Message</h3>
+    <div className="modal-overlay" onClick={onClose} role="presentation">
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
+        <h3 id="report-modal-title">Report Message</h3>
         {submitted ? (
           <p className="report-success">Report submitted. Thank you.</p>
         ) : (

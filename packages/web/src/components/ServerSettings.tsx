@@ -166,11 +166,11 @@ export default function ServerSettings({ serverId, onClose }: Props) {
   const user = useAuthStore.getState().user;
 
   return (
-    <div className="server-settings-overlay" onClick={onClose}>
-      <div className="server-settings-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="server-settings-overlay" onClick={onClose} role="presentation">
+      <div className="server-settings-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Server Settings">
         <div className="server-settings-header">
           <h3>Server Settings</h3>
-          <button className="btn-ghost" onClick={onClose}>&times;</button>
+          <button className="btn-ghost" onClick={onClose} aria-label="Close">&times;</button>
         </div>
 
         <div className="server-settings-tabs">

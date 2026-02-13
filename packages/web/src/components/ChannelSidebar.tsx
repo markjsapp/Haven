@@ -6,6 +6,8 @@ import { usePresenceStore } from "../store/presence.js";
 import { useFriendsStore } from "../store/friends.js";
 import { Permission, type ChannelResponse, type CategoryResponse } from "@haven/core";
 import { usePermissions } from "../hooks/usePermissions.js";
+import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
+import { useRovingTabindex } from "../hooks/useRovingTabindex.js";
 import {
   parseChannelName,
   parseDmPeerId,
@@ -46,7 +48,7 @@ export default function ChannelSidebar() {
   const selectedServerId = useUiStore((s) => s.selectedServerId);
 
   return (
-    <aside className="channel-sidebar">
+    <aside className="channel-sidebar" aria-label="Channels">
       {selectedServerId === null ? <DmView /> : <ServerView serverId={selectedServerId} />}
       <UserPanel />
     </aside>
@@ -74,6 +76,9 @@ function DmView() {
   const [error, setError] = useState("");
   const [headerSearch, setHeaderSearch] = useState(false);
   const [headerSearchValue, setHeaderSearchValue] = useState("");
+
+  const dmListRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown: handleDmRovingKeyDown } = useRovingTabindex(dmListRef);
 
   const allDmChannels = channels.filter(
     (ch) => (ch.channel_type === "dm" || ch.channel_type === "group") && ch.dm_status !== "pending"
@@ -122,6 +127,7 @@ function DmView() {
             className="channel-sidebar-header-input"
             type="text"
             placeholder="Find or start a conversation"
+            aria-label="Find or start a conversation"
             value={headerSearchValue}
             onChange={(e) => setHeaderSearchValue(e.target.value)}
             onKeyDown={(e) => {
@@ -152,11 +158,13 @@ function DmView() {
           </button>
         )}
       </div>
-      <div className="channel-sidebar-content">
+      <div className="channel-sidebar-content" ref={dmListRef} onKeyDown={handleDmRovingKeyDown}>
         {/* Friends Button */}
         <button
           className={`friends-nav-btn ${showFriends ? "active" : ""}`}
           onClick={() => setShowFriends(true)}
+          data-roving-item
+          tabIndex={showFriends ? 0 : -1}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
@@ -179,6 +187,8 @@ function DmView() {
                 <button
                   className={`channel-item dm-item pending ${ch.id === currentChannelId ? "active" : ""}`}
                   onClick={() => { selectChannel(ch.id); setShowFriends(false); }}
+                  data-roving-item
+                  tabIndex={!showFriends && ch.id === currentChannelId ? 0 : -1}
                 >
                   <div className="dm-avatar pending">
                     {parseDmDisplayName(ch.encrypted_meta, user?.id ?? "").charAt(0).toUpperCase()}
@@ -198,6 +208,7 @@ function DmView() {
             className="btn-icon"
             onClick={() => setShowCreateDm(true)}
             title="Create DM"
+            aria-label="Create DM"
           >
             +
           </button>
@@ -214,6 +225,8 @@ function DmView() {
                   <button
                     className={`channel-item dm-item ${ch.id === currentChannelId ? "active" : ""} ${unread > 0 ? "unread" : ""}`}
                     onClick={() => { selectChannel(ch.id); setShowFriends(false); setHeaderSearch(false); setHeaderSearchValue(""); }}
+                    data-roving-item
+                    tabIndex={!showFriends && ch.id === currentChannelId ? 0 : -1}
                   >
                     <div className="dm-avatar group-dm-avatar">
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -226,7 +239,7 @@ function DmView() {
                         <span className="dm-item-members">{memberCount} Members</span>
                       )}
                     </div>
-                    {unread > 0 && <span className="unread-badge">{unread}</span>}
+                    {unread > 0 && <span className="unread-badge" aria-label={`${unread} unread messages`}>{unread}</span>}
                   </button>
                 </li>
               );
@@ -240,15 +253,17 @@ function DmView() {
                 <button
                   className={`channel-item dm-item ${ch.id === currentChannelId ? "active" : ""} ${unread > 0 ? "unread" : ""}`}
                   onClick={() => { selectChannel(ch.id); setShowFriends(false); setHeaderSearch(false); setHeaderSearchValue(""); }}
+                  data-roving-item
+                  tabIndex={!showFriends && ch.id === currentChannelId ? 0 : -1}
                 >
                   <div className="dm-avatar">
                     {parseDmDisplayName(ch.encrypted_meta, user?.id ?? "").charAt(0).toUpperCase()}
-                    <span className={`dm-avatar-status ${isActive ? "online" : "offline"}`} />
+                    <span className={`dm-avatar-status ${isActive ? "online" : "offline"}`} aria-label={isActive ? "Online" : "Offline"} />
                   </div>
                   <span className="dm-item-name">
                     {parseDmDisplayName(ch.encrypted_meta, user?.id ?? "")}
                   </span>
-                  {unread > 0 && <span className="unread-badge">{unread}</span>}
+                  {unread > 0 && <span className="unread-badge" aria-label={`${unread} unread messages`}>{unread}</span>}
                 </button>
               </li>
             );
@@ -258,6 +273,8 @@ function DmView() {
               <button
                 className="channel-item dm-item start-dm-item"
                 onClick={() => handleStartDm(headerSearchValue.trim())}
+                data-roving-item
+                tabIndex={-1}
               >
                 <span className="dm-item-name">Start DM with <strong>{headerSearchValue.trim()}</strong></span>
               </button>
@@ -320,6 +337,8 @@ function ChannelContextMenu({
   const isChannelMuted = useUiStore((s) => s.isChannelMuted);
   const setChannelNotification = useUiStore((s) => s.setChannelNotification);
   const channelNotifications = useUiStore((s) => s.channelNotifications);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown } = useMenuKeyboard(menuRef);
 
   const muted = isChannelMuted(channelId);
   const currentNotify = channelNotifications[channelId] ?? "default";
@@ -329,16 +348,21 @@ function ChannelContextMenu({
 
   return (
     <div
+      ref={menuRef}
       className="channel-context-menu"
       style={{ top: y, left: x }}
       onClick={(e) => e.stopPropagation()}
+      onKeyDown={handleKeyDown}
+      role="menu"
+      aria-label="Channel options"
+      tabIndex={-1}
     >
       {/* Mute Channel */}
       <div
         className="context-submenu-trigger"
         onMouseEnter={() => onShowSubmenu("mute")}
       >
-        <button onClick={(e) => {
+        <button role="menuitem" tabIndex={-1} onClick={(e) => {
           e.stopPropagation();
           if (muted) {
             unmuteChannel(channelId);
@@ -372,7 +396,7 @@ function ChannelContextMenu({
         className="context-submenu-trigger"
         onMouseEnter={() => onShowSubmenu("notify")}
       >
-        <button onClick={(e) => {
+        <button role="menuitem" tabIndex={-1} onClick={(e) => {
           e.stopPropagation();
           onShowSubmenu(submenu === "notify" ? undefined : "notify");
         }}>
@@ -407,12 +431,92 @@ function ChannelContextMenu({
       {/* Admin-only items */}
       {canManageChannels && (
         <>
-          <div className="context-divider" />
-          <button onClick={onRename}>Rename Channel</button>
-          <button onClick={onPermissions}>Permissions</button>
-          <button className="danger" onClick={onDelete}>Delete Channel</button>
+          <div className="context-divider" role="separator" />
+          <button role="menuitem" tabIndex={-1} onClick={onRename}>Rename Channel</button>
+          <button role="menuitem" tabIndex={-1} onClick={onPermissions}>Permissions</button>
+          <button role="menuitem" tabIndex={-1} className="danger" onClick={onDelete}>Delete Channel</button>
         </>
       )}
+    </div>
+  );
+}
+
+// ─── Category Context Menu (inline) ──────────────────
+function CategoryContextMenuPopup({
+  x,
+  y,
+  onCreateChannel,
+  onRenameCategory,
+  onCreateCategory,
+  onDeleteCategory,
+}: {
+  x: number;
+  y: number;
+  onCreateChannel: () => void;
+  onRenameCategory: () => void;
+  onCreateCategory: () => void;
+  onDeleteCategory: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown } = useMenuKeyboard(menuRef);
+
+  return (
+    <div
+      ref={menuRef}
+      className="channel-context-menu"
+      style={{ top: y, left: x }}
+      role="menu"
+      aria-label="Category options"
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+    >
+      <button role="menuitem" tabIndex={-1} onClick={onCreateChannel}>
+        Create Channel
+      </button>
+      <button role="menuitem" tabIndex={-1} onClick={onRenameCategory}>
+        Rename Category
+      </button>
+      <button role="menuitem" tabIndex={-1} onClick={onCreateCategory}>
+        Create Category
+      </button>
+      <button role="menuitem" tabIndex={-1} className="danger" onClick={onDeleteCategory}>
+        Delete Category
+      </button>
+    </div>
+  );
+}
+
+// ─── Server Header Context Menu (inline) ─────────────
+function ServerHeaderContextMenu({
+  x,
+  y,
+  onCreateChannel,
+  onCreateCategory,
+}: {
+  x: number;
+  y: number;
+  onCreateChannel: () => void;
+  onCreateCategory: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown } = useMenuKeyboard(menuRef);
+
+  return (
+    <div
+      ref={menuRef}
+      className="channel-context-menu"
+      style={{ top: y, left: x }}
+      role="menu"
+      aria-label="Server options"
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+    >
+      <button role="menuitem" tabIndex={-1} onClick={onCreateChannel}>
+        Create Channel
+      </button>
+      <button role="menuitem" tabIndex={-1} onClick={onCreateCategory}>
+        Create Category
+      </button>
     </div>
   );
 }
@@ -494,6 +598,8 @@ function ChannelItemContent({ ch, isOverlay, onContextMenu }: { ch: ChannelRespo
         className={`channel-item ${ch.id === currentChannelId ? "active" : ""} ${unread > 0 ? "unread" : ""} ${muted ? "muted" : ""} ${isInThisVoice ? "voice-active" : ""} ${isOverlay ? "drag-overlay" : ""}`}
         onClick={isOverlay ? undefined : handleChannelClick}
         onContextMenu={onContextMenu ? (e) => onContextMenu(e, ch.id) : undefined}
+        data-roving-item
+        tabIndex={ch.id === currentChannelId ? 0 : -1}
       >
         {showUnreadDot && mentions === 0 && <span className="channel-unread-dot" />}
         {isVoice ? (
@@ -506,11 +612,14 @@ function ChannelItemContent({ ch, isOverlay, onContextMenu }: { ch: ChannelRespo
         )}
         {parseChannelName(ch.encrypted_meta)}
         {muted && (
-          <svg className="channel-muted-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M16.5 12A4.5 4.5 0 0 0 14 8.27V6.11l-4-4L8.59 3.52 20.48 15.41 21.89 14l-5.39-5.39V12zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.9 8.9 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
-          </svg>
+          <>
+            <svg className="channel-muted-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M16.5 12A4.5 4.5 0 0 0 14 8.27V6.11l-4-4L8.59 3.52 20.48 15.41 21.89 14l-5.39-5.39V12zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.9 8.9 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+            </svg>
+            <span className="sr-only">Muted</span>
+          </>
         )}
-        {mentions > 0 && <span className="unread-badge">{mentions}</span>}
+        {mentions > 0 && <span className="unread-badge" aria-label={`${mentions} unread messages`}>{mentions}</span>}
       </button>
       {!isOverlay && isVoice && <VoiceChannelPreview channelId={ch.id} />}
     </>
@@ -619,6 +728,8 @@ function SortableCategorySection({
               <button
                 className="category-collapse-btn"
                 onClick={() => onToggleCollapse(cat.id)}
+                aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${cat.name}`}
+                aria-expanded={!isCollapsed}
                 {...attributes}
                 {...listeners}
               >
@@ -638,6 +749,7 @@ function SortableCategorySection({
                   className="btn-icon"
                   onClick={() => onCreateChannel(cat.id, cat.name)}
                   title={`Create Channel in ${cat.name}`}
+                  aria-label="Create Channel"
                 >
                   +
                 </button>
@@ -727,6 +839,9 @@ function ServerView({ serverId }: { serverId: string }) {
   const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [permissionsChannelId, setPermissionsChannelId] = useState<string | null>(null);
+
+  const channelListRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown: handleChannelRovingKeyDown } = useRovingTabindex(channelListRef);
 
   const server = servers.find((s) => s.id === serverId);
   const serverName = server ? parseServerName(server.encrypted_meta) : "Server";
@@ -1074,7 +1189,7 @@ function ServerView({ serverId }: { serverId: string }) {
           </svg>
         </button>
       </div>
-      <div className="channel-sidebar-content" onContextMenu={(e) => {
+      <div className="channel-sidebar-content" ref={channelListRef} onKeyDown={handleChannelRovingKeyDown} onContextMenu={(e) => {
         // Only fire for empty space (not on channels/categories which have their own handlers)
         if (e.defaultPrevented) return;
         handleServerContextMenu(e);
@@ -1096,6 +1211,7 @@ function ServerView({ serverId }: { serverId: string }) {
                     className="btn-icon"
                     onClick={() => setCreateModal({ categoryId: null })}
                     title="Create Channel"
+                    aria-label="Create Channel"
                   >
                     +
                   </button>
@@ -1208,77 +1324,50 @@ function ServerView({ serverId }: { serverId: string }) {
 
       {/* Right-click context menu for categories */}
       {categoryContextMenu && (
-        <div
-          className="channel-context-menu"
-          style={{ top: categoryContextMenu.y, left: categoryContextMenu.x }}
-        >
-          <button
-            onClick={() => {
-              setCreateModal({ categoryId: categoryContextMenu.categoryId, categoryName: serverCategories.find((c) => c.id === categoryContextMenu.categoryId)?.name });
-              setCategoryContextMenu(null);
-            }}
-          >
-            Create Channel
-          </button>
-          <button
-            onClick={() => {
-              const cat = serverCategories.find((c) => c.id === categoryContextMenu.categoryId);
-              setRenameCatValue(cat?.name ?? "");
-              setRenamingCatId(categoryContextMenu.categoryId);
-              setCategoryContextMenu(null);
-            }}
-          >
-            Rename Category
-          </button>
-          <button
-            onClick={() => {
-              setShowCreateCategory(true);
-              setCategoryContextMenu(null);
-            }}
-          >
-            Create Category
-          </button>
-          <button
-            className="danger"
-            onClick={() => {
-              setConfirmDeleteCategory(categoryContextMenu.categoryId);
-              setCategoryContextMenu(null);
-            }}
-          >
-            Delete Category
-          </button>
-        </div>
+        <CategoryContextMenuPopup
+          x={categoryContextMenu.x}
+          y={categoryContextMenu.y}
+          onCreateChannel={() => {
+            setCreateModal({ categoryId: categoryContextMenu.categoryId, categoryName: serverCategories.find((c) => c.id === categoryContextMenu.categoryId)?.name });
+            setCategoryContextMenu(null);
+          }}
+          onRenameCategory={() => {
+            const cat = serverCategories.find((c) => c.id === categoryContextMenu.categoryId);
+            setRenameCatValue(cat?.name ?? "");
+            setRenamingCatId(categoryContextMenu.categoryId);
+            setCategoryContextMenu(null);
+          }}
+          onCreateCategory={() => {
+            setShowCreateCategory(true);
+            setCategoryContextMenu(null);
+          }}
+          onDeleteCategory={() => {
+            setConfirmDeleteCategory(categoryContextMenu.categoryId);
+            setCategoryContextMenu(null);
+          }}
+        />
       )}
 
       {/* Right-click context menu for server header / empty space */}
       {serverContextMenu && (
-        <div
-          className="channel-context-menu"
-          style={{ top: serverContextMenu.y, left: serverContextMenu.x }}
-        >
-          <button
-            onClick={() => {
-              setCreateModal({ categoryId: null });
-              setServerContextMenu(null);
-            }}
-          >
-            Create Channel
-          </button>
-          <button
-            onClick={() => {
-              setShowCreateCategory(true);
-              setServerContextMenu(null);
-            }}
-          >
-            Create Category
-          </button>
-        </div>
+        <ServerHeaderContextMenu
+          x={serverContextMenu.x}
+          y={serverContextMenu.y}
+          onCreateChannel={() => {
+            setCreateModal({ categoryId: null });
+            setServerContextMenu(null);
+          }}
+          onCreateCategory={() => {
+            setShowCreateCategory(true);
+            setServerContextMenu(null);
+          }}
+        />
       )}
 
       {/* Inline Create Category */}
       {showCreateCategory && (
         <div className="modal-overlay" onClick={() => setShowCreateCategory(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <h3>Create Category</h3>
             <input
               type="text"

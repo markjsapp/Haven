@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type NotificationOverride = "default" | "all" | "mentions" | "nothing";
+export type AccessibilityFont = "default" | "opendyslexic" | "atkinson";
 
 interface MuteEntry {
   /** Unix timestamp (ms) when mute expires, or null for indefinite */
@@ -21,6 +22,12 @@ interface UiState {
   /** channelId -> notification override */
   channelNotifications: Record<string, NotificationOverride>;
 
+  /** Accessibility preferences */
+  a11yReducedMotion: boolean;
+  a11yFont: AccessibilityFont;
+  a11yHighContrast: boolean;
+  a11yAlwaysShowTimestamps: boolean;
+
   selectServer(id: string | null): void;
   toggleMemberSidebar(): void;
   setShowFriends(show: boolean): void;
@@ -32,6 +39,11 @@ interface UiState {
   unmuteChannel(channelId: string): void;
   isChannelMuted(channelId: string): boolean;
   setChannelNotification(channelId: string, setting: NotificationOverride): void;
+
+  setA11yReducedMotion(enabled: boolean): void;
+  setA11yFont(font: AccessibilityFont): void;
+  setA11yHighContrast(enabled: boolean): void;
+  setA11yAlwaysShowTimestamps(enabled: boolean): void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -45,6 +57,11 @@ export const useUiStore = create<UiState>()(
       searchPanelOpen: false,
       mutedChannels: {},
       channelNotifications: {},
+
+      a11yReducedMotion: false,
+      a11yFont: "default",
+      a11yHighContrast: false,
+      a11yAlwaysShowTimestamps: false,
 
       selectServer(id) {
         set({
@@ -114,6 +131,11 @@ export const useUiStore = create<UiState>()(
           };
         });
       },
+
+      setA11yReducedMotion(enabled) { set({ a11yReducedMotion: enabled }); },
+      setA11yFont(font) { set({ a11yFont: font }); },
+      setA11yHighContrast(enabled) { set({ a11yHighContrast: enabled }); },
+      setA11yAlwaysShowTimestamps(enabled) { set({ a11yAlwaysShowTimestamps: enabled }); },
     }),
     {
       name: "haven:ui",
@@ -122,6 +144,10 @@ export const useUiStore = create<UiState>()(
         memberSidebarOpen: state.memberSidebarOpen,
         mutedChannels: state.mutedChannels,
         channelNotifications: state.channelNotifications,
+        a11yReducedMotion: state.a11yReducedMotion,
+        a11yFont: state.a11yFont,
+        a11yHighContrast: state.a11yHighContrast,
+        a11yAlwaysShowTimestamps: state.a11yAlwaysShowTimestamps,
       }),
     },
   ),

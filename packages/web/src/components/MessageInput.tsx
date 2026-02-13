@@ -31,19 +31,14 @@ const BoldStarOnly = Bold.extend({
   },
 });
 
-// Custom extension: Enter to send, Shift+Enter for newline
-const SendOnEnter = Extension.create({
-  name: "sendOnEnter",
+// Custom extension: Shift+Enter inserts a hard break (<br>), not a new paragraph
+const ShiftEnterBreak = Extension.create({
+  name: "shiftEnterBreak",
 
   addKeyboardShortcuts() {
     return {
-      Enter: () => {
-        // Trigger the send handler via a custom event
-        document.dispatchEvent(new CustomEvent("haven:send"));
-        return true;
-      },
       "Shift-Enter": ({ editor }) => {
-        editor.commands.enter();
+        editor.commands.setHardBreak();
         return true;
       },
     };
@@ -108,18 +103,48 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
       Subtext,
       MaskedLink,
       MentionExtension,
-      SendOnEnter,
+      ShiftEnterBreak,
     ],
     onUpdate: () => sendTyping(),
     editorProps: {
       attributes: {
         class: "tiptap-input",
+        role: "textbox",
+        "aria-multiline": "true",
+        "aria-label": "Message",
       },
-      handlePaste: (_view, event) => {
+      handleKeyDown: (_view, event) => {
+        // Plain Enter (no modifiers) sends the message
+        if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          document.dispatchEvent(new CustomEvent("haven:send"));
+          return true;
+        }
+        return false;
+      },
+      handlePaste: (view, event) => {
         const files = Array.from(event.clipboardData?.files ?? []);
         if (files.length > 0) {
           addFiles(files);
           return true;
+        }
+        // When clipboard has HTML, prefer plain text for simple content
+        // to prevent pasted emojis/text from being wrapped in <p> tags
+        const html = event.clipboardData?.getData("text/html");
+        const text = event.clipboardData?.getData("text/plain");
+        if (html && text) {
+          const tmp = document.createElement("div");
+          tmp.innerHTML = html;
+          const hasRichFormatting = tmp.querySelector(
+            "strong, em, b, i, u, s, code, pre, a[href], h1, h2, h3, h4, h5, h6, ul, ol, blockquote, table, img"
+          );
+          if (!hasRichFormatting) {
+            // Insert as plain text to keep it inline in the current paragraph
+            const { tr } = view.state;
+            tr.insertText(text);
+            view.dispatch(tr);
+            return true;
+          }
         }
         return false;
       },
@@ -347,6 +372,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
                   className="pending-upload-remove"
                   onClick={() => removePendingUpload(i)}
                   title="Remove"
+                  aria-label="Remove"
                 >
                   &times;
                 </button>
@@ -361,6 +387,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
           className="attach-btn"
           onClick={handleFileSelect}
           title="Attach file"
+          aria-label="Attach file"
         >
           +
         </button>
@@ -371,15 +398,16 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
           style={{ display: "none" }}
           onChange={handleFileChange}
         />
-        <EditorContent editor={editor} className="tiptap-editor" />
+        <EditorContent editor={editor} className="tiptap-editor" aria-label="Message editor" />
         <div className="emoji-trigger-wrap">
           <button
             type="button"
             className="emoji-trigger-btn"
             onClick={() => setEmojiOpen(!emojiOpen)}
             title="Emoji"
+            aria-label="Emoji"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
             </svg>
           </button>
@@ -401,6 +429,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               onClick={() => editor.chain().focus().toggleBold().run()}
               className={editor.isActive("bold") ? "active" : ""}
               title="Bold"
+              aria-label="Bold"
             >
               B
             </button>
@@ -409,6 +438,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               onClick={() => editor.chain().focus().toggleItalic().run()}
               className={editor.isActive("italic") ? "active" : ""}
               title="Italic"
+              aria-label="Italic"
             >
               <em>I</em>
             </button>
@@ -417,6 +447,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               onClick={() => editor.chain().focus().toggleUnderline().run()}
               className={editor.isActive("underline") ? "active" : ""}
               title="Underline"
+              aria-label="Underline"
             >
               <u>U</u>
             </button>
@@ -425,6 +456,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               onClick={() => editor.chain().focus().toggleStrike().run()}
               className={editor.isActive("strike") ? "active" : ""}
               title="Strikethrough"
+              aria-label="Strikethrough"
             >
               <s>S</s>
             </button>
@@ -433,6 +465,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               onClick={() => editor.chain().focus().toggleCode().run()}
               className={editor.isActive("code") ? "active" : ""}
               title="Inline Code"
+              aria-label="Inline Code"
             >
               {"<>"}
             </button>
@@ -441,6 +474,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               onClick={() => editor.chain().focus().toggleCodeBlock().run()}
               className={editor.isActive("codeBlock") ? "active" : ""}
               title="Code Block"
+              aria-label="Code Block"
             >
               {"```"}
             </button>
@@ -449,6 +483,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               onClick={() => editor.chain().focus().toggleMark("spoiler").run()}
               className={editor.isActive("spoiler") ? "active" : ""}
               title="Spoiler"
+              aria-label="Spoiler"
             >
               {"||"}
             </button>

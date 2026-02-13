@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import type { RoleResponse } from "@haven/core";
 
 interface Props {
@@ -13,6 +14,8 @@ interface Props {
 
 export default function EditMemberRolesModal({ serverId, userId, username, onClose, onChanged }: Props) {
   const api = useAuthStore((s) => s.api);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
   const [allRoles, setAllRoles] = useState<RoleResponse[]>([]);
   const [memberRoleIds, setMemberRoleIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -65,9 +68,9 @@ export default function EditMemberRolesModal({ serverId, userId, username, onClo
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-dialog edit-roles-modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">Edit Roles</h3>
+    <div className="modal-overlay" onClick={onClose} role="presentation">
+      <div className="modal-dialog edit-roles-modal" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="edit-roles-title">
+        <h3 className="modal-title" id="edit-roles-title">Edit Roles</h3>
         <p className="edit-roles-subtitle">Manage roles for <strong>{username}</strong></p>
 
         {error && <div className="error-small">{error}</div>}

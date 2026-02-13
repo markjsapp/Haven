@@ -4,6 +4,7 @@ import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
 import { Permission, type UserProfileResponse } from "@haven/core";
 import { usePermissions } from "../hooks/usePermissions.js";
+import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
 
 interface Props {
   userId: string;
@@ -20,6 +21,7 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
   const startDm = useChatStore((s) => s.startDm);
   const { can } = usePermissions(serverId);
   const ref = useRef<HTMLDivElement>(null);
+  const { handleKeyDown } = useMenuKeyboard(ref);
   const [profile, setProfile] = useState<UserProfileResponse | null>(null);
 
   const isSelf = currentUser?.id === userId;
@@ -109,21 +111,21 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
   }
 
   return (
-    <div className="user-context-menu" ref={ref} style={style}>
-      <button className="user-context-item" onClick={() => { onOpenProfile(); onClose(); }}>
+    <div className="user-context-menu" ref={ref} style={style} role="menu" aria-label="User options" tabIndex={-1} onKeyDown={handleKeyDown}>
+      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => { onOpenProfile(); onClose(); }}>
         Profile
       </button>
 
       {!isSelf && (
-        <button className="user-context-item" onClick={handleMessage}>
+        <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={handleMessage}>
           Message
         </button>
       )}
 
       {serverId && canManageRoles && onManageRoles && (
         <>
-          <div className="user-context-divider" />
-          <button className="user-context-item" onClick={() => { onManageRoles(); onClose(); }}>
+          <div className="user-context-divider" role="separator" />
+          <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => { onManageRoles(); onClose(); }}>
             Manage Roles
           </button>
         </>
@@ -131,40 +133,40 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
 
       {!isSelf && profile && (
         <>
-          <div className="user-context-divider" />
+          <div className="user-context-divider" role="separator" />
 
           {profile.is_friend ? (
-            <button className="user-context-item user-context-danger" onClick={handleRemoveFriend}>
+            <button className="user-context-item user-context-danger" role="menuitem" tabIndex={-1} onClick={handleRemoveFriend}>
               Remove Friend
             </button>
           ) : !profile.friend_request_status ? (
-            <button className="user-context-item" onClick={handleAddFriend}>
+            <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={handleAddFriend}>
               Add Friend
             </button>
           ) : (
-            <button className="user-context-item" disabled>
+            <button className="user-context-item" role="menuitem" tabIndex={-1} disabled>
               {profile.friend_request_status === "pending_outgoing" ? "Request Sent" : "Request Pending"}
             </button>
           )}
 
           {serverId && (canKick || canBan) && (
             <>
-              <div className="user-context-divider" />
+              <div className="user-context-divider" role="separator" />
               {canKick && (
-                <button className="user-context-item user-context-danger" onClick={handleKick}>
+                <button className="user-context-item user-context-danger" role="menuitem" tabIndex={-1} onClick={handleKick}>
                   Kick
                 </button>
               )}
               {canBan && (
-                <button className="user-context-item user-context-danger" onClick={handleBan}>
+                <button className="user-context-item user-context-danger" role="menuitem" tabIndex={-1} onClick={handleBan}>
                   Ban
                 </button>
               )}
             </>
           )}
 
-          <div className="user-context-divider" />
-          <button className="user-context-item user-context-danger" onClick={handleBlock}>
+          <div className="user-context-divider" role="separator" />
+          <button className="user-context-item user-context-danger" role="menuitem" tabIndex={-1} onClick={handleBlock}>
             {profile?.is_blocked ? "Unblock" : "Block"}
           </button>
         </>

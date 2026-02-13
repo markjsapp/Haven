@@ -151,7 +151,7 @@ export default function MessageList() {
   }, [user, nameMap, userNames]);
 
   return (
-    <div className="message-list">
+    <div className="message-list" role="log" aria-live="polite" aria-label="Messages">
       {/* Conversation start marker */}
       {currentChannel && channelDisplay && (
         <div className="conversation-start">
@@ -205,9 +205,9 @@ export default function MessageList() {
             else if (data.event === "member_left") systemContent = `${name} left the group`;
             else if (data.event === "member_kicked") systemContent = `${name} was kicked from the server`;
             else if (data.event === "message_pinned") {
-              systemContent = <>{name} pinned {data.message_id ? <a className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>a message</a> : "a message"}</>;
+              systemContent = <>{name} pinned {data.message_id ? <button className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>a message</button> : "a message"}</>;
             } else if (data.event === "message_unpinned") {
-              systemContent = <>{name} unpinned {data.message_id ? <a className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>a message</a> : "a message"}</>;
+              systemContent = <>{name} unpinned {data.message_id ? <button className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>a message</button> : "a message"}</>;
             } else systemContent = `${name} — ${data.event}`;
           } catch { /* use raw text */ }
 
@@ -383,8 +383,9 @@ export default function MessageList() {
                   className="message-action-btn"
                   onClick={() => startReply(msg.id)}
                   title="Reply"
+                  aria-label="Reply"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
                   </svg>
                 </button>
@@ -396,8 +397,9 @@ export default function MessageList() {
                     reactionPickerMsgId === msg.id ? null : msg.id
                   )}
                   title="Add Reaction"
+                  aria-label="Add Reaction"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
                   </svg>
                 </button>
@@ -407,8 +409,9 @@ export default function MessageList() {
                     className="message-action-btn"
                     onClick={() => startEditing(msg.id)}
                     title="Edit"
+                    aria-label="Edit"
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 000-1.42l-2.34-2.34a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" />
                     </svg>
                   </button>
@@ -419,8 +422,9 @@ export default function MessageList() {
                     className="message-action-btn message-action-danger"
                     onClick={() => setDeletingMessageId(msg.id)}
                     title="Delete"
+                    aria-label="Delete"
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                       <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
                     </svg>
                   </button>

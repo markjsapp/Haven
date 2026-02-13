@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   generateIdentityKeyPair,
   generateSignedPreKey,
@@ -9,6 +9,7 @@ import {
 import { downloadAndRestoreBackup, cacheSecurityPhrase } from "../lib/backup.js";
 import { useAuthStore, persistIdentityKey } from "../store/auth.js";
 import { clearCryptoState } from "../lib/crypto.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 const PREKEY_BATCH_SIZE = 20;
 
@@ -18,6 +19,8 @@ export default function SecurityPhraseRestore() {
   const [phrase, setPhrase] = useState("");
   const [error, setError] = useState("");
   const [restoring, setRestoring] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   const handleRestore = useCallback(async () => {
     if (!phrase.trim()) return;
@@ -100,9 +103,9 @@ export default function SecurityPhraseRestore() {
   }, [completeBackupSetup]);
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-dialog" style={{ maxWidth: 460 }}>
-        <h2 style={{ marginBottom: 8 }}>Restore Your Keys</h2>
+    <div className="modal-overlay" role="presentation">
+      <div className="modal-dialog" style={{ maxWidth: 460 }} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="security-restore-title">
+        <h2 style={{ marginBottom: 8 }} id="security-restore-title">Restore Your Keys</h2>
         <p className="security-phrase-desc">
           An encrypted key backup was found for your account.
           Enter your security phrase or recovery key to restore your messages.

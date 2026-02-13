@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
 import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import Avatar from "./Avatar.js";
 import ConfirmDialog from "./ConfirmDialog.js";
 import type { UserProfileResponse } from "@haven/core";
@@ -24,6 +25,8 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmUnfriend, setConfirmUnfriend] = useState(false);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
   const isOwnProfile = currentUser?.id === userId;
   const statusConfig = STATUS_CONFIG[presenceStatus] ?? STATUS_CONFIG.offline;
 
@@ -102,8 +105,8 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
 
   if (loading) {
     return (
-      <div className="modal-overlay" onClick={onClose}>
-        <div className="full-profile-card" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-overlay" onClick={onClose} role="presentation">
+        <div className="full-profile-card" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-label="User profile">
           <div className="full-profile-loading">Loading...</div>
         </div>
       </div>
@@ -112,8 +115,8 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
 
   if (!profile) {
     return (
-      <div className="modal-overlay" onClick={onClose}>
-        <div className="full-profile-card" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-overlay" onClick={onClose} role="presentation">
+        <div className="full-profile-card" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-label="User profile">
           <div className="full-profile-loading">User not found</div>
         </div>
       </div>
@@ -128,10 +131,10 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
   });
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="full-profile-card" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close-btn full-profile-close" onClick={onClose}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+    <div className="modal-overlay" onClick={onClose} role="presentation">
+      <div className="full-profile-card" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="full-profile-title">
+        <button className="modal-close-btn full-profile-close" onClick={onClose} aria-label="Close">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
           </svg>
         </button>
@@ -171,7 +174,7 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
               )}
 
               <div className="full-profile-names">
-                <h2 className="full-profile-displayname">{displayName}</h2>
+                <h2 className="full-profile-displayname" id="full-profile-title">{displayName}</h2>
                 <span className="full-profile-username">{profile.username}</span>
               </div>
 

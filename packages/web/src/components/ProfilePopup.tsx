@@ -235,7 +235,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
   }
 
   return (
-    <div className="profile-popup" ref={popupRef} style={style}>
+    <div className="profile-popup" ref={popupRef} style={style} role="dialog" aria-label={`Profile: ${displayName}`}>
       {/* Banner with action buttons */}
       <div
         className={`profile-popup-banner${profile.banner_url ? " has-image" : ""}`}
@@ -248,8 +248,9 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
               onClick={handleFriendAction}
               disabled={friendBtnDisabled || actionLoading}
               title={friendBtnTitle}
+              aria-label={friendBtnTitle}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
               </svg>
             </button>
@@ -258,15 +259,16 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
                 className="profile-header-btn"
                 onClick={() => setShowMoreMenu(!showMoreMenu)}
                 title="More"
+                aria-label="More options"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <circle cx="12" cy="5" r="2" />
                   <circle cx="12" cy="12" r="2" />
                   <circle cx="12" cy="19" r="2" />
                 </svg>
               </button>
               {showMoreMenu && (
-                <div className="profile-more-menu">
+                <div className="profile-more-menu" role="menu" aria-label="More options">
                   {profile.is_friend && profile.friendship_id && (
                     <button className="profile-more-item profile-more-danger" onClick={() => { setConfirmUnfriend(true); setShowMoreMenu(false); }} disabled={actionLoading}>
                       Remove Friend
@@ -294,6 +296,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
           <span
             className="profile-popup-presence-dot"
             style={{ backgroundColor: statusConfig.color }}
+            aria-label={statusConfig.label}
           />
         </div>
       </div>
@@ -463,8 +466,9 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
                   onClick={() => setShowEmoji(!showEmoji)}
                   type="button"
                   title="Emoji"
+                  aria-label="Emoji"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
                   </svg>
                 </button>

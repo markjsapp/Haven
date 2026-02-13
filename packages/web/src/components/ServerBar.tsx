@@ -1,8 +1,10 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { parseServerName } from "../lib/channel-utils.js";
+import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
+import { useRovingTabindex } from "../hooks/useRovingTabindex.js";
 
 export default function ServerBar() {
   const servers = useChatStore((s) => s.servers);
@@ -41,6 +43,9 @@ export default function ServerBar() {
   const [serverName, setServerName] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
+
+  const serverListRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown: handleRovingKeyDown } = useRovingTabindex(serverListRef);
 
   // ─── Server Context Menu ────────────────────────────
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; serverId: string } | null>(null);
@@ -112,7 +117,7 @@ export default function ServerBar() {
   return (
     <>
     <nav className="server-bar">
-      <div className="server-bar-inner">
+      <div className="server-bar-inner" ref={serverListRef} onKeyDown={handleRovingKeyDown}>
         {/* Home / DM button */}
         <div className={`server-icon-wrapper ${selectedServerId === null ? "active" : ""}`}>
           <span className="server-pill" />
@@ -120,8 +125,11 @@ export default function ServerBar() {
             className={`server-icon home-icon ${selectedServerId === null ? "active" : ""}`}
             onClick={() => selectServer(null)}
             title="Direct Messages"
+            aria-label="Direct Messages"
+            data-roving-item
+            tabIndex={selectedServerId === null ? 0 : -1}
           >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
               <path d="M7 9h10v2H7zm0-3h10v2H7z" />
             </svg>
@@ -147,6 +155,9 @@ export default function ServerBar() {
                 onClick={() => selectServer(srv.id)}
                 onContextMenu={(e) => handleServerContextMenu(e, srv.id)}
                 title={name}
+                aria-label={name}
+                data-roving-item
+                tabIndex={isActive ? 0 : -1}
               >
                 {name.charAt(0).toUpperCase()}
                 {srvUnread > 0 && <span className="server-unread-dot" />}
@@ -163,8 +174,11 @@ export default function ServerBar() {
             className={`server-icon add-server-icon ${showCreate ? "active" : ""}`}
             onClick={() => { setShowCreate(!showCreate); setShowJoin(false); setError(""); }}
             title="Add a Server"
+            aria-label="Add a Server"
+            data-roving-item
+            tabIndex={-1}
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M13 5h-2v6H5v2h6v6h2v-6h6v-2h-6V5z" />
             </svg>
           </button>
@@ -176,6 +190,9 @@ export default function ServerBar() {
             className={`server-icon join-server-icon ${showJoin ? "active" : ""}`}
             onClick={() => { setShowJoin(!showJoin); setShowCreate(false); setError(""); }}
             title="Join a Server"
+            aria-label="Join a Server"
+            data-roving-item
+            tabIndex={-1}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
               <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6-6-6z" />
@@ -193,40 +210,27 @@ export default function ServerBar() {
         const name = parseServerName(srv.encrypted_meta);
         const isOwner = user?.id === srv.owner_id;
         return (
-          <div
-            className="channel-context-menu"
-            style={{ top: ctxMenu.y, left: ctxMenu.x }}
-          >
-            {isOwner ? (
-              <button
-                className="context-menu-item-danger"
-                onClick={() => {
-                  setCtxMenu(null);
-                  setConfirmAction({ type: "delete", serverId: srv.id, serverName: name });
-                }}
-              >
-                Delete Server
-              </button>
-            ) : (
-              <button
-                className="context-menu-item-danger"
-                onClick={() => {
-                  setCtxMenu(null);
-                  setConfirmAction({ type: "leave", serverId: srv.id, serverName: name });
-                }}
-              >
-                Leave Server
-              </button>
-            )}
-          </div>
+          <ServerBarContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            isOwner={isOwner}
+            onAction={() => {
+              setCtxMenu(null);
+              setConfirmAction({
+                type: isOwner ? "delete" : "leave",
+                serverId: srv.id,
+                serverName: name,
+              });
+            }}
+          />
         );
       })()}
 
       {/* Confirm leave/delete dialog */}
       {confirmAction && (
-        <div className="modal-overlay" onClick={() => setConfirmAction(null)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <h2 className="modal-title">
+        <div className="modal-overlay" onClick={() => setConfirmAction(null)} role="presentation">
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="server-confirm-title">
+            <h2 className="modal-title" id="server-confirm-title">
               {confirmAction.type === "delete" ? "Delete Server" : "Leave Server"}
             </h2>
             <p className="modal-subtitle">
@@ -255,9 +259,9 @@ export default function ServerBar() {
 
       {/* Create server modal */}
       {showCreate && (
-        <div className="modal-overlay" onClick={() => setShowCreate(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <h2 className="modal-title">Create a Server</h2>
+        <div className="modal-overlay" onClick={() => setShowCreate(false)} role="presentation">
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="create-server-title">
+            <h2 className="modal-title" id="create-server-title">Create a Server</h2>
             <p className="modal-subtitle">Give your new server a name to get started.</p>
             <label className="modal-label">SERVER NAME</label>
             <input
@@ -280,9 +284,9 @@ export default function ServerBar() {
 
       {/* Join server modal */}
       {showJoin && (
-        <div className="modal-overlay" onClick={() => setShowJoin(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <h2 className="modal-title">Join a Server</h2>
+        <div className="modal-overlay" onClick={() => setShowJoin(false)} role="presentation">
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="join-server-title">
+            <h2 className="modal-title" id="join-server-title">Join a Server</h2>
             <p className="modal-subtitle">Enter an invite code to join an existing server.</p>
             <label className="modal-label">INVITE CODE</label>
             <input
@@ -303,5 +307,41 @@ export default function ServerBar() {
         </div>
       )}
     </>
+  );
+}
+
+function ServerBarContextMenu({
+  x,
+  y,
+  isOwner,
+  onAction,
+}: {
+  x: number;
+  y: number;
+  isOwner: boolean;
+  onAction: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown } = useMenuKeyboard(menuRef);
+
+  return (
+    <div
+      ref={menuRef}
+      className="channel-context-menu"
+      style={{ top: y, left: x }}
+      role="menu"
+      aria-label="Server options"
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+    >
+      <button
+        role="menuitem"
+        tabIndex={-1}
+        className="context-menu-item-danger"
+        onClick={onAction}
+      >
+        {isOwner ? "Delete Server" : "Leave Server"}
+      </button>
+    </div>
   );
 }

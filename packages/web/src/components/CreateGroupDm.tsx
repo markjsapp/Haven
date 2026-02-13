@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import Avatar from "./Avatar.js";
 
 interface CreateGroupDmProps {
@@ -23,6 +24,8 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   useEffect(() => {
     loadFriends();
@@ -146,7 +149,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
 
   return (
     <div className="create-dm-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="create-dm-modal">
+      <div className="create-dm-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Select friends for DM">
         <div className="create-dm-header">
           <div>
             <h3>Select Friends</h3>
@@ -157,7 +160,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
             </p>
           </div>
           <button className="create-dm-close" onClick={onClose} aria-label="Close">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
             </svg>
           </button>
@@ -170,7 +173,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
               <span key={uid} className="create-dm-chip">
                 {getDisplayName(uid)}
                 <button className="create-dm-chip-remove" onClick={() => removeFriend(uid)}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
                   </svg>
                 </button>
@@ -236,7 +239,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
           {/* Group name — only when 2+ selected */}
           {isGroup && (
             <div className="create-dm-group-name">
-              <svg className="create-dm-group-name-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <svg className="create-dm-group-name-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 000-1.42l-2.34-2.34a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" />
               </svg>
               <input

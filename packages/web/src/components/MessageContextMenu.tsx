@@ -3,6 +3,7 @@ import { useChatStore, type DecryptedMessage } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { Permission } from "@haven/core";
 import { usePermissions } from "../hooks/usePermissions.js";
+import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
 
 interface MessageContextMenuProps {
   message: DecryptedMessage;
@@ -32,6 +33,7 @@ export default function MessageContextMenu({
   const unpinMessage = useChatStore((s) => s.unpinMessage);
   const { can } = usePermissions(serverId);
   const ref = useRef<HTMLDivElement>(null);
+  const { handleKeyDown } = useMenuKeyboard(ref);
 
   const isOwn = message.senderId === user?.id;
   const canManageMessages = can(Permission.MANAGE_MESSAGES);
@@ -68,9 +70,11 @@ export default function MessageContextMenu({
   };
 
   return (
-    <div className="message-context-menu" style={style} ref={ref}>
+    <div className="message-context-menu" style={style} ref={ref} role="menu" aria-label="Message options" tabIndex={-1} onKeyDown={handleKeyDown}>
       <button
         type="button"
+        role="menuitem"
+        tabIndex={-1}
         className="context-menu-item"
         onClick={() => { startReply(message.id); onClose(); }}
       >
@@ -78,6 +82,8 @@ export default function MessageContextMenu({
       </button>
       <button
         type="button"
+        role="menuitem"
+        tabIndex={-1}
         className="context-menu-item"
         onClick={() => {
           navigator.clipboard.writeText(message.text);
@@ -88,10 +94,12 @@ export default function MessageContextMenu({
       </button>
       {canManageMessages && (
         <>
-          <div className="context-menu-separator" />
+          <div className="context-menu-separator" role="separator" />
           {isPinned ? (
             <button
               type="button"
+              role="menuitem"
+              tabIndex={-1}
               className="context-menu-item"
               onClick={() => { unpinMessage(message.id); onClose(); }}
             >
@@ -100,6 +108,8 @@ export default function MessageContextMenu({
           ) : (
             <button
               type="button"
+              role="menuitem"
+              tabIndex={-1}
               className="context-menu-item"
               onClick={() => { pinMessage(message.id); onClose(); }}
             >
@@ -110,9 +120,11 @@ export default function MessageContextMenu({
       )}
       {isOwn && (
         <>
-          <div className="context-menu-separator" />
+          <div className="context-menu-separator" role="separator" />
           <button
             type="button"
+            role="menuitem"
+            tabIndex={-1}
             className="context-menu-item"
             onClick={() => { startEditing(message.id); onClose(); }}
           >
@@ -120,6 +132,8 @@ export default function MessageContextMenu({
           </button>
           <button
             type="button"
+            role="menuitem"
+            tabIndex={-1}
             className="context-menu-item context-menu-item-danger"
             onClick={() => { onDelete(); onClose(); }}
           >
@@ -129,10 +143,12 @@ export default function MessageContextMenu({
       )}
       {!isOwn && (
         <>
-          <div className="context-menu-separator" />
+          <div className="context-menu-separator" role="separator" />
           {canManageMessages && (
             <button
               type="button"
+              role="menuitem"
+              tabIndex={-1}
               className="context-menu-item context-menu-item-danger"
               onClick={() => { onDelete(); onClose(); }}
             >
@@ -141,6 +157,8 @@ export default function MessageContextMenu({
           )}
           <button
             type="button"
+            role="menuitem"
+            tabIndex={-1}
             className="context-menu-item context-menu-item-danger"
             onClick={() => { onReport(); onClose(); }}
           >

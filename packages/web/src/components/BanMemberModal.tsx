@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 interface Props {
   serverId: string;
@@ -11,6 +12,8 @@ interface Props {
 
 export default function BanMemberModal({ serverId, userId, username, onBanned, onClose }: Props) {
   const api = useAuthStore((s) => s.api);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -30,9 +33,9 @@ export default function BanMemberModal({ serverId, userId, username, onBanned, o
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-dialog ban-modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">Ban {username}</h3>
+    <div className="modal-overlay" onClick={onClose} role="presentation">
+      <div className="modal-dialog ban-modal" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="ban-modal-title">
+        <h3 className="modal-title" id="ban-modal-title">Ban {username}</h3>
         <p className="ban-modal-subtitle">
           Are you sure you want to ban <strong>{username}</strong> from this server?
           They will be kicked and unable to rejoin.

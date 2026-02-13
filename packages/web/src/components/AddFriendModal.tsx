@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useFriendsStore } from "../store/friends.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 interface Props {
   onClose: () => void;
@@ -11,6 +12,8 @@ export default function AddFriendModal({ onClose }: Props) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -33,9 +36,9 @@ export default function AddFriendModal({ onClose }: Props) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">Add Friend</h3>
+    <div className="modal-overlay" onClick={onClose} role="presentation">
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-friend-title">
+        <h3 className="modal-title" id="add-friend-title">Add Friend</h3>
         <p className="modal-subtitle">
           Enter a username to send a friend request.
         </p>

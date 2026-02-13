@@ -80,16 +80,17 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
   };
 
   return (
-    <aside className="member-sidebar">
+    <aside className="member-sidebar" aria-label="Server members">
       <div className="member-sidebar-header">
         <div className="search-input-wrapper">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="search-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="search-icon" aria-hidden="true">
             <path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
           </svg>
           <input
             className="search-input"
             type="text"
             placeholder="Search"
+            aria-label="Search members"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -202,14 +203,14 @@ function MemberItem({
     .sort((a, b) => b.position - a.position)[0];
 
   return (
-    <div className={`member-item ${isOffline ? "offline" : ""}`} onClick={onClick} onContextMenu={onContextMenu}>
+    <div className={`member-item ${isOffline ? "offline" : ""}`} role="button" tabIndex={0} onClick={onClick} onContextMenu={onContextMenu} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(e as any); } }}>
       <div className="member-avatar-wrap">
         <Avatar
           avatarUrl={member.avatar_url}
           name={displayName}
           size={32}
         />
-        <span className="member-avatar-status" style={{ backgroundColor: statusColor }} />
+        <span className="member-avatar-status" style={{ backgroundColor: statusColor }} aria-label={status === "online" ? "Online" : status === "idle" ? "Idle" : status === "dnd" ? "Do Not Disturb" : "Offline"} />
       </div>
       <div className="member-info">
         <span className="member-name" style={topRole?.color ? { color: topRole.color } : undefined}>
@@ -221,7 +222,7 @@ function MemberItem({
       </div>
       {isOwner && (
         <span title="Server Owner">
-          <svg className="member-owner-crown" width="16" height="16" viewBox="0 0 16 16" fill="#f0b232">
+          <svg className="member-owner-crown" width="16" height="16" viewBox="0 0 16 16" fill="#f0b232" aria-hidden="true">
             <path d="M2 11l2-6 4 3 4-3 2 6H2zm6-9l2.5 4L8 8 5.5 6 8 2z" />
           </svg>
         </span>

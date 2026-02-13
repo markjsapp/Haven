@@ -3,9 +3,10 @@ import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { useVoiceStore } from "../store/voice.js";
 import Avatar from "./Avatar.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import type { BlockedUserResponse } from "@haven/core";
 
-type Tab = "account" | "profile" | "privacy" | "voice";
+type Tab = "account" | "profile" | "privacy" | "voice" | "accessibility";
 
 export default function UserSettings() {
   const user = useAuthStore((s) => s.user);
@@ -21,11 +22,14 @@ export default function UserSettings() {
     return () => document.removeEventListener("keydown", handleEsc);
   }, [setShowUserSettings]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
+
   if (!user) return null;
 
   return (
-    <div className="user-settings-overlay">
-      <div className="user-settings-modal">
+    <div className="user-settings-overlay" role="presentation">
+      <div className="user-settings-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-label="User Settings">
         <nav className="user-settings-sidebar">
           <div className="user-settings-sidebar-header">User Settings</div>
           <button
@@ -52,6 +56,12 @@ export default function UserSettings() {
           >
             Voice & Audio
           </button>
+          <button
+            className={`user-settings-nav-item ${tab === "accessibility" ? "active" : ""}`}
+            onClick={() => setTab("accessibility")}
+          >
+            Accessibility
+          </button>
           <div className="user-settings-sidebar-divider" />
           <button
             className="user-settings-nav-item danger"
@@ -65,13 +75,14 @@ export default function UserSettings() {
         </nav>
         <div className="user-settings-content">
           <div className="user-settings-content-header">
-            <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : tab === "privacy" ? "Privacy" : "Voice & Audio"}</h2>
+            <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : tab === "privacy" ? "Privacy" : tab === "voice" ? "Voice & Audio" : "Accessibility"}</h2>
             <button
               className="user-settings-close"
               onClick={() => setShowUserSettings(false)}
               title="Close"
+              aria-label="Close settings"
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
               </svg>
             </button>
@@ -81,6 +92,7 @@ export default function UserSettings() {
             {tab === "profile" && <ProfileTab />}
             {tab === "privacy" && <PrivacyTab />}
             {tab === "voice" && <VoiceTab />}
+            {tab === "accessibility" && <AccessibilityTab />}
           </div>
         </div>
       </div>
@@ -644,6 +656,92 @@ function VoiceTab() {
         />
         <span>Noise Suppression</span>
       </label>
+    </div>
+  );
+}
+
+// ─── Accessibility Tab ──────────────────────────────
+
+function AccessibilityTab() {
+  const reducedMotion = useUiStore((s) => s.a11yReducedMotion);
+  const font = useUiStore((s) => s.a11yFont);
+  const highContrast = useUiStore((s) => s.a11yHighContrast);
+  const alwaysShowTimestamps = useUiStore((s) => s.a11yAlwaysShowTimestamps);
+  const setReducedMotion = useUiStore((s) => s.setA11yReducedMotion);
+  const setFont = useUiStore((s) => s.setA11yFont);
+  const setHighContrast = useUiStore((s) => s.setA11yHighContrast);
+  const setAlwaysShowTimestamps = useUiStore((s) => s.setA11yAlwaysShowTimestamps);
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">Motion</div>
+      <p className="settings-description">
+        Reduce or remove animations and transitions throughout the app.
+      </p>
+      <label className="settings-toggle-label">
+        <input
+          type="checkbox"
+          checked={reducedMotion}
+          onChange={(e) => setReducedMotion(e.target.checked)}
+        />
+        <span>Reduce Motion</span>
+      </label>
+      <p className="settings-hint">
+        When enabled, most animations and transitions will be disabled. This also applies
+        when your operating system's "reduce motion" preference is active.
+      </p>
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Font</div>
+      <p className="settings-description">
+        Choose a font optimized for readability.
+      </p>
+      <div className="settings-select-group">
+        {([
+          { value: "default", label: "Default (gg sans)" },
+          { value: "opendyslexic", label: "OpenDyslexic" },
+          { value: "atkinson", label: "Atkinson Hyperlegible" },
+        ] as const).map((opt) => (
+          <label key={opt.value} className="settings-radio-label">
+            <input
+              type="radio"
+              name="a11y_font"
+              value={opt.value}
+              checked={font === opt.value}
+              onChange={() => setFont(opt.value)}
+            />
+            <span>{opt.label}</span>
+          </label>
+        ))}
+      </div>
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Contrast</div>
+      <p className="settings-description">
+        Increase the contrast of text and UI elements for better visibility.
+      </p>
+      <label className="settings-toggle-label">
+        <input
+          type="checkbox"
+          checked={highContrast}
+          onChange={(e) => setHighContrast(e.target.checked)}
+        />
+        <span>High Contrast Mode</span>
+      </label>
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Chat Display</div>
+      <p className="settings-description">
+        Make chat messages easier to parse for screen readers and visual clarity.
+      </p>
+      <label className="settings-toggle-label">
+        <input
+          type="checkbox"
+          checked={alwaysShowTimestamps}
+          onChange={(e) => setAlwaysShowTimestamps(e.target.checked)}
+        />
+        <span>Always Show Message Timestamps</span>
+      </label>
+      <p className="settings-hint">
+        Show full timestamps and author names on every message, instead of grouping consecutive messages from the same user.
+      </p>
     </div>
   );
 }

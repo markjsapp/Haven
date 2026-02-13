@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { generateRecoveryKey } from "@haven/core";
 import { uploadBackup, cacheSecurityPhrase } from "../lib/backup.js";
 import { useAuthStore } from "../store/auth.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 type Step = "choose" | "custom" | "generated" | "saving";
 
@@ -15,6 +16,8 @@ export default function SecurityPhraseSetup() {
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   const handleGenerateKey = useCallback(() => {
     setRecoveryKey(generateRecoveryKey());
@@ -53,11 +56,11 @@ export default function SecurityPhraseSetup() {
   }, [completeBackupSetup]);
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-dialog" style={{ maxWidth: 460 }}>
+    <div className="modal-overlay" role="presentation">
+      <div className="modal-dialog" style={{ maxWidth: 460 }} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="security-setup-title">
         {step === "choose" && (
           <>
-            <h2 style={{ marginBottom: 8 }}>Set Up Key Backup</h2>
+            <h2 style={{ marginBottom: 8 }} id="security-setup-title">Set Up Key Backup</h2>
             <p className="security-phrase-desc">
               Protect your encrypted messages by creating a security phrase.
               You'll need this to restore your messages if you log in on a new device.

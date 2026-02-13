@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 interface Props {
   serverId: string;
@@ -12,6 +13,9 @@ interface Props {
 export default function CreateChannelModal({ serverId, categoryId, categoryName, onClose }: Props) {
   const api = useAuthStore((s) => s.api);
   const loadChannels = useChatStore((s) => s.loadChannels);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   const [channelType, setChannelType] = useState<"text" | "voice">("text");
   const [channelName, setChannelName] = useState("");
@@ -48,14 +52,14 @@ export default function CreateChannelModal({ serverId, categoryId, categoryName,
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-dialog create-channel-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={onClose} role="presentation">
+      <div className="modal-dialog create-channel-modal" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="create-channel-title">
         <div className="modal-dialog-header">
-          <h2 className="modal-title">Create Channel</h2>
+          <h2 className="modal-title" id="create-channel-title">Create Channel</h2>
           {categoryName && (
             <p className="modal-subtitle">in {categoryName}</p>
           )}
-          <button className="modal-close-btn" onClick={onClose}>
+          <button className="modal-close-btn" onClick={onClose} aria-label="Close">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
             </svg>

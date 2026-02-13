@@ -50,10 +50,11 @@ export default forwardRef<{ onKeyDown: (props: { event: KeyboardEvent }) => bool
     if (items.length === 0) return null;
 
     return (
-      <div className="mention-list">
+      <div className="mention-list" role="listbox" aria-label="Mention suggestions">
         {items.map((item, index) => (
           <button
-            type="button"
+            role="option"
+            aria-selected={index === selectedIndex}
             key={item.id}
             className={`mention-list-item ${index === selectedIndex ? "mention-list-item-active" : ""}`}
             onClick={() => selectItem(index)}

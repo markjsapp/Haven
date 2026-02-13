@@ -50,12 +50,16 @@ export default function StatusSelector({ anchorRef, onClose }: StatusSelectorPro
       className="status-selector"
       ref={ref}
       style={{ left: pos.left, bottom: pos.bottom }}
+      role="listbox"
+      aria-label="Set status"
     >
       {STATUS_OPTIONS.map((status) => {
         const config = STATUS_CONFIG[status];
         return (
           <button
             key={status}
+            role="option"
+            aria-selected={status === ownStatus}
             className={`status-selector-item ${status === ownStatus ? "active" : ""}`}
             onClick={() => {
               setOwnStatus(status);

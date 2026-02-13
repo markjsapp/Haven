@@ -154,10 +154,11 @@ export default function Chat() {
 
   return (
     <div className="chat-layout">
+      <a href="#chat-body" className="skip-nav">Skip to chat</a>
       <ServerBar />
       <ChannelSidebar />
 
-      <div className="chat-main">
+      <div className="chat-main" role="main">
         <header className="chat-header">
           <div className="chat-header-left">
             {showFriends && selectedServerId === null ? (
@@ -187,8 +188,9 @@ export default function Chat() {
                   className={`chat-header-btn ${searchPanelOpen ? "active" : ""}`}
                   onClick={toggleSearchPanel}
                   title="Search Messages"
+                  aria-label="Search Messages"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 001.48-5.34c-.47-2.78-2.79-5-5.59-5.34A6.505 6.505 0 003.03 10.5c0 3.59 2.91 6.5 6.5 6.5 1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 20l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
                   </svg>
                 </button>
@@ -196,8 +198,9 @@ export default function Chat() {
                   className={`chat-header-btn ${pinnedPanelOpen ? "active" : ""}`}
                   onClick={togglePinnedPanel}
                   title="Pinned Messages"
+                  aria-label="Pinned Messages"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
                   </svg>
                 </button>
@@ -205,8 +208,9 @@ export default function Chat() {
                   className={`chat-header-btn ${memberSidebarOpen ? "active" : ""}`}
                   onClick={toggleMemberSidebar}
                   title="Member List"
+                  aria-label="Member List"
                 >
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
                   </svg>
                 </button>
@@ -217,6 +221,7 @@ export default function Chat() {
         </header>
 
         <div
+          id="chat-body"
           className="chat-body"
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
@@ -239,7 +244,7 @@ export default function Chat() {
             <>
               <MessageList />
               {typingNames.length > 0 && (
-                <div className="typing-indicator">
+                <div className="typing-indicator" aria-live="polite">
                   <span className="typing-dots">
                     <span /><span /><span />
                   </span>

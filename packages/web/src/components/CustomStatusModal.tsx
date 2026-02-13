@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useAuthStore } from "../store/auth.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import EmojiPicker from "./EmojiPicker.js";
 import type { UserPublic } from "@haven/core";
 
@@ -17,8 +18,10 @@ export default function CustomStatusModal({ initialStatus, initialEmoji, onClose
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLDivElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  useFocusTrap(dialogRef);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -78,9 +81,9 @@ export default function CustomStatusModal({ initialStatus, initialEmoji, onClose
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-dialog custom-status-modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">Set a custom status</h3>
+    <div className="modal-overlay" onClick={onClose} role="presentation">
+      <div className="modal-dialog custom-status-modal" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="custom-status-title">
+        <h3 className="modal-title" id="custom-status-title">Set a custom status</h3>
 
         <div className="custom-status-input-row">
           <div className="custom-status-emoji-btn-wrap" ref={pickerRef}>
