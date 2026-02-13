@@ -13,7 +13,34 @@ import { parseNamesFromMeta, parseChannelDisplay } from "../lib/channel-utils.js
 import EmojiPicker from "./EmojiPicker.js";
 import MessageContextMenu from "./MessageContextMenu.js";
 import ReportModal from "./ReportModal.js";
-import type { DecryptedMessage } from "../store/chat.js";
+import type { DecryptedMessage, LinkPreview } from "../store/chat.js";
+
+// ─── Embedded URL Stripping ──────────────────────────
+
+const IMAGE_EXT_RE = /\.(?:gif|png|jpe?g|webp|avif|apng|svg)(?:\?[^\s]*)?$/i;
+const GIF_HOST_RE = /(?:tenor\.com(?:\/view)?|giphy\.com\/gifs|media[0-9]*\.giphy\.com|i\.imgur\.com)\//i;
+
+/** Strip URLs from message text that are rendered as image/GIF embeds. */
+function stripEmbeddedImageUrls(text: string, previews?: LinkPreview[]): string {
+  if (!previews || previews.length === 0) return text;
+  const embeddedUrls = new Set<string>();
+  for (const p of previews) {
+    // Strip if it's a direct image URL
+    try {
+      if (IMAGE_EXT_RE.test(new URL(p.url).pathname)) { embeddedUrls.add(p.url); continue; }
+    } catch {
+      if (IMAGE_EXT_RE.test(p.url)) { embeddedUrls.add(p.url); continue; }
+    }
+    // Strip if it's a GIF service URL that rendered an image embed
+    if (p.image && GIF_HOST_RE.test(p.url)) embeddedUrls.add(p.url);
+  }
+  if (embeddedUrls.size === 0) return text;
+  let result = text;
+  for (const url of embeddedUrls) {
+    result = result.split(url).join("");
+  }
+  return result.trim();
+}
 
 // ─── Date Divider Helpers ─────────────────────────────
 
@@ -170,23 +197,25 @@ export default function MessageList() {
 
         // System messages render differently
         if (msg.messageType === "system") {
-          let systemText = msg.text;
+          let systemContent: React.ReactNode = msg.text;
           try {
             const data = JSON.parse(msg.text);
             const name = data.username ?? data.user_id?.slice(0, 8) ?? "Someone";
-            if (data.event === "member_joined") systemText = `${name} joined the server`;
-            else if (data.event === "member_left") systemText = `${name} left the group`;
-            else if (data.event === "member_kicked") systemText = `${name} was kicked from the server`;
-            else if (data.event === "message_pinned") systemText = `${name} pinned a message`;
-            else if (data.event === "message_unpinned") systemText = `${name} unpinned a message`;
-            else systemText = `${name} — ${data.event}`;
+            if (data.event === "member_joined") systemContent = `${name} joined the server`;
+            else if (data.event === "member_left") systemContent = `${name} left the group`;
+            else if (data.event === "member_kicked") systemContent = `${name} was kicked from the server`;
+            else if (data.event === "message_pinned") {
+              systemContent = <>{name} pinned {data.message_id ? <a className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>a message</a> : "a message"}</>;
+            } else if (data.event === "message_unpinned") {
+              systemContent = <>{name} unpinned {data.message_id ? <a className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>a message</a> : "a message"}</>;
+            } else systemContent = `${name} — ${data.event}`;
           } catch { /* use raw text */ }
 
           return (
             <Fragment key={msg.id}>
               {dateDividerEl}
               <div className="system-message" id={`msg-${msg.id}`}>
-                <span className="system-message-text">{systemText}</span>
+                <span className="system-message-text">{systemContent}</span>
                 <span className="system-message-time">
                   {new Date(msg.timestamp).toLocaleString([], {
                     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
@@ -305,7 +334,10 @@ export default function MessageList() {
                     )}
                   </div>
                 )}
-                <MessageBody text={msg.text} contentType={msg.contentType} formatting={msg.formatting} />
+                {(() => {
+                  const displayText = stripEmbeddedImageUrls(msg.text, msg.linkPreviews);
+                  return displayText ? <MessageBody text={displayText} contentType={msg.contentType} formatting={msg.formatting} /> : null;
+                })()}
                 {msg.attachments && msg.attachments.length > 0 && (
                   <MessageAttachments attachments={msg.attachments} />
                 )}
@@ -407,7 +439,7 @@ export default function MessageList() {
           </Fragment>
         );
       })}
-      <div ref={bottomRef} />
+      <div ref={bottomRef} style={{ minHeight: 24, flexShrink: 0 }} />
       {deletingMessageId && (
         <ConfirmDialog
           title="Delete Message"

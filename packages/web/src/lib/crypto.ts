@@ -52,6 +52,7 @@ import {
 } from "@haven/core";
 import { useAuthStore } from "../store/auth.js";
 import type { DecryptedMessage, AttachmentMeta } from "../store/chat.js";
+import { scheduleAutoBackup } from "./backup.js";
 
 // ─── DM Session Cache ─────────────────────────────────
 // Maps peerId -> DoubleRatchetSession
@@ -86,6 +87,42 @@ export function clearCryptoState(): void {
 }
 
 /**
+ * Export all in-memory crypto state for backup serialization.
+ * Returns references to the internal Maps/Sets.
+ */
+export function exportCryptoState() {
+  return {
+    sessions,
+    sessionAD,
+    channelPeerMap,
+    mySenderKeys,
+    receivedSenderKeys,
+    distributedChannels,
+  };
+}
+
+/**
+ * Import crypto state from a backup. Clears existing state first,
+ * then populates from the provided Maps/Sets.
+ */
+export function importCryptoState(state: {
+  sessions: Map<string, DoubleRatchetSession>;
+  sessionAD: Map<string, Uint8Array>;
+  channelPeerMap: Map<string, string>;
+  mySenderKeys: Map<string, SenderKeyState>;
+  receivedSenderKeys: Map<string, { fromUserId: string; key: ReceivedSenderKey }>;
+  distributedChannels: Set<string>;
+}): void {
+  clearCryptoState();
+  for (const [k, v] of state.sessions) sessions.set(k, v);
+  for (const [k, v] of state.sessionAD) sessionAD.set(k, v);
+  for (const [k, v] of state.channelPeerMap) channelPeerMap.set(k, v);
+  for (const [k, v] of state.mySenderKeys) mySenderKeys.set(k, v);
+  for (const [k, v] of state.receivedSenderKeys) receivedSenderKeys.set(k, v);
+  for (const v of state.distributedChannels) distributedChannels.add(v);
+}
+
+/**
  * Establish a Double Ratchet session with a peer using their key bundle.
  */
 export async function ensureSession(peerId: string, bundle: KeyBundle): Promise<void> {
@@ -114,6 +151,8 @@ export async function ensureSession(peerId: string, bundle: KeyBundle): Promise<
     usedOtp: bundle.one_time_prekey !== null,
     otpPublicKey: bundle.one_time_prekey ? fromBase64(bundle.one_time_prekey) : null,
   });
+
+  scheduleAutoBackup();
 }
 
 // Temporary storage for initial message key material
@@ -171,6 +210,7 @@ export async function ensureSenderKeyDistributed(channelId: string): Promise<voi
     }
 
     distributedChannels.add(channelId);
+    scheduleAutoBackup();
   }
 }
 
@@ -203,6 +243,10 @@ export async function fetchSenderKeys(channelId: string): Promise<void> {
     } catch (e) {
       console.warn("Failed to process SKDM from", skdm.from_user_id, e);
     }
+  }
+
+  if (skdms.length > 0) {
+    scheduleAutoBackup();
   }
 }
 

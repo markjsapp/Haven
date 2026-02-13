@@ -41,6 +41,7 @@ pub struct User {
     pub custom_status: Option<String>,
     pub custom_status_emoji: Option<String>,
     pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
     pub dm_privacy: String, // "everyone", "friends_only", "server_members"
     pub encrypted_profile: Option<Vec<u8>>,
 }
@@ -52,6 +53,7 @@ pub struct UserPublic {
     pub display_name: Option<String>,
     pub about_me: Option<String>,
     pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
     pub custom_status: Option<String>,
     pub custom_status_emoji: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -67,6 +69,7 @@ impl From<User> for UserPublic {
             display_name: u.display_name,
             about_me: u.about_me,
             avatar_url: u.avatar_url,
+            banner_url: u.banner_url,
             custom_status: u.custom_status,
             custom_status_emoji: u.custom_status_emoji,
             created_at: u.created_at,
@@ -449,6 +452,44 @@ pub struct ChannelMemberKeyInfo {
     pub identity_key: String, // base64
 }
 
+// ─── Key Backups ─────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct KeyBackup {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub encrypted_data: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub salt: Vec<u8>,
+    pub version: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UploadKeyBackupRequest {
+    pub encrypted_data: String, // base64
+    pub nonce: String,          // base64
+    pub salt: String,           // base64
+    pub version: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct KeyBackupResponse {
+    pub encrypted_data: String, // base64
+    pub nonce: String,          // base64
+    pub salt: String,           // base64
+    pub version: i32,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct KeyBackupStatusResponse {
+    pub has_backup: bool,
+    pub version: Option<i32>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
 // ─── Reactions ────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -743,6 +784,7 @@ pub struct UserProfileResponse {
     pub display_name: Option<String>,
     pub about_me: Option<String>,
     pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
     pub custom_status: Option<String>,
     pub custom_status_emoji: Option<String>,
     pub created_at: DateTime<Utc>,

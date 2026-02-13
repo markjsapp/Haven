@@ -120,6 +120,15 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
         </button>
       )}
 
+      {serverId && canManageRoles && onManageRoles && (
+        <>
+          <div className="user-context-divider" />
+          <button className="user-context-item" onClick={() => { onManageRoles(); onClose(); }}>
+            Manage Roles
+          </button>
+        </>
+      )}
+
       {!isSelf && profile && (
         <>
           <div className="user-context-divider" />
@@ -138,14 +147,9 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
             </button>
           )}
 
-          {serverId && (canManageRoles || canKick || canBan) && (
+          {serverId && (canKick || canBan) && (
             <>
               <div className="user-context-divider" />
-              {canManageRoles && onManageRoles && (
-                <button className="user-context-item" onClick={() => { onManageRoles(); onClose(); }}>
-                  Manage Roles
-                </button>
-              )}
               {canKick && (
                 <button className="user-context-item user-context-danger" onClick={handleKick}>
                   Kick

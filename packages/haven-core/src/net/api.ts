@@ -55,6 +55,9 @@ import type {
   ReportResponse,
   VoiceTokenResponse,
   VoiceParticipant,
+  UploadKeyBackupRequest,
+  KeyBackupResponse,
+  KeyBackupStatusResponse,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -157,6 +160,24 @@ export class HavenApi {
 
   async updateKeys(req: UpdateKeysRequest): Promise<void> {
     await this.put("/api/v1/keys/identity", req);
+  }
+
+  // ─── Key Backup ─────────────────────────────────
+
+  async uploadKeyBackup(req: UploadKeyBackupRequest): Promise<void> {
+    await this.put("/api/v1/keys/backup", req);
+  }
+
+  async getKeyBackup(): Promise<KeyBackupResponse> {
+    return this.get<KeyBackupResponse>("/api/v1/keys/backup");
+  }
+
+  async getKeyBackupStatus(): Promise<KeyBackupStatusResponse> {
+    return this.get<KeyBackupStatusResponse>("/api/v1/keys/backup/status");
+  }
+
+  async deleteKeyBackup(): Promise<void> {
+    await this.delete("/api/v1/keys/backup");
   }
 
   // ─── Servers ─────────────────────────────────────
@@ -404,6 +425,14 @@ export class HavenApi {
     await this.put(`/api/v1/servers/${serverId}/nickname`, { nickname });
   }
 
+  async leaveServer(serverId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}/members/@me`);
+  }
+
+  async deleteServer(serverId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}`);
+  }
+
   // ─── Bans ──────────────────────────────────────────
 
   async banMember(serverId: string, userId: string, req: CreateBanRequest): Promise<BanResponse> {
@@ -485,6 +514,34 @@ export class HavenApi {
     }
 
     const res = await fetch(`${this.baseUrl}/api/v1/users/avatar`, {
+      method: "POST",
+      headers,
+      body: blob,
+    });
+
+    if (!res.ok) {
+      if (res.status === 401 && this.onTokenExpired) {
+        this.onTokenExpired();
+      }
+      const err: ApiError = await res.json().catch(() => ({
+        error: res.statusText,
+        status: res.status,
+      }));
+      throw new HavenApiError(err.error, err.status);
+    }
+
+    return res.json() as Promise<import("../types.js").UserPublic>;
+  }
+
+  async uploadBanner(blob: ArrayBuffer): Promise<import("../types.js").UserPublic> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+
+    const res = await fetch(`${this.baseUrl}/api/v1/users/banner`, {
       method: "POST",
       headers,
       body: blob,

@@ -211,7 +211,9 @@ function ProfileTab() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
 
   if (!user) return null;
 
@@ -260,8 +262,50 @@ function ProfileTab() {
     }
   }
 
+  async function handleBannerUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      setError("Banner must be under 8MB");
+      return;
+    }
+    setError("");
+    setBannerUploading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const updated = await api.uploadBanner(buf);
+      useAuthStore.setState({
+        user: { ...user!, ...updated },
+      });
+      setSuccess("Banner updated");
+    } catch (err: any) {
+      setError(err.message || "Failed to upload banner");
+    } finally {
+      setBannerUploading(false);
+      if (bannerInputRef.current) bannerInputRef.current.value = "";
+    }
+  }
+
   return (
     <div className="settings-section">
+      {/* Banner upload */}
+      <div
+        className="settings-banner-preview"
+        onClick={() => bannerInputRef.current?.click()}
+        style={user.banner_url ? { backgroundImage: `url(${user.banner_url})` } : undefined}
+      >
+        <div className="settings-banner-overlay">
+          {bannerUploading ? "Uploading..." : "Change Banner"}
+        </div>
+      </div>
+      <input
+        ref={bannerInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        style={{ display: "none" }}
+        onChange={handleBannerUpload}
+      />
+
       <div className="settings-avatar-section">
         <div className="settings-avatar-preview" onClick={() => fileInputRef.current?.click()}>
           <Avatar

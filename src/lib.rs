@@ -118,13 +118,21 @@ pub fn build_router(state: AppState) -> Router {
     let key_routes = Router::new()
         .route("/identity", put(api::keys::update_identity_keys))
         .route("/prekeys", post(api::keys::upload_prekeys))
-        .route("/prekeys/count", get(api::keys::prekey_count));
+        .route("/prekeys/count", get(api::keys::prekey_count))
+        .route(
+            "/backup",
+            put(api::key_backup::upload_key_backup)
+                .get(api::key_backup::get_key_backup)
+                .delete(api::key_backup::delete_key_backup),
+        )
+        .route("/backup/status", get(api::key_backup::get_key_backup_status));
 
     // User routes
     let user_routes = Router::new()
         .route("/:user_id/keys", get(api::keys::get_key_bundle))
         .route("/:user_id/profile", get(api::users::get_profile))
         .route("/:user_id/avatar", get(api::users::get_avatar))
+        .route("/:user_id/banner", get(api::users::get_banner))
         .route(
             "/:user_id/block",
             post(api::users::block_user).delete(api::users::unblock_user),
@@ -132,6 +140,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/search", get(api::users::get_user_by_username))
         .route("/profile", put(api::users::update_profile))
         .route("/avatar", post(api::users::upload_avatar))
+        .route("/banner", post(api::users::upload_banner))
         .route("/blocked", get(api::users::get_blocked_users))
         .route("/profile-keys", put(api::users::distribute_profile_keys))
         .route("/:user_id/profile-key", get(api::users::get_profile_key));
@@ -140,7 +149,7 @@ pub fn build_router(state: AppState) -> Router {
     let server_routes = Router::new()
         .route("/", get(api::servers::list_servers))
         .route("/", post(api::servers::create_server))
-        .route("/:server_id", get(api::servers::get_server).patch(api::servers::update_server))
+        .route("/:server_id", get(api::servers::get_server).patch(api::servers::update_server).delete(api::servers::delete_server))
         .route(
             "/:server_id/channels",
             get(api::servers::list_server_channels),
@@ -182,6 +191,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/:server_id/members/@me/permissions",
             get(api::servers::get_my_permissions),
+        )
+        .route(
+            "/:server_id/members/@me",
+            delete(api::servers::leave_server),
         )
         .route(
             "/:server_id/members",

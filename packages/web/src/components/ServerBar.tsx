@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
@@ -12,6 +12,7 @@ export default function ServerBar() {
   const selectedServerId = useUiStore((s) => s.selectedServerId);
   const selectServer = useUiStore((s) => s.selectServer);
   const api = useAuthStore((s) => s.api);
+  const user = useAuthStore((s) => s.user);
 
   // Compute per-server unread totals
   const serverUnreads = useMemo(() => {
@@ -40,6 +41,45 @@ export default function ServerBar() {
   const [serverName, setServerName] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
+
+  // ─── Server Context Menu ────────────────────────────
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; serverId: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ type: "leave" | "delete"; serverId: string; serverName: string } | null>(null);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const handler = () => setCtxMenu(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [ctxMenu]);
+
+  function handleServerContextMenu(e: React.MouseEvent, serverId: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY, serverId });
+  }
+
+  async function handleLeaveServer(serverId: string) {
+    try {
+      await api.leaveServer(serverId);
+      selectServer(null);
+      await loadChannels();
+    } catch (err: any) {
+      console.error("Failed to leave server:", err);
+    }
+    setConfirmAction(null);
+  }
+
+  async function handleDeleteServer(serverId: string) {
+    try {
+      await api.deleteServer(serverId);
+      selectServer(null);
+      await loadChannels();
+    } catch (err: any) {
+      console.error("Failed to delete server:", err);
+    }
+    setConfirmAction(null);
+  }
 
   async function handleCreate() {
     if (!serverName.trim()) return;
@@ -105,6 +145,7 @@ export default function ServerBar() {
               <button
                 className={`server-icon ${isActive ? "active" : ""}`}
                 onClick={() => selectServer(srv.id)}
+                onContextMenu={(e) => handleServerContextMenu(e, srv.id)}
                 title={name}
               >
                 {name.charAt(0).toUpperCase()}
@@ -144,6 +185,73 @@ export default function ServerBar() {
       </div>
 
     </nav>
+
+      {/* Server context menu */}
+      {ctxMenu && (() => {
+        const srv = servers.find((s) => s.id === ctxMenu.serverId);
+        if (!srv) return null;
+        const name = parseServerName(srv.encrypted_meta);
+        const isOwner = user?.id === srv.owner_id;
+        return (
+          <div
+            className="channel-context-menu"
+            style={{ top: ctxMenu.y, left: ctxMenu.x }}
+          >
+            {isOwner ? (
+              <button
+                className="context-menu-item-danger"
+                onClick={() => {
+                  setCtxMenu(null);
+                  setConfirmAction({ type: "delete", serverId: srv.id, serverName: name });
+                }}
+              >
+                Delete Server
+              </button>
+            ) : (
+              <button
+                className="context-menu-item-danger"
+                onClick={() => {
+                  setCtxMenu(null);
+                  setConfirmAction({ type: "leave", serverId: srv.id, serverName: name });
+                }}
+              >
+                Leave Server
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Confirm leave/delete dialog */}
+      {confirmAction && (
+        <div className="modal-overlay" onClick={() => setConfirmAction(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal-title">
+              {confirmAction.type === "delete" ? "Delete Server" : "Leave Server"}
+            </h2>
+            <p className="modal-subtitle">
+              {confirmAction.type === "delete"
+                ? `Are you sure you want to delete "${confirmAction.serverName}"? This action cannot be undone and all channels, messages, and roles will be permanently deleted.`
+                : `Are you sure you want to leave "${confirmAction.serverName}"? You will need a new invite to rejoin.`}
+            </p>
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setConfirmAction(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn-danger"
+                onClick={() =>
+                  confirmAction.type === "delete"
+                    ? handleDeleteServer(confirmAction.serverId)
+                    : handleLeaveServer(confirmAction.serverId)
+                }
+              >
+                {confirmAction.type === "delete" ? "Delete Server" : "Leave Server"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create server modal */}
       {showCreate && (

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
@@ -24,6 +24,7 @@ export default function UserPanel() {
   const channels = useChatStore((s) => s.channels);
   const [showStatusSelector, setShowStatusSelector] = useState(false);
   const [showCustomStatus, setShowCustomStatus] = useState(false);
+  const avatarWrapRef = useRef<HTMLDivElement>(null);
 
   if (!user) return null;
 
@@ -93,7 +94,7 @@ export default function UserPanel() {
         </div>
       )}
       <div className="user-panel-row">
-        <div className="user-panel-avatar-wrap" onClick={() => setShowStatusSelector((v) => !v)}>
+        <div className="user-panel-avatar-wrap" ref={avatarWrapRef} onClick={() => setShowStatusSelector((v) => !v)}>
           <Avatar
             avatarUrl={user.avatar_url}
             name={user.display_name || user.username}
@@ -141,7 +142,7 @@ export default function UserPanel() {
       </div>
 
       {showStatusSelector && (
-        <StatusSelector onClose={() => setShowStatusSelector(false)} />
+        <StatusSelector anchorRef={avatarWrapRef} onClose={() => setShowStatusSelector(false)} />
       )}
 
       {showCustomStatus && (

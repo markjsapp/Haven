@@ -4,6 +4,7 @@ pub mod categories;
 pub mod channels;
 pub mod friends;
 pub mod invites;
+pub mod key_backup;
 pub mod keys;
 pub mod messages;
 pub mod presence;

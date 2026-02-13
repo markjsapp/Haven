@@ -51,6 +51,11 @@ export class HavenWs {
     return this.state;
   }
 
+  /** Whether the WebSocket is currently connected and ready to send. */
+  get isConnected(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
   /** Update the auth token (e.g. after a refresh). */
   updateToken(token: string): void {
     this.options.token = token;

@@ -85,6 +85,8 @@ interface ChatState {
   blockedUserIds: string[];
   /** channelId -> unread message count (client-side only) */
   unreadCounts: Record<string, number>;
+  /** channelId -> mention/reply count (client-side only) */
+  mentionCounts: Record<string, number>;
   /** serverId -> effective permission bitfield for current user */
   myPermissions: Record<string, bigint>;
   /** userId -> highest-priority role color hex string */
@@ -159,6 +161,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   reactions: {},
   blockedUserIds: [],
   unreadCounts: {},
+  mentionCounts: {},
   myPermissions: {},
   userRoleColors: {},
 
@@ -484,8 +487,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   async selectChannel(channelId) {
     set((state) => {
-      const { [channelId]: _, ...rest } = state.unreadCounts;
-      return { currentChannelId: channelId, unreadCounts: rest };
+      const { [channelId]: _, ...restUnread } = state.unreadCounts;
+      const { [channelId]: __, ...restMention } = state.mentionCounts;
+      return { currentChannelId: channelId, unreadCounts: restUnread, mentionCounts: restMention };
     });
 
     // Fetch any pending sender key distributions for this channel
@@ -582,45 +586,61 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { currentChannelId, ws, replyingToId } = get();
     if (!currentChannelId || !ws) return;
 
+    // Reconnect if WS dropped
+    if (!ws.isConnected) {
+      console.warn("[WS] Not connected, attempting reconnect...");
+      ws.connect();
+      // Wait briefly for connection
+      await new Promise((r) => setTimeout(r, 1000));
+      if (!ws.isConnected) {
+        console.error("[WS] Reconnect failed — cannot send message");
+        return;
+      }
+    }
+
     const { user } = useAuthStore.getState();
     if (!user) return;
 
-    // Detect URLs and fetch link previews (non-blocking, with timeout)
-    const linkPreviews = await fetchLinkPreviews(text);
+    try {
+      // Detect URLs and fetch link previews (non-blocking, with timeout)
+      const linkPreviews = await fetchLinkPreviews(text);
 
-    const { senderToken, encryptedBody } = await encryptOutgoing(
-      user.id,
-      currentChannelId,
-      text,
-      attachments,
-      formatting,
-      linkPreviews.length > 0 ? linkPreviews : undefined,
-    );
+      const { senderToken, encryptedBody } = await encryptOutgoing(
+        user.id,
+        currentChannelId,
+        text,
+        attachments,
+        formatting,
+        linkPreviews.length > 0 ? linkPreviews : undefined,
+      );
 
-    // Optimistic insert: show our own message immediately (plaintext)
-    const tempId = `temp-${crypto.randomUUID()}`;
-    pendingAcks.push(tempId);
+      // Optimistic insert: show our own message immediately (plaintext)
+      const tempId = `temp-${crypto.randomUUID()}`;
+      pendingAcks.push(tempId);
 
-    const optimistic: DecryptedMessage = {
-      id: tempId,
-      channelId: currentChannelId,
-      senderId: user.id,
-      text,
-      attachments,
-      linkPreviews: linkPreviews.length > 0 ? linkPreviews : undefined,
-      contentType: formatting?.contentType,
-      formatting: formatting?.data,
-      timestamp: new Date().toISOString(),
-      replyToId: replyingToId,
-      raw: {} as MessageResponse, // placeholder — replaced on ack
-    };
-    set((state) => appendMessage(state, currentChannelId, optimistic));
+      const optimistic: DecryptedMessage = {
+        id: tempId,
+        channelId: currentChannelId,
+        senderId: user.id,
+        text,
+        attachments,
+        linkPreviews: linkPreviews.length > 0 ? linkPreviews : undefined,
+        contentType: formatting?.contentType,
+        formatting: formatting?.data,
+        timestamp: new Date().toISOString(),
+        replyToId: replyingToId,
+        raw: {} as MessageResponse, // placeholder — replaced on ack
+      };
+      set((state) => appendMessage(state, currentChannelId, optimistic));
 
-    const attachmentIds = attachments?.map((a) => a.id);
-    ws.sendMessage(currentChannelId, senderToken, encryptedBody, undefined, attachmentIds, replyingToId ?? undefined);
+      const attachmentIds = attachments?.map((a) => a.id);
+      ws.sendMessage(currentChannelId, senderToken, encryptedBody, undefined, attachmentIds, replyingToId ?? undefined);
 
-    // Clear reply state after send
-    set({ replyingToId: null });
+      // Clear reply state after send
+      set({ replyingToId: null });
+    } catch (err) {
+      console.error("[sendMessage] Failed to send:", err);
+    }
   },
 
   addFiles(files: File[]) {
@@ -922,6 +942,18 @@ function appendMessage(
   return { messages: { ...state.messages, [channelId]: updated } };
 }
 
+/** Check if a tiptap formatting object mentions a specific user ID. */
+function formattingMentionsUser(formatting: unknown, userId: string): boolean {
+  if (!formatting || typeof formatting !== "object") return false;
+  const node = formatting as Record<string, unknown>;
+  if (node.type === "mention" && (node.attrs as Record<string, unknown>)?.id === userId) return true;
+  const content = node.content;
+  if (Array.isArray(content)) {
+    return content.some((child) => formattingMentionsUser(child, userId));
+  }
+  return false;
+}
+
 /** Clear a specific user from the typing indicator for a channel. */
 function clearTypingForUser(channelId: string, userId: string): void {
   useChatStore.setState((state) => {
@@ -991,6 +1023,28 @@ async function handleIncomingMessage(raw: MessageResponse) {
     cacheMessage(msg);
     // Clear typing indicator for this sender — they just sent a message
     clearTypingForUser(raw.channel_id, msg.senderId);
+
+    // Detect @mentions and replies to current user for mention badge
+    if (raw.channel_id !== useChatStore.getState().currentChannelId) {
+      const myId = useAuthStore.getState().user?.id;
+      if (myId) {
+        const isMentioned = formattingMentionsUser(msg.formatting, myId);
+        const isReplyToMe = msg.replyToId
+          ? (useChatStore.getState().messages[raw.channel_id] ?? []).some(
+              (m) => m.id === msg.replyToId && m.senderId === myId,
+            )
+          : false;
+        if (isMentioned || isReplyToMe) {
+          useChatStore.setState((state) => ({
+            mentionCounts: {
+              ...state.mentionCounts,
+              [raw.channel_id]: (state.mentionCounts[raw.channel_id] ?? 0) + 1,
+            },
+          }));
+        }
+      }
+    }
+
     useChatStore.setState((state) => appendMessage(state, raw.channel_id, msg));
   } catch (err) {
     console.warn("[E2EE] WS message decryption failed", raw.id, err);
@@ -1062,6 +1116,26 @@ const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
 const MAX_PREVIEWS = 3;
 const PREVIEW_TIMEOUT = 4000;
 
+/** Match URLs pointing directly to an image file */
+const IMAGE_EXT_RE = /\.(?:gif|png|jpe?g|webp|avif|apng|svg)(?:\?[^\s]*)?$/i;
+
+/** Known GIF/image hosting services — treat their pages as direct image embeds */
+const GIF_HOST_RE = /(?:tenor\.com(?:\/view)?|giphy\.com\/gifs|i\.imgur\.com)\//i;
+
+/** Hosts that serve HTML pages (not raw images) even when the URL ends in .gif */
+const GIF_PAGE_HOSTS = /^(?:tenor\.com|giphy\.com)$/i;
+
+function isDirectImageUrl(url: string): boolean {
+  try {
+    const { pathname, hostname } = new URL(url);
+    // Tenor/Giphy pages can end in .gif but return HTML, not image data
+    if (GIF_PAGE_HOSTS.test(hostname)) return false;
+    return IMAGE_EXT_RE.test(pathname);
+  } catch {
+    return IMAGE_EXT_RE.test(url);
+  }
+}
+
 async function fetchLinkPreviews(text: string): Promise<LinkPreview[]> {
   const urls = text.match(URL_RE);
   if (!urls || urls.length === 0) return [];
@@ -1069,23 +1143,43 @@ async function fetchLinkPreviews(text: string): Promise<LinkPreview[]> {
   const { api } = useAuthStore.getState();
   const unique = [...new Set(urls)].slice(0, MAX_PREVIEWS);
 
-  const results = await Promise.allSettled(
-    unique.map((url) =>
-      Promise.race([
-        api.fetchLinkPreview(url),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), PREVIEW_TIMEOUT),
-        ),
-      ]),
-    ),
-  );
-
-  const previews: LinkPreview[] = [];
-  for (const r of results) {
-    if (r.status === "fulfilled" && r.value && (r.value.title || r.value.description)) {
-      previews.push(r.value);
+  // Separate direct image URLs from regular URLs
+  const imageUrls: string[] = [];
+  const regularUrls: string[] = [];
+  for (const url of unique) {
+    if (isDirectImageUrl(url)) {
+      imageUrls.push(url);
+    } else {
+      regularUrls.push(url);
     }
   }
+
+  // Create inline image embeds (no backend fetch needed)
+  const previews: LinkPreview[] = imageUrls.map((url) => ({
+    url,
+    image: url,
+  }));
+
+  // Fetch OG metadata for non-image URLs from backend
+  if (regularUrls.length > 0) {
+    const results = await Promise.allSettled(
+      regularUrls.map((url) =>
+        Promise.race([
+          api.fetchLinkPreview(url),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("timeout")), PREVIEW_TIMEOUT),
+          ),
+        ]),
+      ),
+    );
+
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value && (r.value.title || r.value.description || r.value.image)) {
+        previews.push(r.value);
+      }
+    }
+  }
+
   return previews;
 }
 

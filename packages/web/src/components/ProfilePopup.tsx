@@ -237,7 +237,10 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
   return (
     <div className="profile-popup" ref={popupRef} style={style}>
       {/* Banner with action buttons */}
-      <div className="profile-popup-banner">
+      <div
+        className={`profile-popup-banner${profile.banner_url ? " has-image" : ""}`}
+        style={profile.banner_url ? { backgroundImage: `url(${profile.banner_url})` } : undefined}
+      >
         {!isOwnProfile && (
           <div className="profile-popup-header-actions">
             <button

@@ -24,6 +24,26 @@ const extensions = [
   Subtext,
 ];
 
+// ─── Emoji-only detection ────────────────────────────
+
+/** Matches strings composed entirely of emoji + modifiers + whitespace */
+const EMOJI_ONLY_RE = /^(?:\p{Extended_Pictographic}|[\u{1F3FB}-\u{1F3FF}]|[\u{1F1E0}-\u{1F1FF}]|\uFE0F|\u200D|\u20E3|\s)+$/u;
+
+/** Returns the number of visual emoji if text is emoji-only, 0 otherwise. */
+function getEmojiOnlyCount(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  if (!EMOJI_ONLY_RE.test(trimmed)) return 0;
+  // Count grapheme clusters for accurate visual emoji count
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+    return [...segmenter.segment(trimmed)].filter((s) => s.segment.trim()).length;
+  }
+  // Fallback: count Extended_Pictographic code points
+  const matches = trimmed.match(/\p{Extended_Pictographic}/gu);
+  return matches ? matches.length : 0;
+}
+
 interface Props {
   text: string;
   contentType?: string;
@@ -95,5 +115,8 @@ export default function MessageBody({ text, contentType, formatting }: Props) {
     );
   }
 
-  return <div className="message-body">{text}</div>;
+  const emojiCount = getEmojiOnlyCount(text);
+  const jumbo = emojiCount > 0 && emojiCount <= 10;
+
+  return <div className={`message-body${jumbo ? " message-body-jumbo" : ""}`}>{text}</div>;
 }

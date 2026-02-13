@@ -23,19 +23,26 @@ Haven/
 
 ### Communication
 - **Servers & Channels** — create servers with text channels, organized into categories
-- **Direct Messages** — 1-on-1 messaging with DM request/accept flow
+- **Direct Messages** — 1-on-1 and group DMs with request/accept flow
 - **Friends System** — send/accept/decline friend requests, mutual auto-accept
 - **Real-time** — WebSocket-based messaging with typing indicators and presence
+- **Rich Embeds** — link previews with YouTube, Spotify, Tenor, Giphy, and Imgur embeds
+- **Big Emoji** — jumbo rendering for emoji-only messages (up to 10 emoji)
+- **@Mentions** — mention users in messages with autocomplete, mention-aware notification badges
+- **Message Pinning** — pin messages with clickable system message links
 
 ### Organization
 - **Channel Categories** — group channels into collapsible categories with drag-and-drop reordering
 - **Roles & Permissions** — Discord-style role system with bitfield permissions and channel overwrites
+- **Channel Mute & Notifications** — per-channel mute with timed durations and notification overrides
 - **Invites** — shareable invite codes with optional expiry and usage limits
+- **Server Management** — leave or delete servers with confirmation dialogs
 
 ### Security
 - **End-to-End Encryption** — messages encrypted with Double Ratchet (Signal Protocol)
 - **Sealed Sender** — only the recipient can see who sent a message
 - **Zero-Knowledge Server** — server stores only encrypted blobs and public keys
+- **Encrypted Key Backup** — sync E2EE keys across devices with a security phrase (Argon2id KDF + XSalsa20-Poly1305)
 - **Argon2id** password hashing, JWT auth with rotating refresh tokens, optional TOTP 2FA
 - **Encrypted Attachments** — files encrypted client-side, stored as opaque blobs
 
@@ -138,12 +145,18 @@ cd packages/web && npm test
 | PUT | `/api/v1/keys/identity` | Update identity + signed prekey |
 | POST | `/api/v1/keys/prekeys` | Upload one-time prekeys |
 | GET | `/api/v1/keys/prekeys/count` | Check remaining prekeys |
+| PUT | `/api/v1/keys/backup` | Upload encrypted key backup |
+| GET | `/api/v1/keys/backup` | Download encrypted key backup |
+| GET | `/api/v1/keys/backup/status` | Check if backup exists |
+| DELETE | `/api/v1/keys/backup` | Delete key backup |
 
 ### Servers & Channels
 | Method | Path | Description |
 |--------|------|-------------|
 | GET/POST | `/api/v1/servers` | List / create servers |
 | GET | `/api/v1/servers/:id` | Get server details |
+| DELETE | `/api/v1/servers/:id` | Delete server (owner only) |
+| POST | `/api/v1/servers/:id/leave` | Leave server |
 | GET/POST | `/api/v1/servers/:id/channels` | List / create channels |
 | PUT/DELETE | `/api/v1/channels/:id` | Update / delete channel |
 | GET/POST | `/api/v1/servers/:id/categories` | List / create categories |
@@ -180,13 +193,14 @@ cd packages/web && npm test
 | POST | `/api/v1/servers/:id/invites` | Create invite |
 | POST | `/api/v1/invites/:code/join` | Join server via invite code |
 
-### User Profiles
+### User Profiles & Presence
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/users/:id/profile` | Get user profile |
-| PUT | `/api/v1/users/profile` | Update own profile |
+| PUT | `/api/v1/users/profile` | Update own profile (bio, banner) |
 | GET | `/api/v1/users/search` | Search users by username |
 | POST/DELETE | `/api/v1/users/:id/block` | Block / unblock user |
+| GET | `/api/v1/presence` | Bulk presence check by user IDs |
 
 ### WebSocket
 | Path | Description |
@@ -222,3 +236,4 @@ cd packages/web && npm test
 - All file uploads treated as opaque encrypted blobs
 - Size bucketing prevents file-type inference from attachment size
 - Discord-style bitfield permissions with channel-level overwrites
+- Encrypted key backup uses Argon2id KDF + XSalsa20-Poly1305 — server stores opaque blob, zero knowledge of key material

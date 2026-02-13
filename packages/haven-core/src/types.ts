@@ -44,6 +44,7 @@ export interface UserPublic {
   display_name: string | null;
   about_me: string | null;
   avatar_url: string | null;
+  banner_url: string | null;
   custom_status: string | null;
   custom_status_emoji: string | null;
   created_at: string;
@@ -63,6 +64,7 @@ export interface UserProfileResponse {
   display_name: string | null;
   about_me: string | null;
   avatar_url: string | null;
+  banner_url: string | null;
   custom_status: string | null;
   custom_status_emoji: string | null;
   created_at: string;
@@ -141,6 +143,29 @@ export interface UpdateKeysRequest {
   identity_key: string;          // base64
   signed_prekey: string;         // base64
   signed_prekey_signature: string; // base64
+}
+
+// ─── Key Backup ──────────────────────────────────────
+
+export interface UploadKeyBackupRequest {
+  encrypted_data: string;  // base64
+  nonce: string;           // base64
+  salt: string;            // base64
+  version?: number;
+}
+
+export interface KeyBackupResponse {
+  encrypted_data: string;  // base64
+  nonce: string;           // base64
+  salt: string;            // base64
+  version: number;
+  updated_at: string;
+}
+
+export interface KeyBackupStatusResponse {
+  has_backup: boolean;
+  version: number | null;
+  updated_at: string | null;
 }
 
 // ─── Servers ───────────────────────────────────────────

@@ -68,6 +68,7 @@ function DmView() {
   const showFriends = useUiStore((s) => s.showFriends);
   const setShowFriends = useUiStore((s) => s.setShowFriends);
   const unreadCounts = useChatStore((s) => s.unreadCounts);
+  const mentionCounts = useChatStore((s) => s.mentionCounts);
 
   const [showCreateDm, setShowCreateDm] = useState(false);
   const [error, setError] = useState("");
@@ -273,14 +274,159 @@ function DmView() {
   );
 }
 
+// ─── Channel Context Menu ─────────────────────────────
+
+const MUTE_DURATIONS = [
+  { label: "For 15 Minutes", ms: 15 * 60 * 1000 },
+  { label: "For 1 Hour", ms: 60 * 60 * 1000 },
+  { label: "For 3 Hours", ms: 3 * 60 * 60 * 1000 },
+  { label: "For 8 Hours", ms: 8 * 60 * 60 * 1000 },
+  { label: "For 24 Hours", ms: 24 * 60 * 60 * 1000 },
+  { label: "Until I turn it back on", ms: null as number | null },
+];
+
+const NOTIFICATION_OPTIONS: { label: string; value: "default" | "all" | "mentions" | "nothing"; desc?: string }[] = [
+  { label: "Use Category Default", value: "default", desc: "All Messages" },
+  { label: "All Messages", value: "all" },
+  { label: "Only @mentions", value: "mentions" },
+  { label: "Nothing", value: "nothing" },
+];
+
+function ChannelContextMenu({
+  channelId,
+  x,
+  y,
+  submenu,
+  canManageChannels,
+  onRename,
+  onPermissions,
+  onDelete,
+  onShowSubmenu,
+  onClose,
+}: {
+  channelId: string;
+  x: number;
+  y: number;
+  submenu?: "mute" | "notify";
+  canManageChannels: boolean;
+  onRename: () => void;
+  onPermissions: () => void;
+  onDelete: () => void;
+  onShowSubmenu: (sub: "mute" | "notify" | undefined) => void;
+  onClose: () => void;
+}) {
+  const muteChannel = useUiStore((s) => s.muteChannel);
+  const unmuteChannel = useUiStore((s) => s.unmuteChannel);
+  const isChannelMuted = useUiStore((s) => s.isChannelMuted);
+  const setChannelNotification = useUiStore((s) => s.setChannelNotification);
+  const channelNotifications = useUiStore((s) => s.channelNotifications);
+
+  const muted = isChannelMuted(channelId);
+  const currentNotify = channelNotifications[channelId] ?? "default";
+
+  // Notification label for display
+  const notifyLabel = NOTIFICATION_OPTIONS.find((o) => o.value === currentNotify)?.label ?? "All Messages";
+
+  return (
+    <div
+      className="channel-context-menu"
+      style={{ top: y, left: x }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Mute Channel */}
+      <div
+        className="context-submenu-trigger"
+        onMouseEnter={() => onShowSubmenu("mute")}
+      >
+        <button onClick={(e) => {
+          e.stopPropagation();
+          if (muted) {
+            unmuteChannel(channelId);
+            onClose();
+          } else {
+            onShowSubmenu(submenu === "mute" ? undefined : "mute");
+          }
+        }}>
+          {muted ? "Unmute Channel" : "Mute Channel"}
+          {!muted && <span className="context-submenu-arrow">›</span>}
+        </button>
+        {submenu === "mute" && !muted && (
+          <div className="context-submenu" onMouseLeave={() => onShowSubmenu(undefined)}>
+            {MUTE_DURATIONS.map((d) => (
+              <button
+                key={d.label}
+                onClick={() => {
+                  muteChannel(channelId, d.ms);
+                  onClose();
+                }}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Notification Settings */}
+      <div
+        className="context-submenu-trigger"
+        onMouseEnter={() => onShowSubmenu("notify")}
+      >
+        <button onClick={(e) => {
+          e.stopPropagation();
+          onShowSubmenu(submenu === "notify" ? undefined : "notify");
+        }}>
+          <span className="context-btn-with-sub">
+            <span>Notification Settings</span>
+            <span className="context-sub-label">{notifyLabel}</span>
+          </span>
+          <span className="context-submenu-arrow">›</span>
+        </button>
+        {submenu === "notify" && (
+          <div className="context-submenu" onMouseLeave={() => onShowSubmenu(undefined)}>
+            {NOTIFICATION_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={currentNotify === opt.value ? "active" : ""}
+                onClick={() => {
+                  setChannelNotification(channelId, opt.value);
+                  onClose();
+                }}
+              >
+                <span className="context-btn-with-sub">
+                  <span>{opt.label}</span>
+                  {opt.desc && <span className="context-sub-label">{opt.desc}</span>}
+                </span>
+                <span className={`context-radio ${currentNotify === opt.value ? "context-radio-active" : ""}`} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Admin-only items */}
+      {canManageChannels && (
+        <>
+          <div className="context-divider" />
+          <button onClick={onRename}>Rename Channel</button>
+          <button onClick={onPermissions}>Permissions</button>
+          <button className="danger" onClick={onDelete}>Delete Channel</button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Sortable Channel Item ────────────────────────────
 
 function SortableChannelItem({
   ch,
   disabled,
+  onContextMenu,
 }: {
   ch: ChannelResponse;
   disabled?: boolean;
+  onContextMenu?: (e: React.MouseEvent, chId: string) => void;
 }) {
   const {
     attributes,
@@ -303,20 +449,31 @@ function SortableChannelItem({
 
   return (
     <li ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <ChannelItemContent ch={ch} />
+      <ChannelItemContent ch={ch} onContextMenu={onContextMenu} />
     </li>
   );
 }
 
 // ─── Channel Item Content (shared between sortable items and drag overlay) ────
 
-function ChannelItemContent({ ch, isOverlay }: { ch: ChannelResponse; isOverlay?: boolean }) {
+function ChannelItemContent({ ch, isOverlay, onContextMenu }: { ch: ChannelResponse; isOverlay?: boolean; onContextMenu?: (e: React.MouseEvent, chId: string) => void }) {
   const currentChannelId = useChatStore((s) => s.currentChannelId);
   const selectChannel = useChatStore((s) => s.selectChannel);
   const unreadCounts = useChatStore((s) => s.unreadCounts);
+  const mentionCounts = useChatStore((s) => s.mentionCounts);
+  const isChannelMuted = useUiStore((s) => s.isChannelMuted);
+  const channelNotifications = useUiStore((s) => s.channelNotifications);
 
   const isVoice = ch.channel_type === "voice";
-  const unread = unreadCounts[ch.id] ?? 0;
+  const muted = isChannelMuted(ch.id);
+  const notifySetting = channelNotifications[ch.id] ?? "default";
+  const rawUnread = unreadCounts[ch.id] ?? 0;
+  const rawMentions = mentionCounts[ch.id] ?? 0;
+
+  // Suppress indicators based on mute/notification settings
+  const showUnreadDot = !muted && notifySetting !== "nothing" && notifySetting !== "mentions" && rawUnread > 0;
+  const unread = muted || notifySetting === "nothing" ? 0 : rawUnread;
+  const mentions = muted || notifySetting === "nothing" ? 0 : rawMentions;
   const voiceCurrentChannel = useVoiceStore.getState().currentChannelId;
   const isInThisVoice = voiceCurrentChannel === ch.id;
 
@@ -334,9 +491,11 @@ function ChannelItemContent({ ch, isOverlay }: { ch: ChannelResponse; isOverlay?
   return (
     <>
       <button
-        className={`channel-item ${ch.id === currentChannelId ? "active" : ""} ${unread > 0 ? "unread" : ""} ${isInThisVoice ? "voice-active" : ""} ${isOverlay ? "drag-overlay" : ""}`}
+        className={`channel-item ${ch.id === currentChannelId ? "active" : ""} ${unread > 0 ? "unread" : ""} ${muted ? "muted" : ""} ${isInThisVoice ? "voice-active" : ""} ${isOverlay ? "drag-overlay" : ""}`}
         onClick={isOverlay ? undefined : handleChannelClick}
+        onContextMenu={onContextMenu ? (e) => onContextMenu(e, ch.id) : undefined}
       >
+        {showUnreadDot && mentions === 0 && <span className="channel-unread-dot" />}
         {isVoice ? (
           <svg width="16" height="16" viewBox="0 0 24 24" fill={isInThisVoice ? "var(--green)" : "currentColor"} className="channel-type-icon">
             <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z" />
@@ -346,7 +505,12 @@ function ChannelItemContent({ ch, isOverlay }: { ch: ChannelResponse; isOverlay?
           <span className="channel-hash">#</span>
         )}
         {parseChannelName(ch.encrypted_meta)}
-        {unread > 0 && <span className="unread-badge">{unread}</span>}
+        {muted && (
+          <svg className="channel-muted-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M16.5 12A4.5 4.5 0 0 0 14 8.27V6.11l-4-4L8.59 3.52 20.48 15.41 21.89 14l-5.39-5.39V12zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.9 8.9 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+          </svg>
+        )}
+        {mentions > 0 && <span className="unread-badge">{mentions}</span>}
       </button>
       {!isOverlay && isVoice && <VoiceChannelPreview channelId={ch.id} />}
     </>
@@ -509,6 +673,7 @@ function SortableCategorySection({
                   key={ch.id}
                   ch={ch}
                   disabled={isCollapsed}
+                  onContextMenu={onChannelContextMenu}
                 />
               );
             })}
@@ -548,7 +713,7 @@ function ServerView({ serverId }: { serverId: string }) {
 
   const [showSettings, setShowSettings] = useState(false);
   const [createModal, setCreateModal] = useState<{ categoryId?: string | null; categoryName?: string } | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ channelId: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ channelId: string; x: number; y: number; submenu?: "mute" | "notify" } | null>(null);
   const [categoryContextMenu, setCategoryContextMenu] = useState<{ categoryId: string; x: number; y: number } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -693,7 +858,6 @@ function ServerView({ serverId }: { serverId: string }) {
   }
 
   function handleContextMenu(e: React.MouseEvent, channelId: string) {
-    if (!canManageChannels) return;
     e.preventDefault();
     setCategoryContextMenu(null);
     setServerContextMenu(null);
@@ -961,7 +1125,7 @@ function ServerView({ serverId }: { serverId: string }) {
                       );
                     }
                     return (
-                      <SortableChannelItem key={ch.id} ch={ch} />
+                      <SortableChannelItem key={ch.id} ch={ch} onContextMenu={handleContextMenu} />
                     );
                   })}
                   {uncategorized.length === 0 && serverCategories.length === 0 && (
@@ -1017,38 +1181,29 @@ function ServerView({ serverId }: { serverId: string }) {
 
       {/* Right-click context menu for channels */}
       {contextMenu && (
-        <div
-          className="channel-context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-        >
-          <button
-            onClick={() => {
-              const ch = channels.find((c) => c.id === contextMenu.channelId);
-              setRenameValue(ch ? parseChannelName(ch.encrypted_meta) : "");
-              setRenamingId(contextMenu.channelId);
-              setContextMenu(null);
-            }}
-          >
-            Rename Channel
-          </button>
-          <button
-            onClick={() => {
-              setPermissionsChannelId(contextMenu.channelId);
-              setContextMenu(null);
-            }}
-          >
-            Permissions
-          </button>
-          <button
-            className="danger"
-            onClick={() => {
-              setConfirmDeleteChannel(contextMenu.channelId);
-              setContextMenu(null);
-            }}
-          >
-            Delete Channel
-          </button>
-        </div>
+        <ChannelContextMenu
+          channelId={contextMenu.channelId}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          submenu={contextMenu.submenu}
+          canManageChannels={canManageChannels}
+          onRename={() => {
+            const ch = channels.find((c) => c.id === contextMenu.channelId);
+            setRenameValue(ch ? parseChannelName(ch.encrypted_meta) : "");
+            setRenamingId(contextMenu.channelId);
+            setContextMenu(null);
+          }}
+          onPermissions={() => {
+            setPermissionsChannelId(contextMenu.channelId);
+            setContextMenu(null);
+          }}
+          onDelete={() => {
+            setConfirmDeleteChannel(contextMenu.channelId);
+            setContextMenu(null);
+          }}
+          onShowSubmenu={(sub) => setContextMenu({ ...contextMenu, submenu: sub })}
+          onClose={() => setContextMenu(null)}
+        />
       )}
 
       {/* Right-click context menu for categories */}

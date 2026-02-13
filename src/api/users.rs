@@ -16,6 +16,7 @@ use crate::storage;
 use crate::AppState;
 
 const MAX_AVATAR_SIZE: usize = 2 * 1024 * 1024; // 2MB
+const MAX_BANNER_SIZE: usize = 8 * 1024 * 1024; // 8MB
 
 #[derive(Debug, Deserialize)]
 pub struct UserSearchQuery {
@@ -100,6 +101,7 @@ pub async fn get_profile(
         display_name: user.display_name,
         about_me: user.about_me,
         avatar_url: user.avatar_url,
+        banner_url: user.banner_url,
         custom_status: user.custom_status,
         custom_status_emoji: user.custom_status_emoji,
         created_at: user.created_at,
@@ -244,6 +246,109 @@ pub async fn get_avatar(
             .load_blob(&storage_key)
             .await
             .map_err(|_| AppError::NotFound("Avatar file not found".into()))?;
+
+        let content_type = detect_image_type(&data);
+        Ok((
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "public, max-age=3600".to_string()),
+            ],
+            data,
+        )
+            .into_response())
+    }
+}
+
+/// POST /api/v1/users/banner — upload banner image (raw bytes)
+pub async fn upload_banner(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    body: Bytes,
+) -> AppResult<Json<UserPublic>> {
+    if body.is_empty() {
+        return Err(AppError::Validation("No image data provided".into()));
+    }
+    if body.len() > MAX_BANNER_SIZE {
+        return Err(AppError::Validation(format!(
+            "Banner too large (max {}MB)",
+            MAX_BANNER_SIZE / 1024 / 1024
+        )));
+    }
+
+    let storage_key = storage::obfuscated_key(&state.storage_key, &format!("banner:{}", user_id));
+    if state.config.cdn_enabled {
+        state
+            .storage
+            .store_blob_raw(&storage_key, &body)
+            .await
+            .map_err(|e| AppError::BadRequest(format!("Failed to store banner: {}", e)))?;
+    } else {
+        state
+            .storage
+            .store_blob(&storage_key, &body)
+            .await
+            .map_err(|e| AppError::BadRequest(format!("Failed to store banner: {}", e)))?;
+    }
+
+    let banner_url = format!("/api/v1/users/{}/banner", user_id);
+    let user = queries::update_user_banner(state.db.write(), user_id, &banner_url).await?;
+
+    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:user:{}", user_id)).await;
+
+    Ok(Json(UserPublic::from(user)))
+}
+
+/// GET /api/v1/users/:user_id/banner — download banner image (no auth required for <img> src)
+pub async fn get_banner(
+    State(state): State<AppState>,
+    Path(user_id): Path<Uuid>,
+) -> Result<impl IntoResponse, AppError> {
+    let user = queries::find_user_by_id(state.db.read(), user_id)
+        .await?
+        .ok_or(AppError::UserNotFound)?;
+
+    if user.banner_url.is_none() {
+        return Err(AppError::NotFound("No banner set".into()));
+    }
+
+    let storage_key = storage::obfuscated_key(&state.storage_key, &format!("banner:{}", user_id));
+
+    if state.config.cdn_enabled {
+        if let Some(url) = state
+            .storage
+            .presign_url(
+                &storage_key,
+                state.config.cdn_presign_expiry_secs,
+                &state.config.cdn_base_url,
+            )
+            .await
+        {
+            return Ok(Redirect::temporary(&url).into_response());
+        }
+
+        let data = state
+            .storage
+            .load_blob_raw(&storage_key)
+            .await
+            .map_err(|_| AppError::NotFound("Banner file not found".into()))?;
+
+        let content_type = detect_image_type(&data);
+        Ok((
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "public, max-age=3600".to_string()),
+            ],
+            data,
+        )
+            .into_response())
+    } else {
+        let data = state
+            .storage
+            .load_blob(&storage_key)
+            .await
+            .map_err(|_| AppError::NotFound("Banner file not found".into()))?;
 
         let content_type = detect_image_type(&data);
         Ok((

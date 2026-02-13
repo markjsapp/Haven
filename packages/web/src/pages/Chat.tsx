@@ -15,9 +15,13 @@ import PinnedMessagesPanel from "../components/PinnedMessagesPanel.js";
 import SearchPanel from "../components/SearchPanel.js";
 import VoiceRoom from "../components/VoiceRoom.js";
 import { parseChannelDisplay } from "../lib/channel-utils.js";
+import SecurityPhraseSetup from "../components/SecurityPhraseSetup.js";
+import SecurityPhraseRestore from "../components/SecurityPhraseRestore.js";
 
 export default function Chat() {
   const user = useAuthStore((s) => s.user);
+  const backupPending = useAuthStore((s) => s.backupPending);
+  const backupAvailable = useAuthStore((s) => s.backupAvailable);
   const connect = useChatStore((s) => s.connect);
   const disconnect = useChatStore((s) => s.disconnect);
   const loadChannels = useChatStore((s) => s.loadChannels);
@@ -274,6 +278,9 @@ export default function Chat() {
       {searchPanelOpen && <SearchPanel />}
 
       {showUserSettings && <Suspense fallback={null}><UserSettings /></Suspense>}
+
+      {backupPending && backupAvailable && <SecurityPhraseRestore />}
+      {backupPending && !backupAvailable && <SecurityPhraseSetup />}
     </div>
   );
 }

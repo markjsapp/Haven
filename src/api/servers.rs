@@ -233,3 +233,80 @@ pub async fn set_nickname(
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
+
+/// DELETE /api/v1/servers/:server_id/members/@me — leave a server
+pub async fn leave_server(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(server_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let server = queries::find_server_by_id(state.db.read(), server_id)
+        .await?
+        .ok_or(AppError::NotFound("Server not found".into()))?;
+
+    if !queries::is_server_member(state.db.read(), server_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this server".into()));
+    }
+
+    // Owner cannot leave — they must delete the server instead
+    if server.owner_id == user_id {
+        return Err(AppError::Validation(
+            "Server owner cannot leave. Delete the server instead.".into(),
+        ));
+    }
+
+    // Get username for system message before removing
+    let user = queries::find_user_by_id(state.db.read(), user_id)
+        .await?
+        .ok_or(AppError::UserNotFound)?;
+
+    queries::remove_server_member(state.db.write(), server_id, user_id).await?;
+
+    // Post system message in system channel
+    if let Some(system_channel_id) = server.system_channel_id {
+        let body = serde_json::json!({
+            "event": "member_left",
+            "username": user.username,
+            "user_id": user_id.to_string(),
+        });
+        if let Ok(sys_msg) = queries::insert_system_message(
+            state.db.write(),
+            system_channel_id,
+            &body.to_string(),
+        )
+        .await
+        {
+            let response: MessageResponse = sys_msg.into();
+            if let Some(broadcaster) = state.channel_broadcasts.get(&system_channel_id) {
+                let _ = broadcaster.send(WsServerMessage::NewMessage(response));
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// DELETE /api/v1/servers/:server_id — delete a server (owner only)
+pub async fn delete_server(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(server_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let server = queries::find_server_by_id(state.db.read(), server_id)
+        .await?
+        .ok_or(AppError::NotFound("Server not found".into()))?;
+
+    if server.owner_id != user_id {
+        return Err(AppError::Forbidden(
+            "Only the server owner can delete the server".into(),
+        ));
+    }
+
+    // Cascade delete handles all child records
+    queries::delete_server(state.db.write(), server_id).await?;
+
+    // Invalidate cache
+    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:server:{}", server_id)).await;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}

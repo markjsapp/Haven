@@ -139,7 +139,10 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
         <div className="full-profile-layout">
           {/* Left side — profile info */}
           <div className="full-profile-left">
-            <div className="full-profile-banner" />
+            <div
+              className={`full-profile-banner${profile.banner_url ? " has-image" : ""}`}
+              style={profile.banner_url ? { backgroundImage: `url(${profile.banner_url})` } : undefined}
+            />
 
             <div className="full-profile-avatar-section">
               <div className="full-profile-avatar-wrap">

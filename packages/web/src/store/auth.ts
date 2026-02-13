@@ -15,6 +15,7 @@ import {
   type DHKeyPair,
 } from "@haven/core";
 import { clearCryptoState } from "../lib/crypto.js";
+import { checkBackupStatus, clearCachedPhrase } from "../lib/backup.js";
 
 const PREKEY_BATCH_SIZE = 20;
 
@@ -24,7 +25,7 @@ const PREKEY_BATCH_SIZE = 20;
 
 const IDENTITY_KEY_PREFIX = "haven:identity:";
 
-function persistIdentityKey(userId: string, kp: IdentityKeyPair): void {
+export function persistIdentityKey(userId: string, kp: IdentityKeyPair): void {
   const data = JSON.stringify({
     publicKey: toBase64(kp.publicKey),
     privateKey: toBase64(kp.privateKey),
@@ -57,11 +58,14 @@ interface AuthState {
   identityKeyPair: IdentityKeyPair | null;
   signedPreKey: SignedPreKey | null;
   initialized: boolean;
+  backupPending: boolean;
+  backupAvailable: boolean;
 
   init(): Promise<void>;
   register(username: string, password: string, displayName?: string): Promise<void>;
   login(username: string, password: string, totpCode?: string): Promise<void>;
   logout(): void;
+  completeBackupSetup(): void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -71,6 +75,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   identityKeyPair: null,
   signedPreKey: null,
   initialized: false,
+  backupPending: false,
+  backupAvailable: false,
 
   async init() {
     if (get().initialized) return;
@@ -112,6 +118,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user: res.user,
       identityKeyPair: identity,
       signedPreKey: signedPre,
+      backupPending: true,
+      backupAvailable: false,
     });
   },
 
@@ -128,7 +136,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     let identityChanged = false;
 
     if (!identity) {
-      // First login on this browser (or keys were cleared) — generate new keys
+      // No local identity key — check if server has an encrypted backup
+      try {
+        const status = await checkBackupStatus();
+        if (status.hasBackup) {
+          // Backup exists — defer key setup until user enters security phrase
+          set({
+            user: res.user,
+            identityKeyPair: null,
+            signedPreKey: null,
+            backupPending: true,
+            backupAvailable: true,
+          });
+          return;
+        }
+      } catch {
+        // Backup check failed — proceed with new key generation
+      }
+
+      // No backup available — generate new keys
       identity = generateIdentityKeyPair();
       persistIdentityKey(res.user.id, identity);
       identityChanged = true;
@@ -173,7 +199,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user: res.user,
       identityKeyPair: identity,
       signedPreKey: signedPre,
+      backupPending: false,
+      backupAvailable: false,
     });
+  },
+
+  completeBackupSetup() {
+    set({ backupPending: false });
   },
 
   logout() {
@@ -181,7 +213,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     api.logout().catch(() => {});
     // Clear in-memory E2EE state (sessions, sender keys, etc.)
     clearCryptoState();
-    set({ user: null, identityKeyPair: null, signedPreKey: null });
+    clearCachedPhrase();
+    set({
+      user: null,
+      identityKeyPair: null,
+      signedPreKey: null,
+      backupPending: false,
+      backupAvailable: false,
+    });
     // Note: we deliberately keep the persisted identity key in localStorage
     // so re-login on the same browser reuses it.
   },

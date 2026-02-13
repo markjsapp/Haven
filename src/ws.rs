@@ -864,6 +864,7 @@ async fn handle_pin_message(
                     "event": "message_pinned",
                     "username": username,
                     "user_id": user_id.to_string(),
+                    "message_id": message_id.to_string(),
                 });
                 if let Ok(sys_msg) = queries::insert_system_message(
                     state.db.write(), channel_id, &body.to_string(),
@@ -923,6 +924,7 @@ async fn handle_unpin_message(
                     "event": "message_unpinned",
                     "username": username,
                     "user_id": user_id.to_string(),
+                    "message_id": message_id.to_string(),
                 });
                 if let Ok(sys_msg) = queries::insert_system_message(
                     state.db.write(), channel_id, &body.to_string(),

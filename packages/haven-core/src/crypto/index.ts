@@ -42,3 +42,12 @@ export {
   encryptProfileToBase64,
   decryptProfileFromBase64,
 } from "./profile.js";
+export {
+  encryptBackup,
+  decryptBackup,
+  deriveBackupKey,
+  generateRecoveryKey,
+  type BackupEncryptResult,
+  type BackupPayload,
+  type SerializedSessionState,
+} from "./backup.js";

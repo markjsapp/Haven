@@ -1257,6 +1257,69 @@ pub async fn remove_server_member(
     Ok(())
 }
 
+pub async fn delete_server(pool: &PgPool, server_id: Uuid) -> AppResult<()> {
+    // All child tables use ON DELETE CASCADE, so this single delete
+    // removes server_members, channels (→ messages, channel_members, etc.),
+    // roles, member_roles, invites, bans, categories, etc.
+    sqlx::query("DELETE FROM servers WHERE id = $1")
+        .bind(server_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ─── Key Backups ─────────────────────────────────────
+
+pub async fn upsert_key_backup(
+    pool: &PgPool,
+    user_id: Uuid,
+    encrypted_data: &[u8],
+    nonce: &[u8],
+    salt: &[u8],
+    version: i32,
+) -> AppResult<KeyBackup> {
+    let backup = sqlx::query_as::<_, KeyBackup>(
+        r#"
+        INSERT INTO key_backups (id, user_id, encrypted_data, nonce, salt, version, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        ON CONFLICT (user_id) DO UPDATE SET
+            encrypted_data = EXCLUDED.encrypted_data,
+            nonce = EXCLUDED.nonce,
+            salt = EXCLUDED.salt,
+            version = EXCLUDED.version,
+            updated_at = NOW()
+        RETURNING *
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(encrypted_data)
+    .bind(nonce)
+    .bind(salt)
+    .bind(version)
+    .fetch_one(pool)
+    .await?;
+    Ok(backup)
+}
+
+pub async fn get_key_backup(pool: &PgPool, user_id: Uuid) -> AppResult<Option<KeyBackup>> {
+    let backup = sqlx::query_as::<_, KeyBackup>(
+        "SELECT * FROM key_backups WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(backup)
+}
+
+pub async fn delete_key_backup(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
+    sqlx::query("DELETE FROM key_backups WHERE user_id = $1")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // ─── User Profiles ───────────────────────────────────
 
 pub async fn update_user_profile(
@@ -1298,6 +1361,17 @@ pub async fn update_user_avatar(pool: &PgPool, user_id: Uuid, avatar_url: &str) 
     )
     .bind(user_id)
     .bind(avatar_url)
+    .fetch_one(pool)
+    .await?;
+    Ok(user)
+}
+
+pub async fn update_user_banner(pool: &PgPool, user_id: Uuid, banner_url: &str) -> AppResult<User> {
+    let user = sqlx::query_as::<_, User>(
+        "UPDATE users SET banner_url = $2, updated_at = NOW() WHERE id = $1 RETURNING *",
+    )
+    .bind(user_id)
+    .bind(banner_url)
     .fetch_one(pool)
     .await?;
     Ok(user)
