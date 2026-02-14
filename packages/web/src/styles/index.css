@@ -92,6 +92,38 @@
   --border-subtle: #B5B9C0;
   --divider: #B5B9C0;
 }
+[data-theme="sage"][data-high-contrast] {
+  --text-muted: #B4B4B4;
+  --text-secondary: #ECECEC;
+  --interactive-normal: #ECECEC;
+  --interactive-muted: #9B9B9B;
+  --border-subtle: #525252;
+  --divider: #525252;
+}
+[data-theme="cosmos"][data-high-contrast] {
+  --text-muted: #B0B4C3;
+  --text-secondary: #E3E5EA;
+  --interactive-normal: #E3E5EA;
+  --interactive-muted: #8F93A2;
+  --border-subtle: #4A5070;
+  --divider: #4A5070;
+}
+[data-theme="forest"][data-high-contrast] {
+  --text-muted: #A9BBA7;
+  --text-secondary: #D4DDD2;
+  --interactive-normal: #D4DDD2;
+  --interactive-muted: #8EA38B;
+  --border-subtle: #4F6A4C;
+  --divider: #4F6A4C;
+}
+[data-theme="bluebird"][data-high-contrast] {
+  --text-muted: #3D4F5F;
+  --text-secondary: #14171A;
+  --interactive-normal: #14171A;
+  --interactive-muted: #657786;
+  --border-subtle: #AAB8C2;
+  --divider: #AAB8C2;
+}
 
 /* Floating element shadows for light themes */
 [data-theme="default"] .modal-dialog,
@@ -101,7 +133,11 @@
 [data-theme="light"] .modal-dialog,
 [data-theme="light"] .user-context-menu,
 [data-theme="light"] .channel-context-menu,
-[data-theme="light"] .profile-popup {
+[data-theme="light"] .profile-popup,
+[data-theme="bluebird"] .modal-dialog,
+[data-theme="bluebird"] .user-context-menu,
+[data-theme="bluebird"] .channel-context-menu,
+[data-theme="bluebird"] .profile-popup {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
 }
 
@@ -307,6 +343,154 @@
   --scrollbar-thumb: #C8CBD0;
 }
 
+/* ─── Sage Theme (ChatGPT-inspired) ──────────────── */
+[data-theme="sage"] {
+  --bg-tertiary: #171717;
+  --bg-secondary: #212121;
+  --bg-primary: #2D2D2D;
+  --bg-secondary-alt: #1A1A1A;
+  --bg-hover: #353535;
+  --bg-active: #424242;
+  --bg-floating: #0D0D0D;
+  --bg-input: #3A3A3A;
+
+  --text-normal: #ECECEC;
+  --text-muted: #9B9B9B;
+  --text-header: #F7F7F7;
+  --text-secondary: #B4B4B4;
+  --text-link: #1AB78E;
+
+  --interactive-normal: #B4B4B4;
+  --interactive-hover: #ECECEC;
+  --interactive-active: #FFFFFF;
+  --interactive-muted: #7A7A7A;
+
+  --blurple: #10A37F;
+  --blurple-hover: #0D8A6A;
+  --green: #1AB78E;
+  --yellow: #F5C542;
+  --red: #EF6B6B;
+
+  --status-danger: #EF6B6B;
+  --bg-modifier-hover: #353535;
+
+  --border-subtle: #3E3E3E;
+  --divider: #3E3E3E;
+
+  --scrollbar-thumb: #1A1A1A;
+}
+
+/* ─── Cosmos Theme (Gemini-inspired) ─────────────── */
+[data-theme="cosmos"] {
+  --bg-tertiary: #131620;
+  --bg-secondary: #1B1F2E;
+  --bg-primary: #232736;
+  --bg-secondary-alt: #171B28;
+  --bg-hover: #2B3044;
+  --bg-active: #363C54;
+  --bg-floating: #0C0E16;
+  --bg-input: #2E3348;
+
+  --text-normal: #E3E5EA;
+  --text-muted: #8F93A2;
+  --text-header: #F3F4F7;
+  --text-secondary: #B0B4C3;
+  --text-link: #A78BFA;
+
+  --interactive-normal: #B0B4C3;
+  --interactive-hover: #E3E5EA;
+  --interactive-active: #FFFFFF;
+  --interactive-muted: #6B6F7E;
+
+  --blurple: #8B6CEF;
+  --blurple-hover: #7454D6;
+  --green: #34C759;
+  --yellow: #FBBF24;
+  --red: #F87171;
+
+  --status-danger: #F87171;
+  --bg-modifier-hover: #2B3044;
+
+  --border-subtle: #333852;
+  --divider: #333852;
+
+  --scrollbar-thumb: #171B28;
+}
+
+/* ─── Forest Theme ───────────────────────────────── */
+[data-theme="forest"] {
+  --bg-tertiary: #1A2318;
+  --bg-secondary: #222E1F;
+  --bg-primary: #2A3627;
+  --bg-secondary-alt: #1E271B;
+  --bg-hover: #324030;
+  --bg-active: #3D4D39;
+  --bg-floating: #111810;
+  --bg-input: #334431;
+
+  --text-normal: #D4DDD2;
+  --text-muted: #8EA38B;
+  --text-header: #EBF0EA;
+  --text-secondary: #A9BBA7;
+  --text-link: #6EC065;
+
+  --interactive-normal: #A9BBA7;
+  --interactive-hover: #D4DDD2;
+  --interactive-active: #F0F5EF;
+  --interactive-muted: #6D7F6A;
+
+  --blurple: #5FAD56;
+  --blurple-hover: #4E9446;
+  --green: #6EC065;
+  --yellow: #D4AA3E;
+  --red: #E06C6C;
+
+  --status-danger: #E06C6C;
+  --bg-modifier-hover: #324030;
+
+  --border-subtle: #3A4B37;
+  --divider: #3A4B37;
+
+  --scrollbar-thumb: #1E271B;
+}
+
+/* ─── Bluebird Theme (classic Twitter) ───────────── */
+[data-theme="bluebird"] {
+  --bg-tertiary: #E8ECF0;
+  --bg-secondary: #F5F8FA;
+  --bg-primary: #FFFFFF;
+  --bg-secondary-alt: #E1E8ED;
+  --bg-hover: #E8ECF0;
+  --bg-active: #CCD6DD;
+  --bg-floating: #FFFFFF;
+  --bg-input: #E1E8ED;
+
+  --text-normal: #14171A;
+  --text-muted: #657786;
+  --text-header: #060606;
+  --text-secondary: #3D4F5F;
+  --text-link: #0C7ABF;
+
+  --interactive-normal: #3D4F5F;
+  --interactive-hover: #14171A;
+  --interactive-active: #060606;
+  --interactive-muted: #8899A6;
+
+  --blurple: #0C7ABF;
+  --blurple-hover: #0A6BA6;
+  --green: #17BF63;
+  --yellow: #FFAD1F;
+  --red: #E0245E;
+
+  --status-danger: #E0245E;
+  --bg-modifier-hover: #E8ECF0;
+
+  --border-subtle: #CCD6DD;
+  --divider: #E1E8ED;
+
+  --scrollbar-thumb: #CCD6DD;
+}
+
 html,
 body,
 #root {
@@ -391,7 +575,7 @@ body {
   width: 100%;
   padding: 10px;
   background: var(--bg-tertiary);
-  border: none;
+  border: 1px solid var(--border-subtle);
   border-radius: 3px;
   color: var(--text-normal);
   font-size: 1rem;
@@ -710,7 +894,7 @@ body {
   width: 100%;
   padding: 10px;
   background: var(--bg-tertiary);
-  border: none;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   color: var(--text-normal);
   font-size: 15px;
@@ -775,7 +959,7 @@ body {
 
 .channel-sidebar-header-input {
   background: var(--bg-tertiary);
-  border: none;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   color: var(--text-normal);
   font-size: 13px;
@@ -1262,6 +1446,7 @@ body {
   align-items: center;
   gap: 4px;
   background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 0 8px;
   width: 100%;
@@ -3152,7 +3337,7 @@ em-emoji-picker {
 
 .profile-edit-textarea {
   background: var(--bg-input);
-  border: none;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 8px;
   color: var(--text-primary);
@@ -4048,6 +4233,7 @@ em-emoji-picker {
 /* ─── Theme Picker ───────────────────────────────── */
 .theme-picker {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   margin-top: 12px;
 }
@@ -4166,7 +4352,7 @@ em-emoji-picker {
 .settings-input {
   padding: 10px;
   background: var(--bg-tertiary);
-  border: none;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   color: var(--text-normal);
   font-size: 15px;
@@ -4196,7 +4382,7 @@ em-emoji-picker {
 .settings-textarea {
   padding: 10px;
   background: var(--bg-tertiary);
-  border: none;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   color: var(--text-normal);
   font-size: 15px;
@@ -5029,6 +5215,102 @@ em-emoji-picker {
   height: 1px;
   background: var(--divider);
   margin: 4px 0;
+}
+
+.user-context-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+/* ─── Context Menu: Note Input ────────────────────── */
+
+.context-note-input {
+  padding: 4px 8px 6px;
+}
+
+.context-note-textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-normal);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+
+.context-note-textarea:focus {
+  border-color: var(--blurple);
+  box-shadow: 0 0 0 1px var(--blurple);
+}
+
+.context-note-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+/* ─── Context Menu: Volume Slider ─────────────────── */
+
+.context-volume-section {
+  padding: 6px 8px;
+}
+
+.context-volume-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.context-volume-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-volume-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-active);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.context-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--blurple);
+  cursor: pointer;
+  border: none;
+}
+
+.context-volume-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--blurple);
+  cursor: pointer;
+  border: none;
+}
+
+.context-volume-value {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 36px;
+  text-align: right;
 }
 
 /* ─── Add Friend Modal ───────────────────────────── */
@@ -6641,12 +6923,23 @@ em-emoji-picker {
   margin-left: 4px;
 }
 
+.voice-participant-icons {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .voice-mute-icon {
   flex-shrink: 0;
 }
 
 .voice-participant.muted .voice-participant-name {
   color: var(--text-secondary);
+}
+
+.voice-participant.server-muted .voice-participant-avatar,
+.voice-participant.server-deafened .voice-participant-avatar {
+  opacity: 0.5;
 }
 
 /* ─── Voice: Controls ──────────────────────────────── */

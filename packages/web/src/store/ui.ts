@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 
 export type NotificationOverride = "default" | "all" | "mentions" | "nothing";
 export type AccessibilityFont = "default" | "opendyslexic" | "atkinson";
-export type Theme = "night" | "default" | "light";
+export type Theme = "night" | "default" | "light" | "sage" | "cosmos" | "forest" | "bluebird";
 
 interface MuteEntry {
   /** Unix timestamp (ms) when mute expires, or null for indefinite */
@@ -38,6 +38,9 @@ interface UiState {
   a11yHighContrast: boolean;
   a11yAlwaysShowTimestamps: boolean;
 
+  /** Private user notes (userId -> note text, only visible to you) */
+  userNotes: Record<string, string>;
+
   selectServer(id: string | null): void;
   toggleMemberSidebar(): void;
   setShowFriends(show: boolean): void;
@@ -56,6 +59,7 @@ interface UiState {
   setA11yFont(font: AccessibilityFont): void;
   setA11yHighContrast(enabled: boolean): void;
   setA11yAlwaysShowTimestamps(enabled: boolean): void;
+  setUserNote(userId: string, note: string): void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -77,6 +81,8 @@ export const useUiStore = create<UiState>()(
       a11yFont: "default",
       a11yHighContrast: false,
       a11yAlwaysShowTimestamps: false,
+
+      userNotes: {},
 
       selectServer(id) {
         set({
@@ -156,6 +162,15 @@ export const useUiStore = create<UiState>()(
       setA11yFont(font) { set({ a11yFont: font }); },
       setA11yHighContrast(enabled) { set({ a11yHighContrast: enabled }); },
       setA11yAlwaysShowTimestamps(enabled) { set({ a11yAlwaysShowTimestamps: enabled }); },
+      setUserNote(userId, note) {
+        set((s) => {
+          if (!note.trim()) {
+            const { [userId]: _, ...rest } = s.userNotes;
+            return { userNotes: rest };
+          }
+          return { userNotes: { ...s.userNotes, [userId]: note } };
+        });
+      },
     }),
     {
       name: "haven:ui",
@@ -169,6 +184,7 @@ export const useUiStore = create<UiState>()(
         a11yFont: state.a11yFont,
         a11yHighContrast: state.a11yHighContrast,
         a11yAlwaysShowTimestamps: state.a11yAlwaysShowTimestamps,
+        userNotes: state.userNotes,
       }),
     },
   ),

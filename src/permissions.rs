@@ -17,6 +17,7 @@ pub const MENTION_EVERYONE: i64      = 1 << 12;
 pub const ATTACH_FILES: i64          = 1 << 13;
 pub const READ_MESSAGE_HISTORY: i64  = 1 << 14;
 pub const MANAGE_EMOJIS: i64         = 1 << 15;
+pub const MUTE_MEMBERS: i64         = 1 << 16;
 
 /// Default permissions for the @everyone role.
 pub const DEFAULT_PERMISSIONS: i64 =

@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -10,13 +10,15 @@ import { Track } from "livekit-client";
 import { useVoiceStore } from "../store/voice.js";
 import { useAuthStore } from "../store/auth.js";
 import Avatar from "./Avatar.js";
+import VoiceContextMenu from "./VoiceContextMenu.js";
 
 interface VoiceRoomProps {
   channelId: string;
   channelName: string;
+  serverId: string;
 }
 
-export default function VoiceRoom({ channelId, channelName }: VoiceRoomProps) {
+export default function VoiceRoom({ channelId, channelName, serverId }: VoiceRoomProps) {
   const {
     connectionState,
     currentChannelId,
@@ -71,6 +73,7 @@ export default function VoiceRoom({ channelId, channelName }: VoiceRoomProps) {
           <RoomContent
             channelName={channelName}
             channelId={channelId!}
+            serverId={serverId}
             isMuted={isMuted}
             isDeafened={isDeafened}
           />
@@ -129,20 +132,56 @@ export default function VoiceRoom({ channelId, channelName }: VoiceRoomProps) {
 interface RoomContentProps {
   channelName: string;
   channelId: string;
+  serverId: string;
   isMuted: boolean;
   isDeafened: boolean;
 }
 
-function RoomContent({ channelName, channelId, isMuted, isDeafened }: RoomContentProps) {
+function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: RoomContentProps) {
   const { localParticipant } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
-  const { toggleMute, toggleDeafen, leaveVoice } = useVoiceStore();
+  const { toggleMute, toggleDeafen, leaveVoice, participants, userVolumes } = useVoiceStore();
   const user = useAuthStore((s) => s.user);
+
+  const [contextMenu, setContextMenu] = useState<{
+    userId: string;
+    serverMuted: boolean;
+    serverDeafened: boolean;
+    position: { x: number; y: number };
+  } | null>(null);
 
   // Sync mute state to LiveKit
   useEffect(() => {
     localParticipant.setMicrophoneEnabled(!isMuted);
   }, [isMuted, localParticipant]);
+
+  // Apply per-user volume to remote participants
+  useEffect(() => {
+    for (const rp of remoteParticipants) {
+      const vol = userVolumes[rp.identity] ?? 100;
+      rp.setVolume(vol / 100);
+    }
+  }, [remoteParticipants, userVolumes]);
+
+  const channelParticipants = participants[channelId] ?? [];
+
+  function handleContextMenu(
+    e: React.MouseEvent,
+    userId: string,
+    serverMuted: boolean,
+    serverDeafened: boolean,
+  ) {
+    e.preventDefault();
+    setContextMenu({
+      userId,
+      serverMuted,
+      serverDeafened,
+      position: { x: e.clientX, y: e.clientY },
+    });
+  }
+
+  // Find server mute/deafen state for local user
+  const localParticipantData = channelParticipants.find((p) => p.user_id === user?.id);
 
   return (
     <>
@@ -159,22 +198,33 @@ function RoomContent({ channelName, channelId, isMuted, isDeafened }: RoomConten
         {/* Local participant */}
         <ParticipantTile
           identity={localParticipant.identity}
+          userId={user?.id ?? ""}
           name={user?.display_name || user?.username || "You"}
           avatarUrl={user?.avatar_url ?? null}
           isMuted={isMuted}
           isLocal={true}
+          serverMuted={localParticipantData?.server_muted ?? false}
+          serverDeafened={localParticipantData?.server_deafened ?? false}
+          onContextMenu={handleContextMenu}
         />
         {/* Remote participants */}
-        {remoteParticipants.map((p) => (
-          <ParticipantTile
-            key={p.identity}
-            identity={p.identity}
-            name={p.name || p.identity}
-            avatarUrl={null}
-            isMuted={!p.isMicrophoneEnabled}
-            isLocal={false}
-          />
-        ))}
+        {remoteParticipants.map((p) => {
+          const pData = channelParticipants.find((cp) => cp.user_id === p.identity);
+          return (
+            <ParticipantTile
+              key={p.identity}
+              identity={p.identity}
+              userId={p.identity}
+              name={p.name || p.identity}
+              avatarUrl={pData?.avatar_url ?? null}
+              isMuted={!p.isMicrophoneEnabled}
+              isLocal={false}
+              serverMuted={pData?.server_muted ?? false}
+              serverDeafened={pData?.server_deafened ?? false}
+              onContextMenu={handleContextMenu}
+            />
+          );
+        })}
       </div>
 
       <div className="voice-controls">
@@ -219,6 +269,18 @@ function RoomContent({ channelName, channelId, isMuted, isDeafened }: RoomConten
           </svg>
         </button>
       </div>
+
+      {contextMenu && (
+        <VoiceContextMenu
+          userId={contextMenu.userId}
+          channelId={channelId}
+          serverId={serverId}
+          serverMuted={contextMenu.serverMuted}
+          serverDeafened={contextMenu.serverDeafened}
+          position={contextMenu.position}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </>
   );
 }
@@ -227,15 +289,37 @@ function RoomContent({ channelName, channelId, isMuted, isDeafened }: RoomConten
 
 interface ParticipantTileProps {
   identity: string;
+  userId: string;
   name: string;
   avatarUrl: string | null;
   isMuted: boolean;
   isLocal: boolean;
+  serverMuted: boolean;
+  serverDeafened: boolean;
+  onContextMenu: (
+    e: React.MouseEvent,
+    userId: string,
+    serverMuted: boolean,
+    serverDeafened: boolean,
+  ) => void;
 }
 
-function ParticipantTile({ identity, name, avatarUrl, isMuted, isLocal }: ParticipantTileProps) {
+function ParticipantTile({
+  identity,
+  userId,
+  name,
+  avatarUrl,
+  isMuted,
+  isLocal,
+  serverMuted,
+  serverDeafened,
+  onContextMenu,
+}: ParticipantTileProps) {
   return (
-    <div className={`voice-participant ${isMuted ? "muted" : ""}`}>
+    <div
+      className={`voice-participant ${isMuted ? "muted" : ""} ${serverMuted ? "server-muted" : ""} ${serverDeafened ? "server-deafened" : ""}`}
+      onContextMenu={(e) => onContextMenu(e, userId, serverMuted, serverDeafened)}
+    >
       <div className="voice-participant-avatar">
         <Avatar avatarUrl={avatarUrl} name={name} size={64} />
       </div>
@@ -244,11 +328,23 @@ function ParticipantTile({ identity, name, avatarUrl, isMuted, isLocal }: Partic
           {name}
           {isLocal && <span className="voice-you-badge">(you)</span>}
         </span>
-        {isMuted && (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)" className="voice-mute-icon">
-            <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.55-.9l4.17 4.18L21 19.73 4.27 3z" />
-          </svg>
-        )}
+        <div className="voice-participant-icons">
+          {isMuted && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)" className="voice-mute-icon" aria-label="Muted">
+              <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.55-.9l4.17 4.18L21 19.73 4.27 3z" />
+            </svg>
+          )}
+          {serverMuted && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--yellow)" className="voice-mute-icon" aria-label="Server Muted">
+              <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.55-.9l4.17 4.18L21 19.73 4.27 3z" />
+            </svg>
+          )}
+          {serverDeafened && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--yellow)" className="voice-mute-icon" aria-label="Server Deafened">
+              <path d="M3.63 3.63a.996.996 0 000 1.41L7.29 8.7 7 9H4c-.55 0-1 .45-1 1v4c0 .55.45 1 1 1h3l3.29 3.29c.63.63 1.71.18 1.71-.71v-4.17l4.18 4.18c-.49.37-1.02.68-1.6.91-.36.15-.58.53-.58.92 0 .72.73 1.18 1.39.91.8-.33 1.55-.77 2.22-1.31l1.34 1.34a.996.996 0 101.41-1.41L5.05 3.63c-.39-.39-1.02-.39-1.42 0zM19 12c0 .82-.15 1.61-.41 2.34l1.53 1.53c.56-1.17.88-2.48.88-3.87 0-3.83-2.4-7.11-5.78-8.4-.59-.23-1.22.23-1.22.86v.19c0 .38.25.71.61.85C17.18 6.54 19 9.06 19 12zm-8.71-6.29l-.17.17L12 7.76V6.41c0-.89-1.08-1.33-1.71-.7zM16.5 12A4.5 4.5 0 0014 7.97v1.79l2.48 2.48c.01-.08.02-.16.02-.24z" />
+            </svg>
+          )}
+        </div>
       </div>
     </div>
   );

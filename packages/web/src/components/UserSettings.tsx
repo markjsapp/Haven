@@ -1172,6 +1172,26 @@ function AppearanceTab() {
       label: "Light Mode",
       colors: ["#E3E5E8", "#F2F3F5", "#FFFFFF", "#4752C4", "#2E3338"],
     },
+    {
+      value: "sage",
+      label: "Sage",
+      colors: ["#171717", "#212121", "#2D2D2D", "#10A37F", "#ECECEC"],
+    },
+    {
+      value: "cosmos",
+      label: "Cosmos",
+      colors: ["#131620", "#1B1F2E", "#232736", "#8B6CEF", "#E3E5EA"],
+    },
+    {
+      value: "forest",
+      label: "Forest",
+      colors: ["#1A2318", "#222E1F", "#2A3627", "#5FAD56", "#D4DDD2"],
+    },
+    {
+      value: "bluebird",
+      label: "Bluebird",
+      colors: ["#E8ECF0", "#F5F8FA", "#FFFFFF", "#0C7ABF", "#14171A"],
+    },
   ];
 
   return (

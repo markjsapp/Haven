@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
+import { useUiStore } from "../store/ui.js";
 import { Permission, type UserProfileResponse } from "@haven/core";
 import { usePermissions } from "../hooks/usePermissions.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
@@ -31,6 +32,12 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
   const canManageRoles = can(Permission.MANAGE_ROLES);
   const canManageServer = can(Permission.MANAGE_SERVER);
 
+  // Note state
+  const existingNote = useUiStore((s) => s.userNotes[userId] ?? "");
+  const setUserNote = useUiStore((s) => s.setUserNote);
+  const [noteText, setNoteText] = useState(existingNote);
+  const [noteOpen, setNoteOpen] = useState(false);
+
   useEffect(() => {
     api.getUserProfile(userId, serverId).then(setProfile).catch(() => {});
   }, [userId, serverId]);
@@ -38,11 +45,19 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
+        if (noteOpen && noteText !== existingNote) {
+          setUserNote(userId, noteText);
+        }
         onClose();
       }
     }
     function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (noteOpen && noteText !== existingNote) {
+          setUserNote(userId, noteText);
+        }
+        onClose();
+      }
     }
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleEsc);
@@ -50,13 +65,13 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleEsc);
     };
-  }, [onClose]);
+  }, [onClose, noteOpen, noteText, existingNote, userId, setUserNote]);
 
   // Adjust position to stay within viewport
   const style: React.CSSProperties = {
     position: "fixed",
-    top: Math.min(position.y, window.innerHeight - 300),
-    left: Math.min(position.x, window.innerWidth - 200),
+    top: Math.min(position.y, window.innerHeight - 400),
+    left: Math.min(position.x, window.innerWidth - 220),
     zIndex: 400,
   };
 
@@ -137,6 +152,49 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
         <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => { onChangeNickname(userId); onClose(); }}>
           {isSelf ? "Change Nickname" : "Change Nickname"}
         </button>
+      )}
+
+      {/* Add Note — not on self */}
+      {!isSelf && (
+        <>
+          <div className="user-context-divider" role="separator" />
+          <button
+            className="user-context-item"
+            role="menuitem"
+            tabIndex={-1}
+            onClick={() => {
+              if (noteOpen) {
+                setUserNote(userId, noteText);
+                setNoteOpen(false);
+              } else {
+                setNoteOpen(true);
+              }
+            }}
+          >
+            {existingNote ? "Edit Note" : "Add Note"}
+            <span className="user-context-hint">Only visible to you</span>
+          </button>
+          {noteOpen && (
+            <div className="context-note-input" onMouseDown={(e) => e.stopPropagation()}>
+              <textarea
+                className="context-note-textarea"
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                placeholder="Click to add a note..."
+                rows={3}
+                autoFocus
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    setUserNote(userId, noteText);
+                    setNoteOpen(false);
+                  }
+                }}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {!isSelf && profile && (

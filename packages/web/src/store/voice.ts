@@ -28,6 +28,9 @@ interface VoiceState extends VoiceSettings {
   // Remote participants (by channel_id)
   participants: Record<string, VoiceParticipant[]>;
 
+  /** Per-user volume overrides (userId -> 0–200, default 100) */
+  userVolumes: Record<string, number>;
+
   // Actions
   joinVoice(channelId: string): Promise<void>;
   leaveVoice(): Promise<void>;
@@ -42,6 +45,7 @@ interface VoiceState extends VoiceSettings {
   setOutputVolume(v: number): void;
   setEchoCancellation(v: boolean): void;
   setNoiseSuppression(v: boolean): void;
+  setUserVolume(userId: string, volume: number): void;
 
   // WS event handler
   handleVoiceStateUpdate(
@@ -51,6 +55,14 @@ interface VoiceState extends VoiceSettings {
     displayName: string | null,
     avatarUrl: string | null,
     joined: boolean,
+  ): void;
+
+  // Handle server mute/deafen update from WS
+  handleVoiceMuteUpdate(
+    channelId: string,
+    userId: string,
+    serverMuted: boolean,
+    serverDeafened: boolean,
   ): void;
 
   // Load initial participants for a channel
@@ -72,6 +84,9 @@ export const useVoiceStore = create<VoiceState>()(
 
       // Remote participants
       participants: {},
+
+      // Per-user volume (persisted)
+      userVolumes: {},
 
       // Audio settings (defaults)
       inputDeviceId: "",
@@ -152,6 +167,11 @@ export const useVoiceStore = create<VoiceState>()(
       setNoiseSuppression(v) {
         set({ noiseSuppression: v });
       },
+      setUserVolume(userId, volume) {
+        set((s) => ({
+          userVolumes: { ...s.userVolumes, [userId]: volume },
+        }));
+      },
 
       handleVoiceStateUpdate(channelId, userId, username, displayName, avatarUrl, joined) {
         set((state) => {
@@ -164,7 +184,14 @@ export const useVoiceStore = create<VoiceState>()(
             } else {
               updated = [
                 ...current,
-                { user_id: userId, username, display_name: displayName, avatar_url: avatarUrl },
+                {
+                  user_id: userId,
+                  username,
+                  display_name: displayName,
+                  avatar_url: avatarUrl,
+                  server_muted: false,
+                  server_deafened: false,
+                },
               ];
             }
           } else {
@@ -173,6 +200,23 @@ export const useVoiceStore = create<VoiceState>()(
           }
           return {
             participants: { ...state.participants, [channelId]: updated },
+          };
+        });
+      },
+
+      handleVoiceMuteUpdate(channelId, userId, serverMuted, serverDeafened) {
+        set((state) => {
+          const current = state.participants[channelId];
+          if (!current) return state;
+          return {
+            participants: {
+              ...state.participants,
+              [channelId]: current.map((p) =>
+                p.user_id === userId
+                  ? { ...p, server_muted: serverMuted, server_deafened: serverDeafened }
+                  : p,
+              ),
+            },
           };
         });
       },
@@ -199,6 +243,7 @@ export const useVoiceStore = create<VoiceState>()(
         outputVolume: state.outputVolume,
         echoCancellation: state.echoCancellation,
         noiseSuppression: state.noiseSuppression,
+        userVolumes: state.userVolumes,
       }),
     },
   ),

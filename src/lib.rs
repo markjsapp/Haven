@@ -364,7 +364,9 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/:channel_id/participants",
             get(api::voice::get_participants),
-        );
+        )
+        .route("/:channel_id/members/:user_id/mute", put(api::voice::server_mute))
+        .route("/:channel_id/members/:user_id/deafen", put(api::voice::server_deafen));
 
     // Background task: prune broadcast channels with no subscribers
     {

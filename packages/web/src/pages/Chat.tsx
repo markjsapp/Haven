@@ -242,7 +242,7 @@ export default function Chat() {
           {showFriends && selectedServerId === null ? (
             <FriendsList />
           ) : currentChannelId && isVoiceChannel ? (
-            <VoiceRoom channelId={currentChannelId} channelName={channelDisplay?.name ?? "Voice"} />
+            <VoiceRoom channelId={currentChannelId} channelName={channelDisplay?.name ?? "Voice"} serverId={selectedServerId!} />
           ) : currentChannelId ? (
             <>
               <MessageList />

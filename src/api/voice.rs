@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::db::queries;
 use crate::errors::{AppError, AppResult};
 use crate::middleware::AuthUser;
-use crate::models::{VoiceParticipantResponse, VoiceTokenResponse, WsServerMessage};
+use crate::models::{VoiceDeafenRequest, VoiceMuteRequest, VoiceParticipantResponse, VoiceTokenResponse, WsServerMessage};
 use crate::AppState;
 
 /// POST /api/v1/voice/:channel_id/join
@@ -128,6 +128,17 @@ pub async fn leave_voice(
         .unwrap_or(0);
 
     if removed > 0 {
+        // Clean up server mute/deafen state
+        let _: Result<(), _> = redis::cmd("SREM")
+            .arg(format!("haven:voice:{}:smuted", channel_id))
+            .arg(&user_id_str)
+            .query_async(&mut redis)
+            .await;
+        let _: Result<(), _> = redis::cmd("SREM")
+            .arg(format!("haven:voice:{}:sdeafened", channel_id))
+            .arg(&user_id_str)
+            .query_async(&mut redis)
+            .await;
         broadcast_voice_state(&state, channel_id, user_id, &user_id_str, false).await;
     }
 
@@ -150,6 +161,18 @@ pub async fn get_participants(
         .await
         .unwrap_or_default();
 
+    // Fetch server mute/deafen sets
+    let muted_ids: Vec<String> = redis::cmd("SMEMBERS")
+        .arg(format!("haven:voice:{}:smuted", channel_id))
+        .query_async(&mut redis)
+        .await
+        .unwrap_or_default();
+    let deafened_ids: Vec<String> = redis::cmd("SMEMBERS")
+        .arg(format!("haven:voice:{}:sdeafened", channel_id))
+        .query_async(&mut redis)
+        .await
+        .unwrap_or_default();
+
     let mut participants = Vec::new();
     for id_str in &member_ids {
         if let Ok(uid) = Uuid::parse_str(id_str) {
@@ -159,12 +182,122 @@ pub async fn get_participants(
                     username: user.username,
                     display_name: user.display_name,
                     avatar_url: user.avatar_url,
+                    server_muted: muted_ids.contains(id_str),
+                    server_deafened: deafened_ids.contains(id_str),
                 });
             }
         }
     }
 
     Ok(Json(participants))
+}
+
+/// PUT /api/v1/voice/:channel_id/members/:user_id/mute
+///
+/// Server-mute a user in a voice channel. Requires MUTE_MEMBERS permission.
+pub async fn server_mute(
+    State(state): State<AppState>,
+    AuthUser(caller_id): AuthUser,
+    Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<VoiceMuteRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    // Get channel to find server_id
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+    let server_id = channel.server_id
+        .ok_or_else(|| AppError::BadRequest("Not a server channel".into()))?;
+
+    // Check MUTE_MEMBERS permission
+    let (is_owner, perms) = queries::get_member_permissions(state.db.read(), server_id, caller_id).await?;
+    if !is_owner && !crate::permissions::has_permission(perms, crate::permissions::MUTE_MEMBERS) {
+        return Err(AppError::Forbidden("Missing MUTE_MEMBERS permission".into()));
+    }
+
+    // Verify target is in the voice channel
+    let mut redis = state.redis.clone();
+    let target_str = target_user_id.to_string();
+    let in_channel: bool = redis::cmd("SISMEMBER")
+        .arg(format!("haven:voice:{}", channel_id))
+        .arg(&target_str)
+        .query_async(&mut redis)
+        .await
+        .unwrap_or(false);
+    if !in_channel {
+        return Err(AppError::BadRequest("User is not in this voice channel".into()));
+    }
+
+    let key = format!("haven:voice:{}:smuted", channel_id);
+    if req.muted {
+        let _: () = redis::cmd("SADD").arg(&key).arg(&target_str).query_async(&mut redis).await?;
+    } else {
+        let _: () = redis::cmd("SREM").arg(&key).arg(&target_str).query_async(&mut redis).await?;
+    }
+
+    // Get current deafen state
+    let is_deafened: bool = redis::cmd("SISMEMBER")
+        .arg(format!("haven:voice:{}:sdeafened", channel_id))
+        .arg(&target_str)
+        .query_async(&mut redis)
+        .await
+        .unwrap_or(false);
+
+    // Broadcast to channel
+    broadcast_voice_mute_state(&state, channel_id, target_user_id, req.muted, is_deafened).await;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// PUT /api/v1/voice/:channel_id/members/:user_id/deafen
+///
+/// Server-deafen a user in a voice channel. Requires MUTE_MEMBERS permission.
+pub async fn server_deafen(
+    State(state): State<AppState>,
+    AuthUser(caller_id): AuthUser,
+    Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<VoiceDeafenRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+    let server_id = channel.server_id
+        .ok_or_else(|| AppError::BadRequest("Not a server channel".into()))?;
+
+    let (is_owner, perms) = queries::get_member_permissions(state.db.read(), server_id, caller_id).await?;
+    if !is_owner && !crate::permissions::has_permission(perms, crate::permissions::MUTE_MEMBERS) {
+        return Err(AppError::Forbidden("Missing MUTE_MEMBERS permission".into()));
+    }
+
+    let mut redis = state.redis.clone();
+    let target_str = target_user_id.to_string();
+    let in_channel: bool = redis::cmd("SISMEMBER")
+        .arg(format!("haven:voice:{}", channel_id))
+        .arg(&target_str)
+        .query_async(&mut redis)
+        .await
+        .unwrap_or(false);
+    if !in_channel {
+        return Err(AppError::BadRequest("User is not in this voice channel".into()));
+    }
+
+    let key = format!("haven:voice:{}:sdeafened", channel_id);
+    if req.deafened {
+        let _: () = redis::cmd("SADD").arg(&key).arg(&target_str).query_async(&mut redis).await?;
+    } else {
+        let _: () = redis::cmd("SREM").arg(&key).arg(&target_str).query_async(&mut redis).await?;
+    }
+
+    // Get current mute state
+    let is_muted: bool = redis::cmd("SISMEMBER")
+        .arg(format!("haven:voice:{}:smuted", channel_id))
+        .arg(&target_str)
+        .query_async(&mut redis)
+        .await
+        .unwrap_or(false);
+
+    broadcast_voice_mute_state(&state, channel_id, target_user_id, is_muted, req.deafened).await;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// Remove a user from all voice channels and broadcast their departure.
@@ -223,6 +356,41 @@ async fn broadcast_voice_state(
     }
 
     // Also broadcast to all channels in the same server so sidebar can update
+    if let Ok(Some(channel)) = queries::find_channel_by_id(state.db.read(), channel_id).await {
+        if let Some(server_id) = channel.server_id {
+            if let Ok(channels) = queries::get_server_channels(state.db.read(), server_id).await {
+                for ch in channels {
+                    if ch.id != channel_id {
+                        if let Some(broadcaster) = state.channel_broadcasts.get(&ch.id) {
+                            let _ = broadcaster.send(msg.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Broadcast a VoiceMuteUpdate event to the voice channel.
+async fn broadcast_voice_mute_state(
+    state: &AppState,
+    channel_id: Uuid,
+    user_id: Uuid,
+    server_muted: bool,
+    server_deafened: bool,
+) {
+    let msg = WsServerMessage::VoiceMuteUpdate {
+        channel_id,
+        user_id,
+        server_muted,
+        server_deafened,
+    };
+
+    if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
+        let _ = broadcaster.send(msg.clone());
+    }
+
+    // Broadcast to all channels in the same server
     if let Ok(Some(channel)) = queries::find_channel_by_id(state.db.read(), channel_id).await {
         if let Some(server_id) = channel.server_id {
             if let Ok(channels) = queries::get_server_channels(state.db.read(), server_id).await {

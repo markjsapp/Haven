@@ -555,12 +555,24 @@ pub struct VoiceTokenResponse {
     pub channel_id: Uuid,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize)]
 pub struct VoiceParticipantResponse {
     pub user_id: Uuid,
     pub username: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
+    pub server_muted: bool,
+    pub server_deafened: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VoiceMuteRequest {
+    pub muted: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VoiceDeafenRequest {
+    pub deafened: bool,
 }
 
 // ─── WebSocket Messages ────────────────────────────────
@@ -670,6 +682,13 @@ pub enum WsServerMessage {
         user_id: Uuid,
         username: String,
         joined: bool,
+    },
+    /// Server mute/deafen state change for a voice participant
+    VoiceMuteUpdate {
+        channel_id: Uuid,
+        user_id: Uuid,
+        server_muted: bool,
+        server_deafened: bool,
     },
     /// A custom emoji was created in a server
     EmojiCreated {

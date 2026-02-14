@@ -753,6 +753,14 @@ export class HavenApi {
     return this.get<VoiceParticipant[]>(`/api/v1/voice/${channelId}/participants`);
   }
 
+  async serverMuteUser(channelId: string, userId: string, muted: boolean): Promise<void> {
+    await this.put(`/api/v1/voice/${channelId}/members/${userId}/mute`, { muted });
+  }
+
+  async serverDeafenUser(channelId: string, userId: string, deafened: boolean): Promise<void> {
+    await this.put(`/api/v1/voice/${channelId}/members/${userId}/deafen`, { deafened });
+  }
+
   // ─── HTTP Helpers ────────────────────────────────
 
   private async get<T>(path: string): Promise<T> {

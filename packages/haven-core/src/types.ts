@@ -371,7 +371,8 @@ export type WsServerMessage =
   | { type: "MessageUnpinned"; payload: { channel_id: string; message_id: string } }
   | { type: "VoiceStateUpdate"; payload: { channel_id: string; user_id: string; username: string; joined: boolean } }
   | { type: "EmojiCreated"; payload: { server_id: string; emoji: CustomEmojiResponse } }
-  | { type: "EmojiDeleted"; payload: { server_id: string; emoji_id: string } };
+  | { type: "EmojiDeleted"; payload: { server_id: string; emoji_id: string } }
+  | { type: "VoiceMuteUpdate"; payload: { channel_id: string; user_id: string; server_muted: boolean; server_deafened: boolean } };
 
 // ─── Presence ─────────────────────────────────────────
 
@@ -428,6 +429,7 @@ export const Permission = {
   ATTACH_FILES:         BigInt(1) << BigInt(13),
   READ_MESSAGE_HISTORY: BigInt(1) << BigInt(14),
   MANAGE_EMOJIS:        BigInt(1) << BigInt(15),
+  MUTE_MEMBERS:         BigInt(1) << BigInt(16),
 } as const;
 
 export interface RoleResponse {
@@ -566,6 +568,8 @@ export interface VoiceParticipant {
   username: string;
   display_name: string | null;
   avatar_url: string | null;
+  server_muted: boolean;
+  server_deafened: boolean;
 }
 
 // ─── API Error ─────────────────────────────────────────

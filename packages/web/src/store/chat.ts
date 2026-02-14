@@ -276,6 +276,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     });
 
+    ws.on("VoiceMuteUpdate", (msg: Extract<WsServerMessage, { type: "VoiceMuteUpdate" }>) => {
+      import("./voice.js").then(({ useVoiceStore }) => {
+        const { channel_id, user_id, server_muted, server_deafened } = msg.payload;
+        useVoiceStore.getState().handleVoiceMuteUpdate(
+          channel_id, user_id, server_muted, server_deafened,
+        );
+      });
+    });
+
     // Custom emoji events
     ws.on("EmojiCreated", (msg: Extract<WsServerMessage, { type: "EmojiCreated" }>) => {
       const { server_id, emoji } = msg.payload;
