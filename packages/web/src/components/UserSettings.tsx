@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
-import { useUiStore } from "../store/ui.js";
+import { useUiStore, type Theme } from "../store/ui.js";
 import { useVoiceStore } from "../store/voice.js";
 import Avatar from "./Avatar.js";
 import EmojiPicker from "./EmojiPicker.js";
@@ -15,7 +15,7 @@ import {
   downloadAndRestoreBackup,
 } from "../lib/backup.js";
 
-type Tab = "account" | "profile" | "privacy" | "voice" | "accessibility" | "security";
+type Tab = "account" | "profile" | "privacy" | "voice" | "appearance" | "accessibility" | "security";
 
 export default function UserSettings() {
   const user = useAuthStore((s) => s.user);
@@ -66,6 +66,12 @@ export default function UserSettings() {
             Voice & Audio
           </button>
           <button
+            className={`user-settings-nav-item ${tab === "appearance" ? "active" : ""}`}
+            onClick={() => setTab("appearance")}
+          >
+            Appearance
+          </button>
+          <button
             className={`user-settings-nav-item ${tab === "security" ? "active" : ""}`}
             onClick={() => setTab("security")}
           >
@@ -90,7 +96,7 @@ export default function UserSettings() {
         </nav>
         <div className="user-settings-content">
           <div className="user-settings-content-header">
-            <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : tab === "privacy" ? "Privacy" : tab === "voice" ? "Voice & Audio" : tab === "security" ? "Security & Backup" : "Accessibility"}</h2>
+            <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : tab === "privacy" ? "Privacy" : tab === "voice" ? "Voice & Audio" : tab === "appearance" ? "Appearance" : tab === "security" ? "Security & Backup" : "Accessibility"}</h2>
             <button className="settings-esc-close" onClick={() => setShowUserSettings(false)} aria-label="Close settings">
               <div className="settings-esc-circle">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -105,6 +111,7 @@ export default function UserSettings() {
             {tab === "profile" && <ProfileTab />}
             {tab === "privacy" && <PrivacyTab />}
             {tab === "voice" && <VoiceTab />}
+            {tab === "appearance" && <AppearanceTab />}
             {tab === "security" && <SecurityTab />}
             {tab === "accessibility" && <AccessibilityTab />}
           </div>
@@ -1139,6 +1146,55 @@ function SecurityTab() {
       )}
 
       {success && <div className="settings-success" style={{ marginTop: 12 }}>{success}</div>}
+    </div>
+  );
+}
+
+// ─── Appearance Tab ─────────────────────────────────
+
+function AppearanceTab() {
+  const theme = useUiStore((s) => s.theme);
+  const setTheme = useUiStore((s) => s.setTheme);
+
+  const themes: { value: Theme; label: string; colors: string[] }[] = [
+    {
+      value: "night",
+      label: "Night Mode",
+      colors: ["#1e1f22", "#2b2d31", "#313338", "#5865f2", "#dbdee1"],
+    },
+    {
+      value: "default",
+      label: "Default",
+      colors: ["#E2D9CC", "#EAE3D7", "#F5F0E8", "#C2410C", "#3D3029"],
+    },
+    {
+      value: "light",
+      label: "Light Mode",
+      colors: ["#E3E5E8", "#F2F3F5", "#FFFFFF", "#4752C4", "#2E3338"],
+    },
+  ];
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">Theme</div>
+      <p className="settings-description">Choose how Haven looks for you.</p>
+      <div className="theme-picker">
+        {themes.map((t) => (
+          <button
+            key={t.value}
+            className={`theme-card ${theme === t.value ? "selected" : ""}`}
+            onClick={() => setTheme(t.value)}
+            aria-pressed={theme === t.value}
+          >
+            <div className="theme-preview">
+              {t.colors.map((c, i) => (
+                <div key={i} className="theme-swatch" style={{ background: c }} />
+              ))}
+            </div>
+            <span className="theme-label">{t.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

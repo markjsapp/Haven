@@ -14,12 +14,15 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 /** Apply a11y data attributes to <html> element so CSS can respond */
 function useA11yAttributes() {
+  const theme = useUiStore((s) => s.theme);
   const reducedMotion = useUiStore((s) => s.a11yReducedMotion);
   const font = useUiStore((s) => s.a11yFont);
   const highContrast = useUiStore((s) => s.a11yHighContrast);
 
   useEffect(() => {
     const el = document.documentElement;
+    el.setAttribute("data-theme", theme);
+
     if (reducedMotion) el.setAttribute("data-reduced-motion", "");
     else el.removeAttribute("data-reduced-motion");
 
@@ -28,7 +31,7 @@ function useA11yAttributes() {
 
     if (highContrast) el.setAttribute("data-high-contrast", "");
     else el.removeAttribute("data-high-contrast");
-  }, [reducedMotion, font, highContrast]);
+  }, [theme, reducedMotion, font, highContrast]);
 }
 
 export default function App() {

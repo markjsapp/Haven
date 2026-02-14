@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 
 export type NotificationOverride = "default" | "all" | "mentions" | "nothing";
 export type AccessibilityFont = "default" | "opendyslexic" | "atkinson";
+export type Theme = "night" | "default" | "light";
 
 interface MuteEntry {
   /** Unix timestamp (ms) when mute expires, or null for indefinite */
@@ -28,6 +29,9 @@ interface UiState {
   /** channelId -> notification override */
   channelNotifications: Record<string, NotificationOverride>;
 
+  /** Appearance */
+  theme: Theme;
+
   /** Accessibility preferences */
   a11yReducedMotion: boolean;
   a11yFont: AccessibilityFont;
@@ -47,6 +51,7 @@ interface UiState {
   isChannelMuted(channelId: string): boolean;
   setChannelNotification(channelId: string, setting: NotificationOverride): void;
 
+  setTheme(theme: Theme): void;
   setA11yReducedMotion(enabled: boolean): void;
   setA11yFont(font: AccessibilityFont): void;
   setA11yHighContrast(enabled: boolean): void;
@@ -65,6 +70,8 @@ export const useUiStore = create<UiState>()(
       mentionPopup: null,
       mutedChannels: {},
       channelNotifications: {},
+
+      theme: "night",
 
       a11yReducedMotion: false,
       a11yFont: "default",
@@ -144,6 +151,7 @@ export const useUiStore = create<UiState>()(
         });
       },
 
+      setTheme(theme) { set({ theme }); },
       setA11yReducedMotion(enabled) { set({ a11yReducedMotion: enabled }); },
       setA11yFont(font) { set({ a11yFont: font }); },
       setA11yHighContrast(enabled) { set({ a11yHighContrast: enabled }); },
@@ -156,6 +164,7 @@ export const useUiStore = create<UiState>()(
         memberSidebarOpen: state.memberSidebarOpen,
         mutedChannels: state.mutedChannels,
         channelNotifications: state.channelNotifications,
+        theme: state.theme,
         a11yReducedMotion: state.a11yReducedMotion,
         a11yFont: state.a11yFont,
         a11yHighContrast: state.a11yHighContrast,

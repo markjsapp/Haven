@@ -76,6 +76,34 @@
   --border-subtle: #5c5e66;
   --divider: #5c5e66;
 }
+[data-theme="default"][data-high-contrast] {
+  --text-muted: #5C5047;
+  --text-secondary: #3D3029;
+  --interactive-normal: #3D3029;
+  --interactive-muted: #6F6358;
+  --border-subtle: #B5A999;
+  --divider: #B5A999;
+}
+[data-theme="light"][data-high-contrast] {
+  --text-muted: #4E5058;
+  --text-secondary: #2E3338;
+  --interactive-normal: #2E3338;
+  --interactive-muted: #6D7078;
+  --border-subtle: #B5B9C0;
+  --divider: #B5B9C0;
+}
+
+/* Floating element shadows for light themes */
+[data-theme="default"] .modal-dialog,
+[data-theme="default"] .user-context-menu,
+[data-theme="default"] .channel-context-menu,
+[data-theme="default"] .profile-popup,
+[data-theme="light"] .modal-dialog,
+[data-theme="light"] .user-context-menu,
+[data-theme="light"] .channel-context-menu,
+[data-theme="light"] .profile-popup {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+}
 
 /* Accessibility font: OpenDyslexic */
 @font-face {
@@ -203,6 +231,80 @@
 
   /* Typography */
   --font: "Inter", "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* ─── Default Theme (Claude warm tones) ──────────── */
+[data-theme="default"] {
+  --bg-tertiary: #E2D9CC;
+  --bg-secondary: #EAE3D7;
+  --bg-primary: #F5F0E8;
+  --bg-secondary-alt: #DDD4C6;
+  --bg-hover: #DED7CB;
+  --bg-active: #D1C8BA;
+  --bg-floating: #D5CABB;
+  --bg-input: #EBE5D8;
+
+  --text-normal: #3D3029;
+  --text-muted: #6F6358;
+  --text-header: #1A1310;
+  --text-secondary: #5C5047;
+  --text-link: #B7470F;
+
+  --interactive-normal: #5C5047;
+  --interactive-hover: #3D3029;
+  --interactive-active: #1A1310;
+  --interactive-muted: #8A7E73;
+
+  --blurple: #C2410C;
+  --blurple-hover: #A3370A;
+  --green: #15803D;
+  --yellow: #CA8A04;
+  --red: #DC2626;
+
+  --status-danger: #DC2626;
+  --bg-modifier-hover: #DDD4C6;
+
+  --border-subtle: #D1C8BA;
+  --divider: #D1C8BA;
+
+  --scrollbar-thumb: #C4B9AB;
+}
+
+/* ─── Light Mode Theme ───────────────────────────── */
+[data-theme="light"] {
+  --bg-tertiary: #E3E5E8;
+  --bg-secondary: #F2F3F5;
+  --bg-primary: #FFFFFF;
+  --bg-secondary-alt: #EBEDEF;
+  --bg-hover: #EBEDEF;
+  --bg-active: #D5D8DC;
+  --bg-floating: #FFFFFF;
+  --bg-input: #E3E5E8;
+
+  --text-normal: #2E3338;
+  --text-muted: #6D7078;
+  --text-header: #060607;
+  --text-secondary: #4E5058;
+  --text-link: #0068B8;
+
+  --interactive-normal: #4E5058;
+  --interactive-hover: #2E3338;
+  --interactive-active: #060607;
+  --interactive-muted: #8A8D94;
+
+  --blurple: #4752C4;
+  --blurple-hover: #3C45A5;
+  --green: #1A7D41;
+  --yellow: #D4920A;
+  --red: #D83C3E;
+
+  --status-danger: #D83C3E;
+  --bg-modifier-hover: #EBEDEF;
+
+  --border-subtle: #D5D8DC;
+  --divider: #E1E3E6;
+
+  --scrollbar-thumb: #C8CBD0;
 }
 
 html,
@@ -3941,6 +4043,46 @@ em-emoji-picker {
 .settings-esc-label {
   font-size: 11px;
   font-weight: 600;
+}
+
+/* ─── Theme Picker ───────────────────────────────── */
+.theme-picker {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 2px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.theme-card:hover {
+  border-color: var(--interactive-hover);
+}
+.theme-card.selected {
+  border-color: var(--blurple);
+}
+.theme-preview {
+  display: flex;
+  gap: 4px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.theme-swatch {
+  width: 24px;
+  height: 40px;
+}
+.theme-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
 }
 
 .user-settings-content-body {
