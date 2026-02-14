@@ -13,9 +13,10 @@ interface Props {
   onClose: () => void;
   onOpenProfile: () => void;
   onManageRoles?: () => void;
+  onChangeNickname?: (userId: string) => void;
 }
 
-export default function UserContextMenu({ userId, serverId, position, onClose, onOpenProfile, onManageRoles }: Props) {
+export default function UserContextMenu({ userId, serverId, position, onClose, onOpenProfile, onManageRoles, onChangeNickname }: Props) {
   const api = useAuthStore((s) => s.api);
   const currentUser = useAuthStore((s) => s.user);
   const startDm = useChatStore((s) => s.startDm);
@@ -28,6 +29,7 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
   const canKick = can(Permission.KICK_MEMBERS);
   const canBan = can(Permission.BAN_MEMBERS);
   const canManageRoles = can(Permission.MANAGE_ROLES);
+  const canManageServer = can(Permission.MANAGE_SERVER);
 
   useEffect(() => {
     api.getUserProfile(userId, serverId).then(setProfile).catch(() => {});
@@ -129,6 +131,12 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
             Manage Roles
           </button>
         </>
+      )}
+
+      {serverId && onChangeNickname && (isSelf || canManageServer) && (
+        <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => { onChangeNickname(userId); onClose(); }}>
+          {isSelf ? "Change Nickname" : "Change Nickname"}
+        </button>
       )}
 
       {!isSelf && profile && (

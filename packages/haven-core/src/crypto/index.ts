@@ -51,3 +51,4 @@ export {
   type BackupPayload,
   type SerializedSessionState,
 } from "./backup.js";
+export { generatePassphrase } from "./passphrase.js";

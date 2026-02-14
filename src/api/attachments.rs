@@ -20,9 +20,14 @@ use crate::AppState;
 /// When CDN is disabled, applies server-side AES-256-GCM encryption at rest.
 pub async fn upload(
     State(state): State<AppState>,
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     body: Bytes,
 ) -> AppResult<Json<UploadResponse>> {
+    // Per-user rate limit
+    if !state.api_rate_limiter.check(user_id) {
+        return Err(AppError::BadRequest("Rate limit exceeded — try again later".into()));
+    }
+
     // Validate file size
     if body.len() as u64 > state.config.max_upload_size_bytes {
         return Err(AppError::BadRequest(format!(

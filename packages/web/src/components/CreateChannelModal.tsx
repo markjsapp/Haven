@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
+import { unicodeBtoa } from "../lib/base64.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import EmojiPicker from "./EmojiPicker.js";
 
@@ -49,7 +50,7 @@ export default function CreateChannelModal({ serverId, categoryId, categoryName,
     try {
       const meta = JSON.stringify({ name });
       await api.createChannel(serverId, {
-        encrypted_meta: btoa(meta),
+        encrypted_meta: unicodeBtoa(meta),
         channel_type: channelType,
         category_id: categoryId ?? undefined,
       });

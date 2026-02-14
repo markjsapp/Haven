@@ -27,10 +27,10 @@ use tower_http::{
     compression::CompressionLayer,
     cors::{AllowOrigin, CorsLayer},
     set_header::SetResponseHeaderLayer,
-    trace::TraceLayer,
+    trace::{DefaultOnResponse, TraceLayer},
 };
 
-use middleware::{rate_limit_middleware, RateLimiter};
+use middleware::{rate_limit_middleware, RateLimiter, UserRateLimiter};
 
 use config::AppConfig;
 use ws::{ChannelBroadcastMap, ConnectionMap};
@@ -47,6 +47,10 @@ pub struct AppState {
     pub connections: ConnectionMap,
     pub channel_broadcasts: ChannelBroadcastMap,
     pub pubsub_subscriptions: pubsub::PubSubSubscriptions,
+    /// Per-user rate limiter for WebSocket message sending (30 msg / 10s)
+    pub ws_rate_limiter: UserRateLimiter,
+    /// Per-user rate limiter for write API endpoints (30 req / 60s)
+    pub api_rate_limiter: UserRateLimiter,
 }
 
 // ─── Router ────────────────────────────────────────────
@@ -98,6 +102,7 @@ pub fn build_router(state: AppState) -> Router {
     // Auth routes (no authentication required) — stricter rate limit
     let auth_limiter_clone = auth_limiter.clone();
     let auth_routes = Router::new()
+        .route("/challenge", get(api::auth_routes::pow_challenge))
         .route("/register", post(api::auth_routes::register))
         .route("/login", post(api::auth_routes::login))
         .route("/refresh", post(api::auth_routes::refresh_token))
@@ -112,7 +117,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/password", put(api::auth_routes::change_password))
         .route("/totp/setup", post(api::auth_routes::totp_setup))
         .route("/totp/verify", post(api::auth_routes::totp_verify))
-        .route("/totp", delete(api::auth_routes::totp_disable));
+        .route("/totp", delete(api::auth_routes::totp_disable))
+        .route("/delete-account", post(api::auth_routes::delete_account));
 
     // Key management routes
     let key_routes = Router::new()
@@ -231,6 +237,29 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/:server_id/nickname",
             put(api::servers::set_nickname),
+        )
+        .route(
+            "/:server_id/members/:user_id/nickname",
+            put(api::servers::set_member_nickname),
+        )
+        .route(
+            "/:server_id/icon",
+            post(api::servers::upload_icon)
+                .get(api::servers::get_icon)
+                .delete(api::servers::delete_icon),
+        )
+        .route(
+            "/:server_id/emojis",
+            get(api::emojis::list_emojis).post(api::emojis::upload_emoji),
+        )
+        .route(
+            "/:server_id/emojis/:emoji_id",
+            axum::routing::patch(api::emojis::update_emoji)
+                .delete(api::emojis::delete_emoji),
+        )
+        .route(
+            "/:server_id/emojis/:emoji_id/image",
+            get(api::emojis::get_emoji_image),
         );
 
     // Channel routes
@@ -371,7 +400,19 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/v1", api)
         .route("/health", get(health_check))
         .layer(CompressionLayer::new())
-        .layer(TraceLayer::new_for_http())
+        // TraceLayer: custom span excludes remote_addr (IP privacy)
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|req: &axum::extract::Request| {
+                    tracing::info_span!(
+                        "http_request",
+                        method = %req.method(),
+                        uri = %req.uri(),
+                        version = ?req.version(),
+                    )
+                })
+                .on_response(DefaultOnResponse::new().level(tracing::Level::DEBUG)),
+        )
         .layer(axum_mw::from_fn(move |req, next| {
             let limiter = global_limiter.clone();
             rate_limit_middleware(limiter, req, next)
@@ -397,6 +438,12 @@ pub fn build_router(state: AppState) -> Router {
         .layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("permissions-policy"),
             HeaderValue::from_static("camera=(), microphone=(self), geolocation=()"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' wss:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+            ),
         ))
         .with_state(state)
 }

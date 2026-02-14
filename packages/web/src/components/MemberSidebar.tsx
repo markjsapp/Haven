@@ -28,6 +28,9 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
   } | null>(null);
   const [fullProfileUserId, setFullProfileUserId] = useState<string | null>(null);
   const [editRolesTarget, setEditRolesTarget] = useState<{ userId: string; username: string } | null>(null);
+  const [nicknameTarget, setNicknameTarget] = useState<{ userId: string; currentNick: string } | null>(null);
+  const [nicknameInput, setNicknameInput] = useState("");
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,6 +181,12 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
               setEditRolesTarget({ userId: m.user_id, username: m.display_name || m.username });
             }
           }}
+          onChangeNickname={(userId) => {
+            const m = members.find((mem) => mem.user_id === userId);
+            const current = m?.nickname ?? "";
+            setNicknameTarget({ userId, currentNick: current });
+            setNicknameInput(current);
+          }}
         />
       )}
 
@@ -200,6 +209,61 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
             api.listServerMembers(serverId).then(setMembers).catch(() => {});
           }}
         />
+      )}
+
+      {nicknameTarget && (
+        <div className="modal-overlay" onClick={() => setNicknameTarget(null)} role="presentation">
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="nickname-title">
+            <h2 className="modal-title" id="nickname-title">Change Nickname</h2>
+            <p className="modal-subtitle">
+              {nicknameTarget.userId === currentUserId
+                ? "Set a nickname for yourself in this server."
+                : "Set a nickname for this member."}
+            </p>
+            <label className="modal-label">NICKNAME</label>
+            <input
+              className="modal-input"
+              type="text"
+              placeholder="Enter a nickname (leave empty to clear)"
+              value={nicknameInput}
+              onChange={(e) => setNicknameInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const nick = nicknameInput.trim() || null;
+                  const isSelf = nicknameTarget.userId === currentUserId;
+                  const promise = isSelf
+                    ? api.setNickname(serverId, nick)
+                    : api.setMemberNickname(serverId, nicknameTarget.userId, nick);
+                  promise.then(() => {
+                    api.listServerMembers(serverId).then(setMembers).catch(() => {});
+                    setNicknameTarget(null);
+                  }).catch(() => {});
+                }
+              }}
+              maxLength={32}
+              autoFocus
+            />
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setNicknameTarget(null)}>Cancel</button>
+              <button
+                className="btn-primary modal-submit"
+                onClick={() => {
+                  const nick = nicknameInput.trim() || null;
+                  const isSelf = nicknameTarget.userId === currentUserId;
+                  const promise = isSelf
+                    ? api.setNickname(serverId, nick)
+                    : api.setMemberNickname(serverId, nicknameTarget.userId, nick);
+                  promise.then(() => {
+                    api.listServerMembers(serverId).then(setMembers).catch(() => {});
+                    setNicknameTarget(null);
+                  }).catch(() => {});
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </aside>
   );

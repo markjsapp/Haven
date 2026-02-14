@@ -66,25 +66,70 @@ function getEmojiOnlyCount(text: string): number {
   return matches ? matches.length : 0;
 }
 
+// ─── Custom emoji rendering ─────────────────────────
+
+/** Matches :uuid: patterns for custom emojis */
+const CUSTOM_EMOJI_RE = /:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):/gi;
+
+/** Returns true if text contains ONLY custom emoji patterns and whitespace */
+function isCustomEmojiOnly(text: string): boolean {
+  return text.replace(CUSTOM_EMOJI_RE, "").trim().length === 0;
+}
+
+/** Count the number of custom emoji patterns in text */
+function countCustomEmojis(text: string): number {
+  return (text.match(CUSTOM_EMOJI_RE) || []).length;
+}
+
+/** Replace :uuid: patterns in HTML with <img> tags for custom emojis */
+function replaceCustomEmojis(
+  input: string,
+  emojiMap: Map<string, { name: string; image_url: string }>,
+  baseUrl: string,
+): string {
+  return input.replace(CUSTOM_EMOJI_RE, (match, id) => {
+    const emoji = emojiMap.get(id);
+    if (!emoji) return match;
+    return `<img class="custom-emoji" src="${baseUrl}${emoji.image_url}" alt=":${emoji.name}:" title=":${emoji.name}:" draggable="false" />`;
+  });
+}
+
+/** Check if tiptap HTML contains only custom emoji images (no other text content) */
+function isHtmlCustomEmojiOnly(html: string): boolean {
+  const stripped = html
+    .replace(/<img\s+class="custom-emoji"[^>]*\/?\s*>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+  return stripped.length === 0;
+}
+
 interface Props {
   text: string;
   contentType?: string;
   formatting?: object;
+  /** Map of emoji ID -> { name, image_url } for custom emoji rendering */
+  customEmojiMap?: Map<string, { name: string; image_url: string }>;
 }
 
-export default function MessageBody({ text, contentType, formatting }: Props) {
+export default function MessageBody({ text, contentType, formatting, customEmojiMap }: Props) {
   const [warningUrl, setWarningUrl] = useState<string | null>(null);
+
+  const baseUrl = useMemo(() => window.location.origin, []);
 
   const html = useMemo(() => {
     if (contentType === "tiptap" && formatting) {
       try {
-        return generateHTML(formatting as Parameters<typeof generateHTML>[0], extensions);
+        let result = generateHTML(formatting as Parameters<typeof generateHTML>[0], extensions);
+        if (customEmojiMap && customEmojiMap.size > 0) {
+          result = replaceCustomEmojis(result, customEmojiMap, baseUrl);
+        }
+        return result;
       } catch {
         return null;
       }
     }
     return null;
-  }, [contentType, formatting]);
+  }, [contentType, formatting, customEmojiMap, baseUrl]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -147,10 +192,11 @@ export default function MessageBody({ text, contentType, formatting }: Props) {
   }, [warningUrl]);
 
   if (html) {
+    const richJumbo = customEmojiMap && customEmojiMap.size > 0 && isHtmlCustomEmojiOnly(html) && countCustomEmojis(html) <= 10;
     return (
       <>
         <div
-          className="message-body message-rich"
+          className={`message-body message-rich${richJumbo ? " message-body-jumbo" : ""}`}
           dangerouslySetInnerHTML={{ __html: html }}
           onClick={handleClick}
         />
@@ -163,6 +209,17 @@ export default function MessageBody({ text, contentType, formatting }: Props) {
         )}
       </>
     );
+  }
+
+  // Check if plain text contains custom emojis
+  const hasCustomEmoji = customEmojiMap && customEmojiMap.size > 0 && CUSTOM_EMOJI_RE.test(text);
+
+  if (hasCustomEmoji) {
+    const customOnly = isCustomEmojiOnly(text);
+    const customCount = countCustomEmojis(text);
+    const jumboCustom = customOnly && customCount <= 10;
+    const processed = replaceCustomEmojis(text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"), customEmojiMap!, baseUrl);
+    return <div className={`message-body${jumboCustom ? " message-body-jumbo" : ""}`} dangerouslySetInnerHTML={{ __html: processed }} />;
   }
 
   const emojiCount = getEmojiOnlyCount(text);

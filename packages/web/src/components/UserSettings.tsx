@@ -6,7 +6,7 @@ import Avatar from "./Avatar.js";
 import EmojiPicker from "./EmojiPicker.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import type { BlockedUserResponse } from "@haven/core";
-import { generateRecoveryKey } from "@haven/core";
+import { generateRecoveryKey, generatePassphrase } from "@haven/core";
 import {
   uploadBackup,
   cacheSecurityPhrase,
@@ -91,15 +91,13 @@ export default function UserSettings() {
         <div className="user-settings-content">
           <div className="user-settings-content-header">
             <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : tab === "privacy" ? "Privacy" : tab === "voice" ? "Voice & Audio" : tab === "security" ? "Security & Backup" : "Accessibility"}</h2>
-            <button
-              className="user-settings-close"
-              onClick={() => setShowUserSettings(false)}
-              title="Close"
-              aria-label="Close settings"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-              </svg>
+            <button className="settings-esc-close" onClick={() => setShowUserSettings(false)} aria-label="Close settings">
+              <div className="settings-esc-circle">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                </svg>
+              </div>
+              <span className="settings-esc-label">ESC</span>
             </button>
           </div>
           <div className="user-settings-content-body">
@@ -128,6 +126,11 @@ function AccountTab() {
   const [pwError, setPwError] = useState("");
   const [pwSuccess, setPwSuccess] = useState("");
   const [pwLoading, setPwLoading] = useState(false);
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   if (!user) return null;
 
@@ -222,6 +225,63 @@ function AccountTab() {
           {pwLoading ? "Changing..." : "Change Password"}
         </button>
       </div>
+
+      <div className="settings-section-title" style={{ marginTop: 32 }}>Delete Account</div>
+      <p className="settings-description">
+        Permanently delete your account and all associated data. This action cannot be undone.
+      </p>
+      {!showDeleteConfirm ? (
+        <button
+          className="btn-danger"
+          onClick={() => setShowDeleteConfirm(true)}
+        >
+          Delete Account
+        </button>
+      ) : (
+        <div className="delete-account-confirm">
+          <p className="settings-description" style={{ color: "var(--red)", fontWeight: 600 }}>
+            Are you sure? All your data, servers you own, and messages will be permanently deleted.
+          </p>
+          <label className="settings-field-label">
+            Confirm Password
+            <input
+              className="settings-input"
+              type="password"
+              value={deletePassword}
+              onChange={(e) => { setDeletePassword(e.target.value); setDeleteError(""); }}
+              placeholder="Enter your password to confirm"
+              autoComplete="current-password"
+            />
+          </label>
+          {deleteError && <div className="settings-error">{deleteError}</div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button
+              className="btn-secondary"
+              onClick={() => { setShowDeleteConfirm(false); setDeletePassword(""); setDeleteError(""); }}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn-danger"
+              disabled={deleteLoading || !deletePassword}
+              onClick={async () => {
+                setDeleteError("");
+                setDeleteLoading(true);
+                try {
+                  await api.deleteAccount(deletePassword);
+                  useAuthStore.getState().logout();
+                } catch (err: any) {
+                  setDeleteError(err.message || "Failed to delete account");
+                } finally {
+                  setDeleteLoading(false);
+                }
+              }}
+            >
+              {deleteLoading ? "Deleting..." : "Permanently Delete Account"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -904,6 +964,30 @@ function SecurityTab() {
               />
             </label>
           )}
+          <button
+            className="btn-secondary"
+            style={{ marginBottom: 12 }}
+            onClick={() => {
+              const phrase = generatePassphrase();
+              setNewPhrase(phrase);
+              setConfirmPhrase(phrase);
+              setError("");
+            }}
+          >
+            Generate Phrase
+          </button>
+          {newPhrase && newPhrase === confirmPhrase && newPhrase.includes("-") && (
+            <div className="recovery-key-display" style={{ marginBottom: 12 }}>
+              <code>{newPhrase}</code>
+              <button
+                className="btn-secondary"
+                style={{ marginTop: 8, width: "100%" }}
+                onClick={() => navigator.clipboard.writeText(newPhrase)}
+              >
+                Copy to Clipboard
+              </button>
+            </div>
+          )}
           <label className="settings-field-label">
             New Security Phrase
             <input
@@ -944,8 +1028,32 @@ function SecurityTab() {
         <div className="settings-fields">
           <div className="settings-section-title">Create Security Phrase</div>
           <p className="settings-description">
-            Choose a strong phrase you'll remember. You'll need it on other devices.
+            Choose a strong phrase you'll remember, or generate one automatically.
           </p>
+          <button
+            className="btn-secondary"
+            style={{ marginBottom: 12 }}
+            onClick={() => {
+              const phrase = generatePassphrase();
+              setNewPhrase(phrase);
+              setConfirmPhrase(phrase);
+              setError("");
+            }}
+          >
+            Generate Phrase
+          </button>
+          {newPhrase && newPhrase === confirmPhrase && newPhrase.includes("-") && (
+            <div className="recovery-key-display" style={{ marginBottom: 12 }}>
+              <code>{newPhrase}</code>
+              <button
+                className="btn-secondary"
+                style={{ marginTop: 8, width: "100%" }}
+                onClick={() => navigator.clipboard.writeText(newPhrase)}
+              >
+                Copy to Clipboard
+              </button>
+            </div>
+          )}
           <label className="settings-field-label">
             Security Phrase
             <input

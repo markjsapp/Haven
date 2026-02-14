@@ -260,6 +260,32 @@ impl Storage {
         }
     }
 
+    /// Delete a stored blob (file or S3 object).
+    pub async fn delete_blob(&self, storage_key: &str) -> io::Result<()> {
+        match self {
+            Storage::Local { dir, .. } => {
+                let path = dir.join(storage_key);
+                match tokio::fs::remove_file(&path).await {
+                    Ok(()) => Ok(()),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+                    Err(e) => Err(e),
+                }
+            }
+            Storage::S3 { client, bucket, .. } => {
+                client
+                    .delete_object()
+                    .bucket(bucket)
+                    .key(storage_key)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        io::Error::new(io::ErrorKind::Other, format!("S3 delete failed: {}", e))
+                    })?;
+                Ok(())
+            }
+        }
+    }
+
     /// Load and decrypt data.
     pub async fn load_blob(&self, storage_key: &str) -> io::Result<Vec<u8>> {
         let encrypted = match self {

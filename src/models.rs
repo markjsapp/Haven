@@ -99,6 +99,10 @@ pub struct RegisterRequest {
     pub signed_prekey: String,
     pub signed_prekey_signature: String,
     pub one_time_prekeys: Vec<String>, // batch upload of OTPs
+
+    // Proof-of-Work anti-bot challenge
+    pub pow_challenge: String,
+    pub pow_nonce: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,6 +122,15 @@ pub struct AuthResponse {
 #[derive(Debug, Deserialize)]
 pub struct RefreshRequest {
     pub refresh_token: String,
+}
+
+// ─── Proof-of-Work Challenge ──────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct PowChallengeResponse {
+    pub challenge: String,
+    /// Number of leading zero bits required in SHA-256(challenge + nonce)
+    pub difficulty: u32,
 }
 
 // ─── TOTP ──────────────────────────────────────────────
@@ -174,6 +187,7 @@ pub struct Server {
     pub owner_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub system_channel_id: Option<Uuid>,
+    pub icon_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,6 +207,8 @@ pub struct ServerResponse {
     /// Channel where system messages (joins, etc.) are posted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_channel_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
 }
 
 // ─── Channels ──────────────────────────────────────────
@@ -655,6 +671,16 @@ pub enum WsServerMessage {
         username: String,
         joined: bool,
     },
+    /// A custom emoji was created in a server
+    EmojiCreated {
+        server_id: Uuid,
+        emoji: CustomEmojiResponse,
+    },
+    /// A custom emoji was deleted from a server
+    EmojiDeleted {
+        server_id: Uuid,
+        emoji_id: Uuid,
+    },
 }
 
 // ─── Presence ─────────────────────────────────────────
@@ -679,6 +705,11 @@ pub struct RefreshToken {
     pub token_hash: String,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+    /// Groups tokens from the same login session for theft detection.
+    pub family_id: Option<Uuid>,
+    /// When true, this token has been rotated. If a revoked token is replayed,
+    /// the entire family is invalidated (potential theft).
+    pub revoked: bool,
 }
 
 // ─── Invites ──────────────────────────────────────────
@@ -1066,6 +1097,61 @@ pub struct BanResponse {
 #[derive(Debug, Deserialize)]
 pub struct CreateBanRequest {
     pub reason: Option<String>,
+}
+
+// ─── Custom Emojis ───────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CustomEmoji {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub name: String,
+    pub uploaded_by: Option<Uuid>,
+    pub animated: bool,
+    pub storage_key: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomEmojiResponse {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub name: String,
+    pub uploaded_by: Option<Uuid>,
+    pub animated: bool,
+    pub image_url: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl CustomEmoji {
+    pub fn to_response(&self) -> CustomEmojiResponse {
+        CustomEmojiResponse {
+            id: self.id,
+            server_id: self.server_id,
+            name: self.name.clone(),
+            uploaded_by: self.uploaded_by,
+            animated: self.animated,
+            image_url: format!("/api/v1/servers/{}/emojis/{}/image", self.server_id, self.id),
+            created_at: self.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateEmojiQuery {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameEmojiRequest {
+    pub name: String,
+}
+
+// ─── Delete Account ──────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteAccountRequest {
+    pub password: String,
 }
 
 // ─── Validation helpers ───────────────────────────────

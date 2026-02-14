@@ -21,6 +21,11 @@ pub async fn create_invite(
     Path(server_id): Path<Uuid>,
     Json(req): Json<CreateInviteRequest>,
 ) -> AppResult<Json<InviteResponse>> {
+    // Per-user rate limit
+    if !state.api_rate_limiter.check(user_id) {
+        return Err(AppError::BadRequest("Rate limit exceeded — try again later".into()));
+    }
+
     queries::require_server_permission(
         state.db.read(),
         server_id,
@@ -178,6 +183,7 @@ pub async fn join_by_invite(
         created_at: server.created_at,
         my_permissions: Some(perms.to_string()),
         system_channel_id: server.system_channel_id,
+        icon_url: server.icon_url.clone(),
     }))
 }
 

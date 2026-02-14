@@ -1,5 +1,8 @@
 use axum::{
+    body::Bytes,
     extract::{Path, State},
+    http::{header, StatusCode},
+    response::{IntoResponse, Redirect},
     Json,
 };
 use uuid::Uuid;
@@ -8,7 +11,10 @@ use crate::db::queries;
 use crate::errors::{AppError, AppResult};
 use crate::middleware::AuthUser;
 use crate::models::*;
+use crate::storage;
 use crate::AppState;
+
+const MAX_ICON_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
 /// POST /api/v1/servers
 pub async fn create_server(
@@ -21,6 +27,10 @@ pub async fn create_server(
         &req.encrypted_meta,
     )
     .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
+
+    if encrypted_meta.len() > 8192 {
+        return Err(AppError::Validation("encrypted_meta exceeds maximum size (8KB)".into()));
+    }
 
     let server = queries::create_server(state.db.write(), user_id, &encrypted_meta).await?;
 
@@ -69,6 +79,7 @@ pub async fn create_server(
         created_at: server.created_at,
         my_permissions: Some(i64::MAX.to_string()),
         system_channel_id: Some(channel.id),
+        icon_url: None,
     }))
 }
 
@@ -99,6 +110,7 @@ pub async fn get_server(
         created_at: server.created_at,
         my_permissions: Some(perms.to_string()),
         system_channel_id: server.system_channel_id,
+        icon_url: server.icon_url.clone(),
     }))
 }
 
@@ -123,6 +135,7 @@ pub async fn list_servers(
             created_at: s.created_at,
             my_permissions: Some(perms.to_string()),
             system_channel_id: s.system_channel_id,
+            icon_url: s.icon_url.clone(),
         });
     }
 
@@ -234,6 +247,35 @@ pub async fn set_nickname(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+/// PUT /api/v1/servers/:server_id/members/:user_id/nickname
+/// Set or clear a member's nickname (requires MANAGE_SERVER permission).
+pub async fn set_member_nickname(
+    State(state): State<AppState>,
+    AuthUser(caller_id): AuthUser,
+    Path((server_id, target_user_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<UpdateNicknameRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    // Require MANAGE_SERVER permission
+    let (is_owner, perms) = queries::get_member_permissions(state.db.read(), server_id, caller_id).await?;
+    if !is_owner && !crate::permissions::has_permission(perms, crate::permissions::MANAGE_SERVER) {
+        return Err(AppError::Forbidden("Missing MANAGE_SERVER permission".into()));
+    }
+
+    if !queries::is_server_member(state.db.read(), server_id, target_user_id).await? {
+        return Err(AppError::NotFound("Member not found".into()));
+    }
+
+    if let Some(ref nick) = req.nickname {
+        if nick.len() > 32 || nick.trim().is_empty() {
+            return Err(AppError::Validation("Nickname must be 1-32 characters".into()));
+        }
+    }
+
+    queries::update_member_nickname(state.db.write(), server_id, target_user_id, req.nickname.as_deref()).await?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 /// DELETE /api/v1/servers/:server_id/members/@me — leave a server
 pub async fn leave_server(
     State(state): State<AppState>,
@@ -248,11 +290,18 @@ pub async fn leave_server(
         return Err(AppError::Forbidden("Not a member of this server".into()));
     }
 
-    // Owner cannot leave — they must delete the server instead
+    // If owner is leaving, only allow it if they're the sole member (auto-deletes server)
     if server.owner_id == user_id {
-        return Err(AppError::Validation(
-            "Server owner cannot leave. Delete the server instead.".into(),
-        ));
+        let member_count = queries::count_server_members(state.db.read(), server_id).await?;
+        if member_count > 1 {
+            return Err(AppError::Validation(
+                "Server owner cannot leave while other members remain. Transfer ownership or delete the server instead.".into(),
+            ));
+        }
+        // Owner is the only member — delete the entire server
+        queries::delete_server(state.db.write(), server_id).await?;
+        crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:server:{}", server_id)).await;
+        return Ok(Json(serde_json::json!({ "ok": true })));
     }
 
     // Get username for system message before removing
@@ -309,4 +358,136 @@ pub async fn delete_server(
     crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:server:{}", server_id)).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ─── Server Icon ────────────────────────────────────────
+
+/// POST /api/v1/servers/:server_id/icon — upload server icon (raw bytes)
+pub async fn upload_icon(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(server_id): Path<Uuid>,
+    body: Bytes,
+) -> AppResult<Json<serde_json::Value>> {
+    // Require MANAGE_SERVER permission
+    let (is_owner, perms) = queries::get_member_permissions(state.db.read(), server_id, user_id).await?;
+    if !is_owner && !crate::permissions::has_permission(perms, crate::permissions::MANAGE_SERVER) {
+        return Err(AppError::Forbidden("Missing MANAGE_SERVER permission".into()));
+    }
+
+    if body.is_empty() {
+        return Err(AppError::Validation("No image data provided".into()));
+    }
+    if body.len() > MAX_ICON_SIZE {
+        return Err(AppError::Validation(format!(
+            "Icon too large (max {}MB)",
+            MAX_ICON_SIZE / 1024 / 1024
+        )));
+    }
+
+    let storage_key = storage::obfuscated_key(&state.storage_key, &format!("server-icon:{}", server_id));
+    if state.config.cdn_enabled {
+        state.storage.store_blob_raw(&storage_key, &body).await
+            .map_err(|e| AppError::BadRequest(format!("Failed to store icon: {}", e)))?;
+    } else {
+        state.storage.store_blob(&storage_key, &body).await
+            .map_err(|e| AppError::BadRequest(format!("Failed to store icon: {}", e)))?;
+    }
+
+    let icon_url = format!("/api/v1/servers/{}/icon", server_id);
+    queries::update_server_icon(state.db.write(), server_id, Some(&icon_url)).await?;
+
+    // Invalidate cache
+    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:server:{}", server_id)).await;
+
+    Ok(Json(serde_json::json!({ "icon_url": icon_url })))
+}
+
+/// GET /api/v1/servers/:server_id/icon — serve server icon image (no auth for <img> src)
+pub async fn get_icon(
+    State(state): State<AppState>,
+    Path(server_id): Path<Uuid>,
+) -> Result<impl IntoResponse, AppError> {
+    let server = queries::find_server_by_id(state.db.read(), server_id)
+        .await?
+        .ok_or(AppError::NotFound("Server not found".into()))?;
+
+    if server.icon_url.is_none() {
+        return Err(AppError::NotFound("No icon set".into()));
+    }
+
+    let storage_key = storage::obfuscated_key(&state.storage_key, &format!("server-icon:{}", server_id));
+
+    if state.config.cdn_enabled {
+        if let Some(url) = state.storage.presign_url(
+            &storage_key,
+            state.config.cdn_presign_expiry_secs,
+            &state.config.cdn_base_url,
+        ).await {
+            return Ok(Redirect::temporary(&url).into_response());
+        }
+
+        let data = state.storage.load_blob_raw(&storage_key).await
+            .map_err(|_| AppError::NotFound("Icon file not found".into()))?;
+
+        let content_type = detect_icon_type(&data);
+        Ok((
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "public, max-age=86400".to_string()),
+            ],
+            data,
+        ).into_response())
+    } else {
+        let data = state.storage.load_blob(&storage_key).await
+            .map_err(|_| AppError::NotFound("Icon file not found".into()))?;
+
+        let content_type = detect_icon_type(&data);
+        Ok((
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "public, max-age=86400".to_string()),
+            ],
+            data,
+        ).into_response())
+    }
+}
+
+/// DELETE /api/v1/servers/:server_id/icon — remove server icon
+pub async fn delete_icon(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(server_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let (is_owner, perms) = queries::get_member_permissions(state.db.read(), server_id, user_id).await?;
+    if !is_owner && !crate::permissions::has_permission(perms, crate::permissions::MANAGE_SERVER) {
+        return Err(AppError::Forbidden("Missing MANAGE_SERVER permission".into()));
+    }
+
+    // Delete the stored blob (best-effort)
+    let storage_key = storage::obfuscated_key(&state.storage_key, &format!("server-icon:{}", server_id));
+    let _ = state.storage.delete_blob(&storage_key).await;
+
+    queries::update_server_icon(state.db.write(), server_id, None).await?;
+
+    // Invalidate cache
+    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:server:{}", server_id)).await;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+fn detect_icon_type(data: &[u8]) -> String {
+    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        "image/png".into()
+    } else if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg".into()
+    } else if data.starts_with(b"GIF8") {
+        "image/gif".into()
+    } else if data.starts_with(b"RIFF") && data.len() > 12 && &data[8..12] == b"WEBP" {
+        "image/webp".into()
+    } else {
+        "application/octet-stream".into()
+    }
 }

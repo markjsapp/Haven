@@ -9,6 +9,16 @@ export interface RegisterRequest {
   signed_prekey: string;      // base64
   signed_prekey_signature: string; // base64
   one_time_prekeys: string[]; // base64[]
+  pow_challenge: string;
+  pow_nonce: string;
+}
+
+/** Fields the caller provides — PoW fields are auto-filled by the API client */
+export type RegisterInput = Omit<RegisterRequest, "pow_challenge" | "pow_nonce">;
+
+export interface PowChallengeResponse {
+  challenge: string;
+  difficulty: number;
 }
 
 export interface LoginRequest {
@@ -181,6 +191,7 @@ export interface ServerResponse {
   created_at: string;
   my_permissions?: string; // i64 as string for JS BigInt safety
   system_channel_id?: string; // channel where system messages (joins, etc.) are posted
+  icon_url?: string;
 }
 
 // ─── Channels ──────────────────────────────────────────
@@ -358,7 +369,9 @@ export type WsServerMessage =
   | { type: "DmRequestReceived"; payload: { channel_id: string; from_user_id: string } }
   | { type: "MessagePinned"; payload: { channel_id: string; message_id: string; pinned_by: string } }
   | { type: "MessageUnpinned"; payload: { channel_id: string; message_id: string } }
-  | { type: "VoiceStateUpdate"; payload: { channel_id: string; user_id: string; username: string; joined: boolean } };
+  | { type: "VoiceStateUpdate"; payload: { channel_id: string; user_id: string; username: string; joined: boolean } }
+  | { type: "EmojiCreated"; payload: { server_id: string; emoji: CustomEmojiResponse } }
+  | { type: "EmojiDeleted"; payload: { server_id: string; emoji_id: string } };
 
 // ─── Presence ─────────────────────────────────────────
 
@@ -414,6 +427,7 @@ export const Permission = {
   MENTION_EVERYONE:     BigInt(1) << BigInt(12),
   ATTACH_FILES:         BigInt(1) << BigInt(13),
   READ_MESSAGE_HISTORY: BigInt(1) << BigInt(14),
+  MANAGE_EMOJIS:        BigInt(1) << BigInt(15),
 } as const;
 
 export interface RoleResponse {
@@ -459,6 +473,24 @@ export interface SetOverwriteRequest {
   target_id: string;
   allow_bits: string;
   deny_bits: string;
+}
+
+// ─── Custom Emojis ──────────────────────────────────
+
+export interface CustomEmojiResponse {
+  id: string;
+  server_id: string;
+  name: string;
+  uploaded_by: string | null;
+  animated: boolean;
+  image_url: string;
+  created_at: string;
+}
+
+// ─── Delete Account ─────────────────────────────────
+
+export interface DeleteAccountRequest {
+  password: string;
 }
 
 // ─── Bans ────────────────────────────────────────────

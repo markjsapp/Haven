@@ -1,5 +1,6 @@
+import { getSodium, initSodium } from "../crypto/utils.js";
 import type {
-  RegisterRequest,
+  RegisterInput,
   LoginRequest,
   AuthResponse,
   RefreshRequest,
@@ -58,6 +59,8 @@ import type {
   UploadKeyBackupRequest,
   KeyBackupResponse,
   KeyBackupStatusResponse,
+  CustomEmojiResponse,
+  PowChallengeResponse,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -97,8 +100,28 @@ export class HavenApi {
 
   // ─── Auth ────────────────────────────────────────
 
-  async register(req: RegisterRequest): Promise<AuthResponse> {
-    const res = await this.post<AuthResponse>("/api/v1/auth/register", req);
+  /** Fetch a PoW challenge from the server. */
+  async getChallenge(): Promise<PowChallengeResponse> {
+    return this.get<PowChallengeResponse>("/api/v1/auth/challenge");
+  }
+
+  /**
+   * Register a new account. Automatically fetches and solves a PoW challenge.
+   * The PoW solving runs in a Web Worker when available, otherwise falls back to main thread.
+   */
+  async register(input: RegisterInput): Promise<AuthResponse> {
+    // 1. Fetch challenge
+    const { challenge, difficulty } = await this.getChallenge();
+
+    // 2. Solve PoW
+    const nonce = await solvePoW(challenge, difficulty);
+
+    // 3. Submit registration with PoW solution
+    const res = await this.post<AuthResponse>("/api/v1/auth/register", {
+      ...input,
+      pow_challenge: challenge,
+      pow_nonce: nonce,
+    });
     this.setTokens(res.access_token, res.refresh_token);
     return res;
   }
@@ -425,6 +448,10 @@ export class HavenApi {
     await this.put(`/api/v1/servers/${serverId}/nickname`, { nickname });
   }
 
+  async setMemberNickname(serverId: string, userId: string, nickname: string | null): Promise<void> {
+    await this.put(`/api/v1/servers/${serverId}/members/${userId}/nickname`, { nickname });
+  }
+
   async leaveServer(serverId: string): Promise<void> {
     await this.delete(`/api/v1/servers/${serverId}/members/@me`);
   }
@@ -631,6 +658,87 @@ export class HavenApi {
     return this.post<ReportResponse>("/api/v1/reports", req);
   }
 
+  // ─── Custom Emojis ──────────────────────────────
+
+  async listServerEmojis(serverId: string): Promise<CustomEmojiResponse[]> {
+    return this.get<CustomEmojiResponse[]>(`/api/v1/servers/${serverId}/emojis`);
+  }
+
+  async uploadEmoji(serverId: string, name: string, imageData: ArrayBuffer): Promise<CustomEmojiResponse> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+
+    const res = await fetch(
+      `${this.baseUrl}/api/v1/servers/${serverId}/emojis?name=${encodeURIComponent(name)}`,
+      { method: "POST", headers, body: imageData },
+    );
+
+    if (!res.ok) {
+      if (res.status === 401 && this.onTokenExpired) {
+        this.onTokenExpired();
+      }
+      const err: ApiError = await res.json().catch(() => ({
+        error: res.statusText,
+        status: res.status,
+      }));
+      throw new HavenApiError(err.error, err.status);
+    }
+
+    return res.json() as Promise<CustomEmojiResponse>;
+  }
+
+  async renameEmoji(serverId: string, emojiId: string, name: string): Promise<CustomEmojiResponse> {
+    return this.patch<CustomEmojiResponse>(`/api/v1/servers/${serverId}/emojis/${emojiId}`, { name });
+  }
+
+  async deleteEmoji(serverId: string, emojiId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}/emojis/${emojiId}`);
+  }
+
+  // ─── Server Icons ──────────────────────────────
+
+  async uploadServerIcon(serverId: string, blob: ArrayBuffer): Promise<{ icon_url: string }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+
+    const res = await fetch(`${this.baseUrl}/api/v1/servers/${serverId}/icon`, {
+      method: "POST",
+      headers,
+      body: blob,
+    });
+
+    if (!res.ok) {
+      if (res.status === 401 && this.onTokenExpired) {
+        this.onTokenExpired();
+      }
+      const err: ApiError = await res.json().catch(() => ({
+        error: res.statusText,
+        status: res.status,
+      }));
+      throw new HavenApiError(err.error, err.status);
+    }
+
+    return res.json() as Promise<{ icon_url: string }>;
+  }
+
+  async deleteServerIcon(serverId: string): Promise<void> {
+    await this.delete(`/api/v1/servers/${serverId}/icon`);
+  }
+
+  // ─── Account Deletion ──────────────────────────
+
+  async deleteAccount(password: string): Promise<void> {
+    await this.post("/api/v1/auth/delete-account", { password });
+  }
+
   // ─── Voice ──────────────────────────────────────
 
   async joinVoice(channelId: string): Promise<VoiceTokenResponse> {
@@ -702,4 +810,56 @@ export class HavenApiError extends Error {
     this.name = "HavenApiError";
     this.status = status;
   }
+}
+
+// ─── Proof-of-Work Solver ────────────────────────────
+
+/**
+ * Solve a PoW challenge: find a nonce such that SHA-256(challenge + nonce)
+ * has at least `difficulty` leading zero bits.
+ * Uses libsodium's crypto_hash_sha256 (works in insecure HTTP contexts,
+ * unlike crypto.subtle which requires HTTPS or localhost).
+ */
+async function solvePoW(challenge: string, difficulty: number): Promise<string> {
+  await initSodium();
+  const sodium = getSodium();
+  const encoder = new TextEncoder();
+  const prefix = encoder.encode(challenge);
+
+  for (let nonce = 0; ; nonce++) {
+    const nonceStr = String(nonce);
+    const nonceBytes = encoder.encode(nonceStr);
+
+    // Concatenate challenge + nonce
+    const data = new Uint8Array(prefix.length + nonceBytes.length);
+    data.set(prefix);
+    data.set(nonceBytes, prefix.length);
+
+    const hash: Uint8Array = sodium.crypto_hash_sha256(data);
+
+    if (hasLeadingZeroBits(hash, difficulty)) {
+      return nonceStr;
+    }
+
+    // Yield to event loop every 10000 iterations to avoid blocking UI
+    if (nonce % 10000 === 0 && nonce > 0) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+}
+
+/** Check if a hash has at least `n` leading zero bits. */
+function hasLeadingZeroBits(hash: Uint8Array, n: number): boolean {
+  let bits = 0;
+  for (const byte of hash) {
+    if (byte === 0) {
+      bits += 8;
+    } else {
+      // Count leading zeros of this byte
+      bits += Math.clz32(byte) - 24; // clz32 counts 32-bit, byte is 8-bit
+      break;
+    }
+    if (bits >= n) return true;
+  }
+  return bits >= n;
 }

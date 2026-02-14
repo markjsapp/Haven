@@ -195,6 +195,13 @@ async fn handle_client_message(
             attachment_ids,
             reply_to_id,
         } => {
+            // Per-user rate limit on message sending
+            if !state.ws_rate_limiter.check(user_id) {
+                let _ = reply_tx.send(WsServerMessage::Error {
+                    message: "Rate limit exceeded — slow down".into(),
+                });
+                return;
+            }
             handle_send_message(
                 user_id,
                 channel_id,

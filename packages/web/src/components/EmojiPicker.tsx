@@ -1,4 +1,5 @@
-import { useRef, useEffect, lazy, Suspense } from "react";
+import { useRef, useEffect, useMemo, lazy, Suspense } from "react";
+import { useChatStore } from "../store/chat.js";
 
 const LazyPicker = lazy(() =>
   Promise.all([import("@emoji-mart/data"), import("@emoji-mart/react")]).then(
@@ -14,9 +15,11 @@ const LazyPicker = lazy(() =>
 interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
   onClose: () => void;
+  serverId?: string;
+  position?: "above" | "below";
 }
 
-export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
+export default function EmojiPicker({ onSelect, onClose, serverId, position = "above" }: EmojiPickerProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,12 +40,36 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
+  const customEmojis = useChatStore((s) => s.customEmojis);
+  const custom = useMemo(() => {
+    if (!serverId) return undefined;
+    const emojis = customEmojis[serverId];
+    if (!emojis || emojis.length === 0) return undefined;
+    return [
+      {
+        id: "server-emojis",
+        name: "Server Emojis",
+        emojis: emojis.map((e) => ({
+          id: e.id,
+          name: e.name,
+          keywords: [e.name],
+          skins: [{ src: e.image_url }],
+        })),
+      },
+    ];
+  }, [serverId, customEmojis]);
+
   return (
-    <div className="emoji-picker" ref={ref} role="dialog" aria-label="Emoji picker">
+    <div className={`emoji-picker${position === "below" ? " emoji-picker-below" : ""}`} ref={ref} role="dialog" aria-label="Emoji picker">
       <Suspense fallback={<div className="emoji-picker-loading" />}>
         <LazyPicker
-          onEmojiSelect={(emoji: { native: string }) => {
-            onSelect(emoji.native);
+          onEmojiSelect={(emoji: { native?: string; id?: string }) => {
+            if (emoji.id && !emoji.native) {
+              // Custom emoji — use :uuid: format
+              onSelect(`:${emoji.id}:`);
+            } else if (emoji.native) {
+              onSelect(emoji.native);
+            }
             onClose();
           }}
           theme="dark"
@@ -51,6 +78,7 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
           skinTonePosition="search"
           perLine={8}
           maxFrequentRows={2}
+          custom={custom}
         />
       </Suspense>
     </div>

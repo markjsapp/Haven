@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
+import { unicodeBtoa } from "../lib/base64.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import Avatar from "./Avatar.js";
 
@@ -116,7 +117,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
 
         const channel = await api.createGroupDm({
           member_ids: memberIds,
-          encrypted_meta: btoa(meta),
+          encrypted_meta: unicodeBtoa(meta),
         });
 
         const { ws } = useChatStore.getState();

@@ -13,6 +13,7 @@ import { Spoiler } from "../lib/tiptap-spoiler.js";
 import { Underline } from "../lib/tiptap-underline.js";
 import { Subtext } from "../lib/tiptap-subtext.js";
 import { MaskedLink } from "../lib/tiptap-masked-link.js";
+import { CustomEmojiNode } from "../lib/tiptap-custom-emoji.js";
 import EmojiPicker from "./EmojiPicker.js";
 import { saveDraft, loadDraft, clearDraft } from "../lib/draft-store.js";
 import { createMentionExtension, suggestionActiveRef, type MemberItem } from "../lib/tiptap-mention.js";
@@ -78,6 +79,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
   const currentChannelId2 = useChatStore((s) => s.currentChannelId);
   const userNames = useChatStore((s) => s.userNames);
   const channels = useChatStore((s) => s.channels);
+  const customEmojis = useChatStore((s) => s.customEmojis);
   const selectedServerId = useUiStore((s) => s.selectedServerId);
 
   // Keep mention member list in sync
@@ -116,6 +118,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
       MaskedLink,
       MentionExtension,
       ChannelMentionExtension,
+      CustomEmojiNode,
       ShiftEnterBreak,
     ],
     onUpdate: () => sendTyping(),
@@ -294,6 +297,20 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
 
   function handleEmojiSelect(emoji: string) {
     if (!editor) return;
+    // Check for custom emoji format :uuid:
+    const customMatch = emoji.match(/^:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):$/i);
+    if (customMatch && selectedServerId) {
+      const emojiId = customMatch[1];
+      const serverEmojis = customEmojis[selectedServerId] ?? [];
+      const found = serverEmojis.find((e) => e.id === emojiId);
+      if (found) {
+        editor.chain().focus().insertContent({
+          type: "customEmoji",
+          attrs: { id: found.id, name: found.name, src: found.image_url },
+        }).run();
+        return;
+      }
+    }
     editor.chain().focus().insertContent(emoji).run();
   }
 
@@ -430,6 +447,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
             <EmojiPicker
               onSelect={handleEmojiSelect}
               onClose={() => setEmojiOpen(false)}
+              serverId={selectedServerId ?? undefined}
             />
           )}
         </div>

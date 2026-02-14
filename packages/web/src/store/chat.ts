@@ -10,11 +10,13 @@ import {
   type ServerResponse,
   type WsServerMessage,
   type ReactionGroup,
+  type CustomEmojiResponse,
 } from "@haven/core";
 import { useAuthStore } from "./auth.js";
 import { usePresenceStore } from "./presence.js";
 import { decryptIncoming, encryptOutgoing, ensureSession, fetchSenderKeys, mapChannelToPeer } from "../lib/crypto.js";
 import { cacheMessage, getCachedMessage, uncacheMessage } from "../lib/message-cache.js";
+import { unicodeBtoa, unicodeAtob } from "../lib/base64.js";
 
 export interface AttachmentMeta {
   id: string;
@@ -91,6 +93,8 @@ interface ChatState {
   myPermissions: Record<string, bigint>;
   /** userId -> highest-priority role color hex string */
   userRoleColors: Record<string, string>;
+  /** serverId -> custom emojis for that server */
+  customEmojis: Record<string, CustomEmojiResponse[]>;
 
   connect(): void;
   disconnect(): void;
@@ -128,7 +132,7 @@ let lastTypingSent = 0;
 function mapDmChannelPeer(channel: ChannelResponse, myUserId: string): void {
   if (channel.channel_type !== "dm") return;
   try {
-    const meta = JSON.parse(atob(channel.encrypted_meta));
+    const meta = JSON.parse(unicodeAtob(channel.encrypted_meta));
     if (meta.type !== "dm" || !Array.isArray(meta.participants)) return;
     const peerId = meta.participants.find((id: string) => id !== myUserId);
     if (peerId) mapChannelToPeer(channel.id, peerId);
@@ -164,6 +168,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   mentionCounts: {},
   myPermissions: {},
   userRoleColors: {},
+  customEmojis: {},
 
   connect() {
     const { api } = useAuthStore.getState();
@@ -269,6 +274,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
           channel_id, user_id, username, null, null, joined,
         );
       });
+    });
+
+    // Custom emoji events
+    ws.on("EmojiCreated", (msg: Extract<WsServerMessage, { type: "EmojiCreated" }>) => {
+      const { server_id, emoji } = msg.payload;
+      set((state) => ({
+        customEmojis: {
+          ...state.customEmojis,
+          [server_id]: [...(state.customEmojis[server_id] ?? []), emoji],
+        },
+      }));
+    });
+
+    ws.on("EmojiDeleted", (msg: Extract<WsServerMessage, { type: "EmojiDeleted" }>) => {
+      const { server_id, emoji_id } = msg.payload;
+      set((state) => ({
+        customEmojis: {
+          ...state.customEmojis,
+          [server_id]: (state.customEmojis[server_id] ?? []).filter((e) => e.id !== emoji_id),
+        },
+      }));
     });
 
     // Friend events — dynamically import friends store to avoid circular deps
@@ -389,6 +415,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       dmChannels,
       memberArrays,
       blockedUsers,
+      serverEmojiArrays,
     ] = await Promise.all([
       Promise.all(servers.map((server) => api.listServerChannels(server.id))),
       Promise.all(servers.map((server) => api.listCategories(server.id))),
@@ -396,6 +423,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       api.listDmChannels(),
       Promise.all(servers.map((server) => api.listServerMembers(server.id))),
       api.getBlockedUsers().catch(() => [] as Array<{ user_id: string; username: string; blocked_at: string }>),
+      Promise.all(servers.map((server) => api.listServerEmojis(server.id).catch(() => [] as CustomEmojiResponse[]))),
     ]);
 
     const allChannels: ChannelResponse[] = serverChannelArrays.flat();
@@ -403,9 +431,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Build categories map: serverId -> CategoryResponse[]
     const categories: Record<string, CategoryResponse[]> = {};
     const roles: Record<string, RoleResponse[]> = {};
+    const customEmojis: Record<string, CustomEmojiResponse[]> = {};
     servers.forEach((server, i) => {
       categories[server.id] = serverCategoryArrays[i];
       roles[server.id] = serverRoleArrays[i];
+      customEmojis[server.id] = serverEmojiArrays[i];
     });
 
     allChannels.push(...dmChannels);
@@ -422,7 +452,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const dmUserNames: Record<string, string> = {};
     for (const ch of dmChannels) {
       try {
-        const meta = JSON.parse(atob(ch.encrypted_meta));
+        const meta = JSON.parse(unicodeAtob(ch.encrypted_meta));
         if (meta.names) {
           for (const [id, name] of Object.entries(meta.names)) {
             if (!dmUserNames[id]) dmUserNames[id] = name as string;
@@ -470,6 +500,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       channels: allChannels,
       categories,
       roles,
+      customEmojis,
       userNames: mergedUserNames,
       blockedUserIds: blockedUsers.map((b) => b.user_id),
       myPermissions,
@@ -515,7 +546,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // System messages are unencrypted — parse directly
         if (raw.message_type === "system") {
           let sysText: string;
-          try { sysText = atob(raw.encrypted_body); } catch { sysText = raw.encrypted_body; }
+          try { sysText = unicodeAtob(raw.encrypted_body); } catch { sysText = raw.encrypted_body; }
           decrypted.push({
             id: raw.id,
             channelId: raw.channel_id,
@@ -873,7 +904,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       participants: [user.id, targetUserId],
       names: { [user.id]: user.username, [targetUserId]: targetUser.username },
     });
-    const metaBase64 = btoa(meta);
+    const metaBase64 = unicodeBtoa(meta);
 
     const channel = await api.createDm({
       target_user_id: targetUserId,
@@ -991,7 +1022,7 @@ async function handleIncomingMessage(raw: MessageResponse) {
   // System messages are unencrypted (but base64-encoded as bytea)
   if (raw.message_type === "system") {
     let sysText: string;
-    try { sysText = atob(raw.encrypted_body); } catch { sysText = raw.encrypted_body; }
+    try { sysText = unicodeAtob(raw.encrypted_body); } catch { sysText = raw.encrypted_body; }
 
     // Update userNames from member_joined events so new users show their name
     try {

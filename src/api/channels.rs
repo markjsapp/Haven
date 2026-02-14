@@ -32,6 +32,10 @@ pub async fn create_channel(
     )
     .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
 
+    if encrypted_meta.len() > 8192 {
+        return Err(AppError::Validation("encrypted_meta exceeds maximum size (8KB)".into()));
+    }
+
     let channel_type = req.channel_type.as_deref().unwrap_or("text");
     let position = req.position.unwrap_or(0);
 
@@ -145,6 +149,10 @@ pub async fn create_dm(
     )
     .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
 
+    if encrypted_meta.len() > 8192 {
+        return Err(AppError::Validation("encrypted_meta exceeds maximum size (8KB)".into()));
+    }
+
     let channel = queries::create_channel(state.db.write(), None, &encrypted_meta, "dm", 0, None).await?;
 
     // Set dm_status
@@ -234,6 +242,10 @@ pub async fn update_channel(
         &req.encrypted_meta,
     )
     .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
+
+    if encrypted_meta.len() > 8192 {
+        return Err(AppError::Validation("encrypted_meta exceeds maximum size (8KB)".into()));
+    }
 
     let updated = queries::update_channel_meta(state.db.write(), channel_id, &encrypted_meta).await?;
 
@@ -354,6 +366,10 @@ pub async fn create_group_dm(
         &req.encrypted_meta,
     )
     .map_err(|_| AppError::Validation("Invalid encrypted_meta encoding".into()))?;
+
+    if encrypted_meta.len() > 8192 {
+        return Err(AppError::Validation("encrypted_meta exceeds maximum size (8KB)".into()));
+    }
 
     let channel = queries::create_channel(state.db.write(), None, &encrypted_meta, "group", 0, None).await?;
 

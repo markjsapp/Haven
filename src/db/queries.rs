@@ -209,21 +209,33 @@ pub async fn store_refresh_token(
     token_hash: &str,
     expires_at: DateTime<Utc>,
 ) -> AppResult<()> {
+    store_refresh_token_with_family(pool, user_id, token_hash, expires_at, None).await
+}
+
+pub async fn store_refresh_token_with_family(
+    pool: &PgPool,
+    user_id: Uuid,
+    token_hash: &str,
+    expires_at: DateTime<Utc>,
+    family_id: Option<Uuid>,
+) -> AppResult<()> {
     sqlx::query(
         r#"
-        INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at, family_id, revoked)
+        VALUES ($1, $2, $3, $4, NOW(), $5, false)
         "#,
     )
     .bind(Uuid::new_v4())
     .bind(user_id)
     .bind(token_hash)
     .bind(expires_at)
+    .bind(family_id)
     .execute(pool)
     .await?;
     Ok(())
 }
 
+/// Find a refresh token by hash, including revoked ones (for theft detection).
 pub async fn find_refresh_token(pool: &PgPool, token_hash: &str) -> AppResult<Option<RefreshToken>> {
     let token = sqlx::query_as::<_, RefreshToken>(
         "SELECT * FROM refresh_tokens WHERE token_hash = $1 AND expires_at > NOW()",
@@ -234,12 +246,22 @@ pub async fn find_refresh_token(pool: &PgPool, token_hash: &str) -> AppResult<Op
     Ok(token)
 }
 
+/// Mark a refresh token as revoked (soft-delete for theft detection).
 pub async fn revoke_refresh_token(pool: &PgPool, token_hash: &str) -> AppResult<()> {
-    sqlx::query("DELETE FROM refresh_tokens WHERE token_hash = $1")
+    sqlx::query("UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1")
         .bind(token_hash)
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Revoke all tokens in a family (used when token theft is detected).
+pub async fn revoke_token_family(pool: &PgPool, family_id: Uuid) -> AppResult<u64> {
+    let result = sqlx::query("DELETE FROM refresh_tokens WHERE family_id = $1")
+        .bind(family_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
 }
 
 pub async fn revoke_all_user_refresh_tokens(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
@@ -326,6 +348,19 @@ pub async fn update_system_channel(
 ) -> AppResult<()> {
     sqlx::query("UPDATE servers SET system_channel_id = $1 WHERE id = $2")
         .bind(system_channel_id)
+        .bind(server_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn update_server_icon(
+    pool: &PgPool,
+    server_id: Uuid,
+    icon_url: Option<&str>,
+) -> AppResult<()> {
+    sqlx::query("UPDATE servers SET icon_url = $1 WHERE id = $2")
+        .bind(icon_url)
         .bind(server_id)
         .execute(pool)
         .await?;
@@ -1255,6 +1290,14 @@ pub async fn remove_server_member(
         .await?;
 
     Ok(())
+}
+
+pub async fn count_server_members(pool: &PgPool, server_id: Uuid) -> AppResult<i64> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM server_members WHERE server_id = $1")
+        .bind(server_id)
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
 }
 
 pub async fn delete_server(pool: &PgPool, server_id: Uuid) -> AppResult<()> {
@@ -2358,4 +2401,111 @@ pub async fn get_profile_key(
     .fetch_optional(pool)
     .await?;
     Ok(dist)
+}
+
+// ─── Custom Emojis ───────────────────────────────────
+
+pub async fn list_server_emojis(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<CustomEmoji>> {
+    let emojis = sqlx::query_as::<_, CustomEmoji>(
+        "SELECT * FROM custom_emojis WHERE server_id = $1 ORDER BY created_at",
+    )
+    .bind(server_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(emojis)
+}
+
+pub async fn get_emoji_by_id(pool: &PgPool, emoji_id: Uuid) -> AppResult<Option<CustomEmoji>> {
+    let emoji = sqlx::query_as::<_, CustomEmoji>("SELECT * FROM custom_emojis WHERE id = $1")
+        .bind(emoji_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(emoji)
+}
+
+/// Returns (static_count, animated_count) for a server's custom emojis.
+pub async fn count_server_emojis(pool: &PgPool, server_id: Uuid) -> AppResult<(i64, i64)> {
+    let row: (i64, i64) = sqlx::query_as(
+        r#"
+        SELECT
+            COUNT(*) FILTER (WHERE NOT animated),
+            COUNT(*) FILTER (WHERE animated)
+        FROM custom_emojis
+        WHERE server_id = $1
+        "#,
+    )
+    .bind(server_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn create_emoji(
+    pool: &PgPool,
+    id: Uuid,
+    server_id: Uuid,
+    name: &str,
+    uploaded_by: Uuid,
+    animated: bool,
+    storage_key: &str,
+) -> AppResult<CustomEmoji> {
+    let emoji = sqlx::query_as::<_, CustomEmoji>(
+        r#"
+        INSERT INTO custom_emojis (id, server_id, name, uploaded_by, animated, storage_key)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *
+        "#,
+    )
+    .bind(id)
+    .bind(server_id)
+    .bind(name)
+    .bind(uploaded_by)
+    .bind(animated)
+    .bind(storage_key)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(ref db_err) if db_err.constraint() == Some("custom_emojis_server_id_name_key") => {
+            AppError::Validation(format!("An emoji named '{}' already exists in this server", name))
+        }
+        other => AppError::Database(other),
+    })?;
+    Ok(emoji)
+}
+
+/// Delete an emoji and return it (for storage cleanup).
+pub async fn delete_emoji(pool: &PgPool, emoji_id: Uuid) -> AppResult<Option<CustomEmoji>> {
+    let emoji = sqlx::query_as::<_, CustomEmoji>(
+        "DELETE FROM custom_emojis WHERE id = $1 RETURNING *",
+    )
+    .bind(emoji_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(emoji)
+}
+
+pub async fn rename_emoji(pool: &PgPool, emoji_id: Uuid, new_name: &str) -> AppResult<CustomEmoji> {
+    let emoji = sqlx::query_as::<_, CustomEmoji>(
+        r#"
+        UPDATE custom_emojis SET name = $2 WHERE id = $1 RETURNING *
+        "#,
+    )
+    .bind(emoji_id)
+    .bind(new_name)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Emoji not found".into()))?;
+    Ok(emoji)
+}
+
+// ─── Servers (ownership) ────────────────────────────
+
+pub async fn get_servers_owned_by(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Server>> {
+    let servers = sqlx::query_as::<_, Server>(
+        "SELECT * FROM servers WHERE owner_id = $1",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(servers)
 }

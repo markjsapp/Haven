@@ -1,8 +1,9 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { parseServerName } from "../lib/channel-utils.js";
+import { unicodeBtoa } from "../lib/base64.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
 import { useRovingTabindex } from "../hooks/useRovingTabindex.js";
 
@@ -46,10 +47,41 @@ export default function ServerBar() {
 
   const serverListRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown: handleRovingKeyDown } = useRovingTabindex(serverListRef);
+  const serverItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [unreadAbove, setUnreadAbove] = useState(false);
+  const [unreadBelow, setUnreadBelow] = useState(false);
+
+  const checkScrollIndicators = useCallback(() => {
+    const container = serverListRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    let above = false;
+    let below = false;
+    for (const [srvId, el] of serverItemRefs.current) {
+      if ((serverUnreads[srvId] ?? 0) === 0) continue;
+      const elRect = el.getBoundingClientRect();
+      if (elRect.bottom < rect.top + 4) above = true;
+      if (elRect.top > rect.bottom - 4) below = true;
+    }
+    // Also check DM unread (home button is the first child)
+    setUnreadAbove(above);
+    setUnreadBelow(below);
+  }, [serverUnreads]);
+
+  useEffect(() => {
+    checkScrollIndicators();
+  }, [serverUnreads, servers, checkScrollIndicators]);
+
+  useEffect(() => {
+    const container = serverListRef.current;
+    if (!container) return;
+    container.addEventListener("scroll", checkScrollIndicators, { passive: true });
+    return () => container.removeEventListener("scroll", checkScrollIndicators);
+  }, [checkScrollIndicators]);
 
   // ─── Server Context Menu ────────────────────────────
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; serverId: string } | null>(null);
-  const [confirmAction, setConfirmAction] = useState<{ type: "leave" | "delete"; serverId: string; serverName: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ type: "leave" | "delete"; serverId: string; serverName: string; isOwnerSoleMember?: boolean } | null>(null);
 
   useEffect(() => {
     if (!ctxMenu) return;
@@ -91,7 +123,7 @@ export default function ServerBar() {
     setError("");
     try {
       const meta = JSON.stringify({ name: serverName.trim() });
-      const newServer = await api.createServer({ encrypted_meta: btoa(meta) });
+      const newServer = await api.createServer({ encrypted_meta: unicodeBtoa(meta) });
       await loadChannels();
       selectServer(newServer.id);
       setServerName("");
@@ -148,6 +180,7 @@ export default function ServerBar() {
             <div
               key={srv.id}
               className={`server-icon-wrapper ${isActive ? "active" : ""}`}
+              ref={(el) => { if (el) serverItemRefs.current.set(srv.id, el); else serverItemRefs.current.delete(srv.id); }}
             >
               <span className="server-pill" />
               <button
@@ -159,7 +192,15 @@ export default function ServerBar() {
                 data-roving-item
                 tabIndex={isActive ? 0 : -1}
               >
-                {name.charAt(0).toUpperCase()}
+                {srv.icon_url ? (
+                  <img
+                    src={srv.icon_url}
+                    alt={name}
+                    className="server-icon-img"
+                  />
+                ) : (
+                  name.charAt(0).toUpperCase()
+                )}
                 {srvUnread > 0 && <span className="server-unread-dot" />}
               </button>
             </div>
@@ -201,6 +242,38 @@ export default function ServerBar() {
         </div>
       </div>
 
+      {unreadAbove && (
+        <button
+          className="scroll-unread-indicator scroll-unread-above"
+          onClick={() => {
+            for (const srv of servers) {
+              if ((serverUnreads[srv.id] ?? 0) > 0) {
+                serverItemRefs.current.get(srv.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                break;
+              }
+            }
+          }}
+          aria-label="Unread servers above"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+        </button>
+      )}
+      {unreadBelow && (
+        <button
+          className="scroll-unread-indicator scroll-unread-below"
+          onClick={() => {
+            for (let i = servers.length - 1; i >= 0; i--) {
+              if ((serverUnreads[servers[i].id] ?? 0) > 0) {
+                serverItemRefs.current.get(servers[i].id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                break;
+              }
+            }
+          }}
+          aria-label="Unread servers below"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+        </button>
+      )}
     </nav>
 
       {/* Server context menu */}
@@ -214,10 +287,18 @@ export default function ServerBar() {
             x={ctxMenu.x}
             y={ctxMenu.y}
             isOwner={isOwner}
-            onAction={() => {
+            onLeave={() => {
               setCtxMenu(null);
               setConfirmAction({
-                type: isOwner ? "delete" : "leave",
+                type: "leave",
+                serverId: srv.id,
+                serverName: name,
+              });
+            }}
+            onDelete={() => {
+              setCtxMenu(null);
+              setConfirmAction({
+                type: "delete",
                 serverId: srv.id,
                 serverName: name,
               });
@@ -236,7 +317,7 @@ export default function ServerBar() {
             <p className="modal-subtitle">
               {confirmAction.type === "delete"
                 ? `Are you sure you want to delete "${confirmAction.serverName}"? This action cannot be undone and all channels, messages, and roles will be permanently deleted.`
-                : `Are you sure you want to leave "${confirmAction.serverName}"? You will need a new invite to rejoin.`}
+                : `Are you sure you want to leave "${confirmAction.serverName}"? If you are the sole member, the server will be deleted.`}
             </p>
             <div className="modal-footer">
               <button className="btn-ghost" onClick={() => setConfirmAction(null)}>
@@ -314,12 +395,14 @@ function ServerBarContextMenu({
   x,
   y,
   isOwner,
-  onAction,
+  onLeave,
+  onDelete,
 }: {
   x: number;
   y: number;
   isOwner: boolean;
-  onAction: () => void;
+  onLeave: () => void;
+  onDelete: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
@@ -338,10 +421,20 @@ function ServerBarContextMenu({
         role="menuitem"
         tabIndex={-1}
         className="context-menu-item-danger"
-        onClick={onAction}
+        onClick={onLeave}
       >
-        {isOwner ? "Delete Server" : "Leave Server"}
+        Leave Server
       </button>
+      {isOwner && (
+        <button
+          role="menuitem"
+          tabIndex={-1}
+          className="context-menu-item-danger"
+          onClick={onDelete}
+        >
+          Delete Server
+        </button>
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { usePresenceStore } from "../store/presence.js";
 import { useFriendsStore } from "../store/friends.js";
 import { Permission, type ChannelResponse, type CategoryResponse } from "@haven/core";
 import { usePermissions } from "../hooks/usePermissions.js";
+import { unicodeBtoa } from "../lib/base64.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
 import { useRovingTabindex } from "../hooks/useRovingTabindex.js";
 import {
@@ -540,6 +541,168 @@ function ServerHeaderContextMenu({
   );
 }
 
+// ─── Server Dropdown Menu (chevron click) ─────────────
+function ServerDropdownMenu({
+  anchorRect,
+  onInvite,
+  onSettings,
+  onCreateChannel,
+  onCreateCategory,
+  onLeave,
+  canCreateInvites,
+  canManageServer,
+  canManageChannels,
+  isOwner,
+  onClose,
+}: {
+  anchorRect: DOMRect;
+  onInvite: () => void;
+  onSettings: () => void;
+  onCreateChannel: () => void;
+  onCreateCategory: () => void;
+  onLeave: () => void;
+  canCreateInvites: boolean;
+  canManageServer: boolean;
+  canManageChannels: boolean;
+  isOwner: boolean;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown } = useMenuKeyboard(menuRef);
+
+  useEffect(() => {
+    menuRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="channel-context-menu"
+      style={{ top: anchorRect.bottom + 4, left: anchorRect.left }}
+      role="menu"
+      aria-label="Server options"
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+    >
+      {canCreateInvites && (
+        <button role="menuitem" tabIndex={-1} onClick={() => { onClose(); onInvite(); }}>
+          Invite People
+        </button>
+      )}
+      {canManageServer && (
+        <button role="menuitem" tabIndex={-1} onClick={() => { onClose(); onSettings(); }}>
+          Server Settings
+        </button>
+      )}
+      {(canCreateInvites || canManageServer) && canManageChannels && (
+        <div className="context-menu-divider" />
+      )}
+      {canManageChannels && (
+        <button role="menuitem" tabIndex={-1} onClick={() => { onClose(); onCreateChannel(); }}>
+          Create Channel
+        </button>
+      )}
+      {canManageChannels && (
+        <button role="menuitem" tabIndex={-1} onClick={() => { onClose(); onCreateCategory(); }}>
+          Create Category
+        </button>
+      )}
+      <div className="context-menu-divider" />
+      <button role="menuitem" tabIndex={-1} className="context-menu-item-danger" onClick={() => { onClose(); onLeave(); }}>
+        Leave Server
+      </button>
+    </div>
+  );
+}
+
+// ─── Invite Modal ────────────────────────────────────
+function InviteModal({
+  serverId,
+  onClose,
+}: {
+  serverId: string;
+  onClose: () => void;
+}) {
+  const api = useAuthStore((s) => s.api);
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.createInvite(serverId, {}).then((invite) => {
+      if (!cancelled) setInviteCode(invite.code);
+    }).catch((err) => {
+      if (!cancelled) setError(err.message || "Failed to create invite");
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [api, serverId]);
+
+  const inviteUrl = inviteCode ? `${window.location.origin}/invite/${inviteCode}` : "";
+
+  async function handleCopy() {
+    if (!inviteCode) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+    }
+  }
+
+  return (
+    <div className="confirm-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="confirm-dialog" role="dialog" aria-label="Invite People">
+        <h3>Invite People</h3>
+        {loading && <p className="settings-description">Creating invite link...</p>}
+        {error && <p className="settings-description" style={{ color: "var(--red)" }}>{error}</p>}
+        {inviteCode && (
+          <>
+            <p className="settings-description">Share this link to invite people to the server:</p>
+            <div className="invite-code-row">
+              <input
+                className="settings-input"
+                readOnly
+                value={inviteUrl}
+                onFocus={(e) => e.target.select()}
+              />
+              <button className="btn-primary" onClick={handleCopy}>
+                {copied ? "Copied!" : "Copy"}
+              </button>
+            </div>
+          </>
+        )}
+        <div className="confirm-actions">
+          <button className="btn-ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Sortable Channel Item ────────────────────────────
 
 function SortableChannelItem({
@@ -855,18 +1018,52 @@ function ServerView({ serverId }: { serverId: string }) {
   const [confirmDeleteCategory, setConfirmDeleteCategory] = useState<string | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [serverContextMenu, setServerContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [showServerDropdown, setShowServerDropdown] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [confirmLeaveServer, setConfirmLeaveServer] = useState(false);
   const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
 
   const channelListRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown: handleChannelRovingKeyDown } = useRovingTabindex(channelListRef);
-
   const server = servers.find((s) => s.id === serverId);
   const serverName = server ? parseServerName(server.encrypted_meta) : "Server";
   const serverChannels = channels.filter((ch) => ch.server_id === serverId);
+
+  const [chUnreadAbove, setChUnreadAbove] = useState(false);
+  const [chUnreadBelow, setChUnreadBelow] = useState(false);
+
+  const checkChannelScrollIndicators = useCallback(() => {
+    const container = channelListRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    let above = false;
+    let below = false;
+    const items = container.querySelectorAll(".channel-item.unread");
+    for (const el of items) {
+      const elRect = el.getBoundingClientRect();
+      if (elRect.bottom < rect.top + 4) above = true;
+      if (elRect.top > rect.bottom - 4) below = true;
+    }
+    setChUnreadAbove(above);
+    setChUnreadBelow(below);
+  }, [unreadCounts]);
+
+  useEffect(() => {
+    checkChannelScrollIndicators();
+  }, [unreadCounts, serverChannels.length, checkChannelScrollIndicators]);
+
+  useEffect(() => {
+    const container = channelListRef.current;
+    if (!container) return;
+    container.addEventListener("scroll", checkChannelScrollIndicators, { passive: true });
+    return () => container.removeEventListener("scroll", checkChannelScrollIndicators);
+  }, [checkChannelScrollIndicators]);
   const { can, isOwner } = usePermissions(serverId);
   const canManageChannels = can(Permission.MANAGE_CHANNELS);
+  const canCreateInvites = can(Permission.CREATE_INVITES);
+  const canManageServer = can(Permission.MANAGE_SERVER);
 
   // Auto-select a channel when switching to a server with no active channel
   useEffect(() => {
@@ -945,7 +1142,7 @@ function ServerView({ serverId }: { serverId: string }) {
     if (!renameValue.trim()) return;
     try {
       const meta = JSON.stringify({ name: renameValue.trim() });
-      await api.updateChannel(channelId, { encrypted_meta: btoa(meta) });
+      await api.updateChannel(channelId, { encrypted_meta: unicodeBtoa(meta) });
       await loadChannels();
       setRenamingId(null);
     } catch { /* non-fatal */ }
@@ -990,6 +1187,16 @@ function ServerView({ serverId }: { serverId: string }) {
       setShowCreateCategory(false);
     } catch { /* non-fatal */ }
   }
+
+  async function handleLeaveServer() {
+    try {
+      await api.leaveServer(serverId);
+      useUiStore.getState().selectServer(null);
+      await loadChannels();
+    } catch { /* non-fatal */ }
+  }
+
+  const headerBtnRef = useRef<HTMLButtonElement>(null);
 
   function handleContextMenu(e: React.MouseEvent, channelId: string) {
     e.preventDefault();
@@ -1198,16 +1405,59 @@ function ServerView({ serverId }: { serverId: string }) {
     <>
       <div className="channel-sidebar-header" onContextMenu={handleServerContextMenu}>
         <button
+          ref={headerBtnRef}
           className="server-name-header"
-          onClick={() => setShowSettings(true)}
-          title="Server Settings"
+          onClick={() => setShowServerDropdown((v) => !v)}
+          title="Server options"
         >
           <span>{serverName}</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="server-name-chevron">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className={`server-name-chevron${showServerDropdown ? " server-name-chevron-open" : ""}`}>
             <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
           </svg>
         </button>
+        {showServerDropdown && headerBtnRef.current && (
+          <ServerDropdownMenu
+            anchorRect={headerBtnRef.current.getBoundingClientRect()}
+            onInvite={() => setShowInviteModal(true)}
+            onSettings={() => setShowSettings(true)}
+            onCreateChannel={() => setCreateModal({ categoryId: null })}
+            onCreateCategory={() => setShowCreateCategory(true)}
+            onLeave={() => setConfirmLeaveServer(true)}
+            canCreateInvites={canCreateInvites}
+            canManageServer={canManageServer}
+            canManageChannels={canManageChannels}
+            isOwner={isOwner}
+            onClose={() => setShowServerDropdown(false)}
+          />
+        )}
       </div>
+      <div style={{ position: "relative", flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {chUnreadAbove && (
+          <button
+            className="channel-scroll-unread-indicator channel-scroll-unread-above"
+            onClick={() => {
+              const first = channelListRef.current?.querySelector(".channel-item.unread");
+              first?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+            aria-label="Unread channels above"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+            New
+          </button>
+        )}
+        {chUnreadBelow && (
+          <button
+            className="channel-scroll-unread-indicator channel-scroll-unread-below"
+            onClick={() => {
+              const items = channelListRef.current?.querySelectorAll(".channel-item.unread");
+              items?.[items.length - 1]?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+            aria-label="Unread channels below"
+          >
+            New
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+          </button>
+        )}
       <div className="channel-sidebar-content" ref={channelListRef} onKeyDown={handleChannelRovingKeyDown} onContextMenu={(e) => {
         // Only fire for empty space (not on channels/categories which have their own handlers)
         if (e.defaultPrevented) return;
@@ -1312,6 +1562,7 @@ function ServerView({ serverId }: { serverId: string }) {
             ) : null}
           </DragOverlay>
         </DndContext>
+      </div>
       </div>
 
       {/* Right-click context menu for channels */}
@@ -1456,6 +1707,27 @@ function ServerView({ serverId }: { serverId: string }) {
           channelId={editingChannelId}
           serverId={serverId}
           onClose={() => setEditingChannelId(null)}
+        />
+      )}
+
+      {showInviteModal && (
+        <InviteModal
+          serverId={serverId}
+          onClose={() => setShowInviteModal(false)}
+        />
+      )}
+
+      {confirmLeaveServer && (
+        <ConfirmDialog
+          title="Leave Server"
+          message={`Are you sure you want to leave ${serverName}? You won't be able to rejoin unless you receive a new invite.`}
+          confirmLabel="Leave Server"
+          danger
+          onConfirm={() => {
+            handleLeaveServer();
+            setConfirmLeaveServer(false);
+          }}
+          onCancel={() => setConfirmLeaveServer(false)}
         />
       )}
     </>

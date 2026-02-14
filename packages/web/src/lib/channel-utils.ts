@@ -1,7 +1,9 @@
+import { unicodeAtob } from "./base64.js";
+
 /** Parse channel name from base64-encoded encrypted_meta. */
 export function parseChannelName(encryptedMeta: string): string {
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     return json.name || json.type || "unnamed";
   } catch {
     return "unnamed";
@@ -11,7 +13,7 @@ export function parseChannelName(encryptedMeta: string): string {
 /** Extract the peer user ID from a DM channel's meta. */
 export function parseDmPeerId(encryptedMeta: string, myUserId: string): string | null {
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     if (json.participants) {
       return json.participants.find((p: string) => p !== myUserId) ?? null;
     }
@@ -24,7 +26,7 @@ export function parseDmPeerId(encryptedMeta: string, myUserId: string): string |
 /** Get the display name for the other party in a DM channel. */
 export function parseDmDisplayName(encryptedMeta: string, myUserId: string): string {
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     if (json.names) {
       for (const [id, name] of Object.entries(json.names)) {
         if (id !== myUserId) return name as string;
@@ -43,12 +45,12 @@ export function parseDmDisplayName(encryptedMeta: string, myUserId: string): str
 /** Parse server name from base64-encoded encrypted_meta. */
 export function parseServerName(encryptedMeta: string): string {
   try {
-    const decoded = atob(encryptedMeta);
+    const decoded = unicodeAtob(encryptedMeta);
     const json = JSON.parse(decoded);
     return json.name || "unnamed";
   } catch {
     try {
-      return atob(encryptedMeta) || "unnamed";
+      return unicodeAtob(encryptedMeta) || "unnamed";
     } catch {
       return "unnamed";
     }
@@ -61,7 +63,7 @@ export function parseChannelDisplay(
   myUserId: string,
 ): { name: string; isDm: boolean; isGroup: boolean; topic?: string } {
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     if (json.type === "dm") {
       if (json.names) {
         for (const [id, name] of Object.entries(json.names)) {
@@ -83,7 +85,7 @@ export function parseChannelDisplay(
 /** Get display name for a group DM channel. */
 export function parseGroupName(encryptedMeta: string, myUserId: string): string {
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     return parseGroupDisplayName(json, myUserId);
   } catch {
     return "Group";
@@ -109,7 +111,7 @@ function parseGroupDisplayName(json: Record<string, unknown>, myUserId: string):
 /** Get member count from a group channel's meta. */
 export function parseGroupMemberCount(encryptedMeta: string): number {
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     if (Array.isArray(json.participants)) return json.participants.length;
     return 0;
   } catch {
@@ -121,7 +123,7 @@ export function parseGroupMemberCount(encryptedMeta: string): number {
 export function parseNamesFromMeta(encryptedMeta?: string): Record<string, string> {
   if (!encryptedMeta) return {};
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     return json.names ?? {};
   } catch {
     return {};

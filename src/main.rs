@@ -2,7 +2,15 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 
-use haven_backend::{build_router, config::AppConfig, db::{self, DbPools}, pubsub, storage::Storage, AppState};
+use haven_backend::{
+    build_router,
+    config::AppConfig,
+    db::{self, DbPools},
+    middleware::{spawn_user_rate_limit_cleanup, UserRateLimiter},
+    pubsub,
+    storage::Storage,
+    AppState,
+};
 
 // ─── Main ──────────────────────────────────────────────
 
@@ -49,6 +57,12 @@ async fn main() {
     let storage = Storage::from_config(&config).await;
     let storage_key = *storage.encryption_key();
 
+    // Per-user rate limiters
+    let ws_rate_limiter = UserRateLimiter::new(30, 10); // 30 messages per 10 seconds
+    let api_rate_limiter = UserRateLimiter::new(30, 60); // 30 write ops per minute
+    spawn_user_rate_limit_cleanup(ws_rate_limiter.clone());
+    spawn_user_rate_limit_cleanup(api_rate_limiter.clone());
+
     // Build application state (pubsub_subscriptions added after start_subscriber)
     let mut state = AppState {
         db: db.clone(),
@@ -59,6 +73,8 @@ async fn main() {
         connections: Arc::new(DashMap::new()),
         channel_broadcasts: Arc::new(DashMap::new()),
         pubsub_subscriptions: pubsub::empty_subscriptions(),
+        ws_rate_limiter,
+        api_rate_limiter,
     };
 
     // Start Redis pub/sub subscriber and store the subscriptions handle

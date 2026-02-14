@@ -2,10 +2,11 @@ import { useState, useEffect } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { usePresenceStore } from "../store/presence.js";
+import { unicodeBtoa, unicodeAtob } from "../lib/base64.js";
 
 function parseChannelName(encryptedMeta: string): string {
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     return json.name || json.type || "unnamed";
   } catch {
     return "unnamed";
@@ -14,7 +15,7 @@ function parseChannelName(encryptedMeta: string): string {
 
 function parseDmPeerId(encryptedMeta: string, myUserId: string): string | null {
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     if (json.participants) {
       return json.participants.find((p: string) => p !== myUserId) ?? null;
     }
@@ -26,7 +27,7 @@ function parseDmPeerId(encryptedMeta: string, myUserId: string): string | null {
 
 function parseDmDisplayName(encryptedMeta: string, myUserId: string): string {
   try {
-    const json = JSON.parse(atob(encryptedMeta));
+    const json = JSON.parse(unicodeAtob(encryptedMeta));
     // New format: { names: { [userId]: username } }
     if (json.names) {
       for (const [id, name] of Object.entries(json.names)) {
@@ -46,14 +47,14 @@ function parseDmDisplayName(encryptedMeta: string, myUserId: string): string {
 
 function parseServerName(encryptedMeta: string): string {
   try {
-    const decoded = atob(encryptedMeta);
+    const decoded = unicodeAtob(encryptedMeta);
     // Try JSON first
     const json = JSON.parse(decoded);
     return json.name || "unnamed";
   } catch {
     // Fallback: raw string (used in create_server)
     try {
-      return atob(encryptedMeta) || "unnamed";
+      return unicodeAtob(encryptedMeta) || "unnamed";
     } catch {
       return "unnamed";
     }
@@ -115,7 +116,7 @@ export default function Sidebar() {
     setCreateServerError("");
     try {
       const meta = JSON.stringify({ name: serverName.trim() });
-      const metaBase64 = btoa(meta);
+      const metaBase64 = unicodeBtoa(meta);
       await api.createServer({ encrypted_meta: metaBase64 });
       await loadChannels();
       setServerName("");

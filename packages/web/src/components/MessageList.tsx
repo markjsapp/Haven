@@ -86,6 +86,7 @@ export default function MessageList() {
   const startReply = useChatStore((s) => s.startReply);
   const pinnedMessageIds = useChatStore((s) => s.pinnedMessageIds);
   const userRoleColors = useChatStore((s) => s.userRoleColors);
+  const customEmojis = useChatStore((s) => s.customEmojis);
   const user = useAuthStore((s) => s.user);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -95,6 +96,17 @@ export default function MessageList() {
   const { can } = usePermissions(serverId);
   const canManageMessages = can(Permission.MANAGE_MESSAGES);
   const nameMap = useMemo(() => parseNamesFromMeta(currentChannel?.encrypted_meta), [currentChannel?.encrypted_meta]);
+
+  // Build custom emoji lookup map for the current server
+  const customEmojiMap = useMemo(() => {
+    const map = new Map<string, { name: string; image_url: string }>();
+    if (!serverId) return map;
+    const emojis = customEmojis[serverId] ?? [];
+    for (const e of emojis) {
+      map.set(e.id, { name: e.name, image_url: e.image_url });
+    }
+    return map;
+  }, [serverId, customEmojis]);
   const pinnedIds = currentChannelId ? pinnedMessageIds[currentChannelId] ?? [] : [];
 
   const channelDisplay = useMemo(() => {
@@ -336,7 +348,7 @@ export default function MessageList() {
                 )}
                 {(() => {
                   const displayText = stripEmbeddedImageUrls(msg.text, msg.linkPreviews);
-                  return displayText ? <MessageBody text={displayText} contentType={msg.contentType} formatting={msg.formatting} /> : null;
+                  return displayText ? <MessageBody text={displayText} contentType={msg.contentType} formatting={msg.formatting} customEmojiMap={customEmojiMap} /> : null;
                 })()}
                 {msg.attachments && msg.attachments.length > 0 && (
                   <MessageAttachments attachments={msg.attachments} />
@@ -360,7 +372,13 @@ export default function MessageList() {
                           onClick={() => toggleReaction(msg.id, r.emoji)}
                           title={r.userIds.map((id) => userNames[id] ?? nameMap[id] ?? id.slice(0, 8)).join(", ")}
                         >
-                          <span className="reaction-emoji">{r.emoji}</span>
+                          <span className="reaction-emoji">{(() => {
+                            // Check if this is a custom emoji (UUID format)
+                            const customId = r.emoji.match(/^:?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):?$/i)?.[1];
+                            const ce = customId ? customEmojiMap.get(customId) : null;
+                            if (ce) return <img className="custom-emoji-reaction" src={`${ce.image_url}`} alt={`:${ce.name}:`} />;
+                            return r.emoji;
+                          })()}</span>
                           <span className="reaction-count">{r.userIds.length}</span>
                         </button>
                       );
@@ -435,6 +453,7 @@ export default function MessageList() {
                     <EmojiPicker
                       onSelect={(emoji) => handleReactionSelect(msg.id, emoji)}
                       onClose={() => setReactionPickerMsgId(null)}
+                      serverId={serverId ?? undefined}
                     />
                   </div>
                 )}

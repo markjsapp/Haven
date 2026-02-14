@@ -2,6 +2,7 @@ import { useRef, useState, useEffect, lazy, Suspense } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { parseChannelName } from "../lib/channel-utils.js";
+import { unicodeBtoa, unicodeAtob } from "../lib/base64.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import EmojiPicker from "./EmojiPicker.js";
 
@@ -44,7 +45,7 @@ export default function ChannelSettings({
   let currentName = "unnamed";
   let currentTopic = "";
   try {
-    const meta = JSON.parse(atob(channel.encrypted_meta));
+    const meta = JSON.parse(unicodeAtob(channel.encrypted_meta));
     currentName = meta.name || "unnamed";
     currentTopic = meta.topic || "";
   } catch { /* ignore */ }
@@ -95,15 +96,13 @@ export default function ChannelSettings({
         <div className="user-settings-content">
           <div className="user-settings-content-header">
             <h2>{tab === "overview" ? "Overview" : "Permissions"}</h2>
-            <button
-              className="user-settings-close"
-              onClick={onClose}
-              title="Close"
-              aria-label="Close channel settings"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-              </svg>
+            <button className="settings-esc-close" onClick={onClose} aria-label="Close channel settings">
+              <div className="settings-esc-circle">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                </svg>
+              </div>
+              <span className="settings-esc-label">ESC</span>
             </button>
           </div>
           <div className="user-settings-content-body">
@@ -175,13 +174,13 @@ function OverviewTab({
       // Reconstruct meta preserving existing fields
       let meta: Record<string, unknown> = {};
       try {
-        meta = JSON.parse(atob(encryptedMeta));
+        meta = JSON.parse(unicodeAtob(encryptedMeta));
       } catch { /* start fresh */ }
       meta.name = name.trim();
       meta.topic = topic.trim() || undefined;
 
       await api.updateChannel(channelId, {
-        encrypted_meta: btoa(JSON.stringify(meta)),
+        encrypted_meta: unicodeBtoa(JSON.stringify(meta)),
       });
       useChatStore.getState().loadChannels();
       setSuccess("Channel updated");
@@ -237,6 +236,7 @@ function OverviewTab({
             <EmojiPicker
               onSelect={handleEmojiSelect}
               onClose={() => setShowEmojiPicker(false)}
+              position="below"
             />
           )}
         </div>

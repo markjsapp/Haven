@@ -2,6 +2,7 @@ pub mod auth_routes;
 pub mod bans;
 pub mod categories;
 pub mod channels;
+pub mod emojis;
 pub mod friends;
 pub mod invites;
 pub mod key_backup;
