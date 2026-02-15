@@ -31,7 +31,7 @@ fn encrypt_blob(data: &[u8], server_key: &[u8; 32]) -> io::Result<Vec<u8>> {
 
     let ciphertext = cipher
         .encrypt(&nonce, data)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Encryption failed: {}", e)))?;
+        .map_err(|e| io::Error::other(format!("Encryption failed: {}", e)))?;
 
     let mut output = Vec::with_capacity(12 + ciphertext.len());
     output.extend_from_slice(nonce.as_slice());
@@ -54,7 +54,7 @@ fn decrypt_blob(data: &[u8], server_key: &[u8; 32]) -> io::Result<Vec<u8>> {
 
     cipher
         .decrypt(nonce, ciphertext)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Decryption failed: {}", e)))
+        .map_err(|e| io::Error::other(format!("Decryption failed: {}", e)))
 }
 
 // ─── Storage Backend ──────────────────────────────────────
@@ -150,7 +150,7 @@ impl Storage {
                     .send()
                     .await
                     .map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, format!("S3 put failed: {}", e))
+                        io::Error::other(format!("S3 put failed: {}", e))
                     })?;
                 Ok(())
             }
@@ -177,7 +177,7 @@ impl Storage {
                     .send()
                     .await
                     .map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, format!("S3 put failed: {}", e))
+                        io::Error::other(format!("S3 put failed: {}", e))
                     })?;
                 Ok(())
             }
@@ -199,7 +199,7 @@ impl Storage {
                     .send()
                     .await
                     .map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, format!("S3 get failed: {}", e))
+                        io::Error::other(format!("S3 get failed: {}", e))
                     })?;
 
                 let bytes = output
@@ -207,7 +207,7 @@ impl Storage {
                     .collect()
                     .await
                     .map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, format!("S3 read body failed: {}", e))
+                        io::Error::other(format!("S3 read body failed: {}", e))
                     })?
                     .into_bytes()
                     .to_vec();
@@ -279,7 +279,7 @@ impl Storage {
                     .send()
                     .await
                     .map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, format!("S3 delete failed: {}", e))
+                        io::Error::other(format!("S3 delete failed: {}", e))
                     })?;
                 Ok(())
             }
@@ -301,7 +301,7 @@ impl Storage {
                     .send()
                     .await
                     .map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, format!("S3 get failed: {}", e))
+                        io::Error::other(format!("S3 get failed: {}", e))
                     })?;
 
                 output
@@ -309,7 +309,7 @@ impl Storage {
                     .collect()
                     .await
                     .map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, format!("S3 read body failed: {}", e))
+                        io::Error::other(format!("S3 read body failed: {}", e))
                     })?
                     .into_bytes()
                     .to_vec()

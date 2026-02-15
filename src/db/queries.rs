@@ -7,6 +7,7 @@ use crate::models::*;
 
 // ─── Users ─────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_user(
     pool: &Pool,
     username: &str,
@@ -682,6 +683,7 @@ pub async fn find_message_by_id(pool: &Pool, id: Uuid) -> AppResult<Option<Messa
     Ok(msg)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_message(
     pool: &Pool,
     channel_id: Uuid,
@@ -1307,6 +1309,7 @@ pub async fn get_server_members(
     offset: i64,
 ) -> AppResult<Vec<ServerMemberResponse>> {
     // Step 1: Get members (paginated)
+    #[allow(clippy::type_complexity)]
     let rows: Vec<(Uuid, String, Option<String>, Option<String>, DateTime<Utc>, Option<String>, Option<DateTime<Utc>>)> =
         sqlx::query_as(
             r#"
@@ -2655,6 +2658,7 @@ pub async fn is_member_timed_out(
 
 // ─── Audit Log ───────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_audit_log(
     pool: &Pool,
     server_id: Uuid,
@@ -2690,6 +2694,7 @@ pub async fn get_audit_log(
     limit: i64,
     before: Option<DateTime<Utc>>,
 ) -> AppResult<Vec<AuditLogResponse>> {
+    #[allow(clippy::type_complexity)]
     let rows: Vec<(Uuid, Uuid, String, String, Option<String>, Option<Uuid>, Option<serde_json::Value>, Option<String>, DateTime<Utc>)> = if let Some(before_ts) = before {
         sqlx::query_as(
             r#"

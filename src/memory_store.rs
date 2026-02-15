@@ -25,8 +25,8 @@ pub struct MemoryStore {
     pub voice_deafened: Arc<DashMap<Uuid, HashSet<Uuid>>>,
 }
 
-impl MemoryStore {
-    pub fn new() -> Self {
+impl Default for MemoryStore {
+    fn default() -> Self {
         Self {
             presence: Arc::new(DashMap::new()),
             cache: Arc::new(DashMap::new()),
@@ -35,6 +35,12 @@ impl MemoryStore {
             voice_muted: Arc::new(DashMap::new()),
             voice_deafened: Arc::new(DashMap::new()),
         }
+    }
+}
+
+impl MemoryStore {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Spawn a background task that prunes expired cache and PoW entries every 60 seconds.

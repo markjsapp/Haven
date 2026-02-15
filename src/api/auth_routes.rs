@@ -532,7 +532,7 @@ pub async fn delete_account(
         .bind(user_id)
         .execute(state.db.write())
         .await
-        .map_err(|e| AppError::Database(e))?;
+        .map_err(AppError::Database)?;
 
     // 8. Clean up stored files (avatar, banner)
     let avatar_key = storage::obfuscated_key(&state.storage_key, &format!("avatar:{}", user_id));

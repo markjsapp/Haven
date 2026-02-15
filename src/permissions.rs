@@ -1,6 +1,5 @@
 /// Permission bitfield constants (Discord-style).
 /// Each permission is a single bit in a u64 / i64.
-
 pub const ADMINISTRATOR: i64         = 1 << 0;
 pub const MANAGE_SERVER: i64         = 1 << 1;
 pub const MANAGE_ROLES: i64          = 1 << 2;

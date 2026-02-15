@@ -202,10 +202,8 @@ pub async fn server_mute(
             .entry(channel_id)
             .or_insert_with(HashSet::new)
             .insert(target_user_id);
-    } else {
-        if let Some(mut set) = state.memory.voice_muted.get_mut(&channel_id) {
-            set.remove(&target_user_id);
-        }
+    } else if let Some(mut set) = state.memory.voice_muted.get_mut(&channel_id) {
+        set.remove(&target_user_id);
     }
 
     // Get current deafen state
@@ -253,10 +251,8 @@ pub async fn server_deafen(
             .entry(channel_id)
             .or_insert_with(HashSet::new)
             .insert(target_user_id);
-    } else {
-        if let Some(mut set) = state.memory.voice_deafened.get_mut(&channel_id) {
-            set.remove(&target_user_id);
-        }
+    } else if let Some(mut set) = state.memory.voice_deafened.get_mut(&channel_id) {
+        set.remove(&target_user_id);
     }
 
     // Get current mute state
