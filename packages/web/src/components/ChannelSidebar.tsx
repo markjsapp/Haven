@@ -38,6 +38,7 @@ import {
   type DragStartEvent,
   type DragEndEvent,
   type DragOverEvent,
+  type CollisionDetection,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -1190,6 +1191,36 @@ function ServerView({ serverId }: { serverId: string }) {
     return order;
   }
 
+  // Custom collision detection: when dragging a category, only collide with other categories
+  // using pointer Y position instead of closestCenter (which fails for tall containers)
+  const collisionDetection: CollisionDetection = useCallback((args) => {
+    const activeData = args.active.data.current;
+    if (activeData?.type === "category") {
+      const catContainers = args.droppableContainers.filter(
+        (c) => c.id.toString().startsWith("cat-")
+      );
+      // Use pointer Y coordinate to find the nearest category
+      const pointerY = args.pointerCoordinates?.y;
+      if (pointerY != null) {
+        let closest: { id: string | number; distance: number } | null = null;
+        for (const container of catContainers) {
+          const rect = args.droppableRects.get(container.id);
+          if (!rect) continue;
+          // Distance from pointer to top of container (header area)
+          const dist = Math.abs(pointerY - rect.top);
+          if (!closest || dist < closest.distance) {
+            closest = { id: container.id, distance: dist };
+          }
+        }
+        if (closest) {
+          return [{ id: closest.id }];
+        }
+      }
+      return closestCenter({ ...args, droppableContainers: catContainers });
+    }
+    return closestCenter(args);
+  }, []);
+
   function handleDragStart(event: DragStartEvent) {
     const id = event.active.id as string;
     setActiveDragId(id);
@@ -1331,6 +1362,9 @@ function ServerView({ serverId }: { serverId: string }) {
   const draggedChannel = activeDragId
     ? serverChannels.find((ch) => ch.id === activeDragId)
     : null;
+  const draggedCategory = activeDragId?.startsWith("cat-")
+    ? serverCategories.find((c) => `cat-${c.id}` === activeDragId)
+    : null;
 
   return (
     <>
@@ -1396,7 +1430,7 @@ function ServerView({ serverId }: { serverId: string }) {
       }}>
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCenter}
+          collisionDetection={collisionDetection}
           onDragStart={handleDragStart}
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
@@ -1489,6 +1523,10 @@ function ServerView({ serverId }: { serverId: string }) {
             {draggedChannel ? (
               <div className="channel-drag-overlay">
                 <ChannelItemContent ch={draggedChannel} isOverlay />
+              </div>
+            ) : draggedCategory ? (
+              <div className="channel-drag-overlay category-drag-overlay">
+                <span className="category-drag-label">{draggedCategory.name.toUpperCase()}</span>
               </div>
             ) : null}
           </DragOverlay>

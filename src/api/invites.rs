@@ -38,7 +38,7 @@ pub async fn create_invite(
     let code = generate_invite_code();
 
     let expires_at = req.expires_in_hours.map(|hours| {
-        Utc::now() + chrono::Duration::hours(hours)
+        Utc::now() + chrono::Duration::seconds((hours * 3600.0) as i64)
     });
 
     let invite = queries::create_invite(

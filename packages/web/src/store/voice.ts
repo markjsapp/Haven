@@ -4,7 +4,7 @@ import type { VoiceParticipant } from "@haven/core";
 import { useAuthStore } from "./auth.js";
 
 export type VoiceConnectionState = "disconnected" | "connecting" | "connected";
-export type ScreenShareQuality = "360p" | "720p" | "720p60" | "1080p" | "1080p60";
+export type ScreenShareQuality = "360p" | "720p" | "720p60" | "1080p" | "1080p60" | "1440p" | "1440p60" | "4k" | "4k60";
 
 interface VoiceSettings {
   inputDeviceId: string;

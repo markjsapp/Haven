@@ -32,6 +32,21 @@ services:
       timeout: 3s
       retries: 5
 
+  livekit:
+    image: livekit/livekit-server:latest
+    ports:
+      - "7880:7880"     # HTTP + WebSocket signaling
+      - "7881:7881"     # RTC over TCP
+      - "7882:7882/udp" # RTC over UDP (media traffic)
+    environment:
+      LIVEKIT_KEYS: "LIVEKIT_CREDENTIALS_REMOVED="
+    command: --dev --bind 0.0.0.0
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # MinIO (S3-compatible) — uncomment when deploying to production
   # minio:
   #   image: minio/minio:latest

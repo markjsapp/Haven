@@ -101,6 +101,8 @@ interface ChatState {
   customEmojis: Record<string, CustomEmojiResponse[]>;
   /** "serverId:userId" -> timed_out_until timestamp (null = no timeout) */
   memberTimeouts: Record<string, string | null>;
+  /** Incremented when server membership changes (join/leave/kick) — triggers member list refresh */
+  memberListVersion: number;
 
   connect(): void;
   disconnect(): void;
@@ -181,6 +183,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   userRoleColors: {},
   customEmojis: {},
   memberTimeouts: {},
+  memberListVersion: 0,
 
   connect() {
     const { api } = useAuthStore.getState();
@@ -342,12 +345,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Custom emoji events
     ws.on("EmojiCreated", (msg: Extract<WsServerMessage, { type: "EmojiCreated" }>) => {
       const { server_id, emoji } = msg.payload;
-      set((state) => ({
-        customEmojis: {
-          ...state.customEmojis,
-          [server_id]: [...(state.customEmojis[server_id] ?? []), emoji],
-        },
-      }));
+      set((state) => {
+        const existing = state.customEmojis[server_id] ?? [];
+        // Deduplicate: broadcast_to_server sends once per channel, so skip if already added
+        if (existing.some((e) => e.id === emoji.id)) return state;
+        return {
+          customEmojis: {
+            ...state.customEmojis,
+            [server_id]: [...existing, emoji],
+          },
+        };
+      });
     });
 
     ws.on("EmojiDeleted", (msg: Extract<WsServerMessage, { type: "EmojiDeleted" }>) => {
@@ -1213,11 +1221,18 @@ async function handleIncomingMessage(raw: MessageResponse) {
     try { sysText = unicodeAtob(raw.encrypted_body); } catch { sysText = raw.encrypted_body; }
 
     // Update userNames from member_joined events so new users show their name
+    // Also bump memberListVersion so MemberSidebar refreshes
     try {
       const data = JSON.parse(sysText);
       if (data.event === "member_joined" && data.user_id && data.username) {
         useChatStore.setState((state) => ({
           userNames: { ...state.userNames, [data.user_id]: data.username },
+          memberListVersion: state.memberListVersion + 1,
+        }));
+      }
+      if (data.event === "member_left" || data.event === "member_kicked") {
+        useChatStore.setState((state) => ({
+          memberListVersion: state.memberListVersion + 1,
         }));
       }
     } catch { /* not valid JSON, ignore */ }

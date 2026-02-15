@@ -6,6 +6,61 @@ import { parseServerName } from "../lib/channel-utils.js";
 import { unicodeBtoa } from "../lib/base64.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
 import { useRovingTabindex } from "../hooks/useRovingTabindex.js";
+import {
+  DndContext,
+  DragOverlay,
+  useDroppable,
+  useSensors,
+  useSensor,
+  PointerSensor,
+  closestCenter,
+  type DragStartEvent,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+const SERVER_ORDER_KEY = "haven:server-order";
+const SERVER_FOLDERS_KEY = "haven:server-folders";
+
+interface ServerFolder {
+  id: string;
+  name: string;
+  color: string;
+  serverIds: string[];
+}
+
+function loadServerOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(SERVER_ORDER_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveServerOrder(order: string[]) {
+  localStorage.setItem(SERVER_ORDER_KEY, JSON.stringify(order));
+}
+
+function loadFolders(): ServerFolder[] {
+  try {
+    const raw = localStorage.getItem(SERVER_FOLDERS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveFolders(folders: ServerFolder[]) {
+  localStorage.setItem(SERVER_FOLDERS_KEY, JSON.stringify(folders));
+}
+
+const FOLDER_COLORS = [
+  "#5865F2", "#57F287", "#FEE75C", "#EB459E", "#ED4245",
+  "#FF8C00", "#9B59B6", "#1ABC9C", "#E91E63", "#607D8B",
+];
 
 export default function ServerBar() {
   const servers = useChatStore((s) => s.servers);
@@ -16,6 +71,157 @@ export default function ServerBar() {
   const selectServer = useUiStore((s) => s.selectServer);
   const api = useAuthStore((s) => s.api);
   const user = useAuthStore((s) => s.user);
+
+  // ─── Server ordering (localStorage) ──────────────
+  const [serverOrder, setServerOrder] = useState<string[]>(loadServerOrder);
+  const [folders, setFolders] = useState<ServerFolder[]>(loadFolders);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [editingFolder, setEditingFolder] = useState<{ id: string; name: string; color: string } | null>(null);
+  const [folderCtxMenu, setFolderCtxMenu] = useState<{ x: number; y: number; folderId: string } | null>(null);
+
+  // Sorted servers: respect custom order, append any new servers at the end
+  const sortedServers = useMemo(() => {
+    const orderMap = new Map(serverOrder.map((id, i) => [id, i]));
+    const sorted = [...servers].sort((a, b) => {
+      const ai = orderMap.get(a.id);
+      const bi = orderMap.get(b.id);
+      if (ai !== undefined && bi !== undefined) return ai - bi;
+      if (ai !== undefined) return -1;
+      if (bi !== undefined) return 1;
+      return 0;
+    });
+    return sorted;
+  }, [servers, serverOrder]);
+
+  // Sync order when servers change (remove stale, keep order for existing)
+  useEffect(() => {
+    const serverIds = new Set(servers.map((s) => s.id));
+    const cleaned = serverOrder.filter((id) => serverIds.has(id));
+    // Add new servers not yet in order
+    for (const s of servers) {
+      if (!cleaned.includes(s.id)) cleaned.push(s.id);
+    }
+    if (JSON.stringify(cleaned) !== JSON.stringify(serverOrder)) {
+      setServerOrder(cleaned);
+      saveServerOrder(cleaned);
+    }
+    // Clean stale server IDs from folders
+    let foldersChanged = false;
+    const cleanedFolders = folders.map((f) => {
+      const validIds = f.serverIds.filter((id) => serverIds.has(id));
+      if (validIds.length !== f.serverIds.length) { foldersChanged = true; return { ...f, serverIds: validIds }; }
+      return f;
+    }).filter((f) => f.serverIds.length > 0);
+    if (foldersChanged || cleanedFolders.length !== folders.length) {
+      setFolders(cleanedFolders);
+      saveFolders(cleanedFolders);
+    }
+  }, [servers]);
+
+  // Which servers are in folders (for filtering the top-level list)
+  const folderedServerIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const f of folders) for (const id of f.serverIds) ids.add(id);
+    return ids;
+  }, [folders]);
+
+  // Servers NOT in any folder
+  const topLevelServers = useMemo(
+    () => sortedServers.filter((s) => !folderedServerIds.has(s.id)),
+    [sortedServers, folderedServerIds]
+  );
+
+  function createFolder(serverId: string) {
+    const srv = servers.find((s) => s.id === serverId);
+    const name = srv ? parseServerName(srv.encrypted_meta) : "Folder";
+    const newFolder: ServerFolder = {
+      id: crypto.randomUUID(),
+      name,
+      color: FOLDER_COLORS[folders.length % FOLDER_COLORS.length],
+      serverIds: [serverId],
+    };
+    const updated = [...folders, newFolder];
+    setFolders(updated);
+    saveFolders(updated);
+    setExpandedFolders((prev) => new Set(prev).add(newFolder.id));
+  }
+
+  function addToFolder(folderId: string, serverId: string) {
+    const updated = folders.map((f) =>
+      f.id === folderId && !f.serverIds.includes(serverId)
+        ? { ...f, serverIds: [...f.serverIds, serverId] }
+        : f
+    );
+    setFolders(updated);
+    saveFolders(updated);
+  }
+
+  function removeFromFolder(folderId: string, serverId: string) {
+    const updated = folders
+      .map((f) => f.id === folderId ? { ...f, serverIds: f.serverIds.filter((id) => id !== serverId) } : f)
+      .filter((f) => f.serverIds.length > 0);
+    setFolders(updated);
+    saveFolders(updated);
+  }
+
+  function deleteFolder(folderId: string) {
+    const updated = folders.filter((f) => f.id !== folderId);
+    setFolders(updated);
+    saveFolders(updated);
+  }
+
+  function updateFolder(folderId: string, patch: Partial<Pick<ServerFolder, "name" | "color">>) {
+    const updated = folders.map((f) => f.id === folderId ? { ...f, ...patch } : f);
+    setFolders(updated);
+    saveFolders(updated);
+  }
+
+  function toggleFolder(folderId: string) {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      return next;
+    });
+  }
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+  const [dragServerId, setDragServerId] = useState<string | null>(null);
+
+  function handleServerDragStart(event: DragStartEvent) {
+    setDragServerId(event.active.id as string);
+  }
+
+  function handleServerDragEnd(event: DragEndEvent) {
+    setDragServerId(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    // Check if dropped on a folder drop zone
+    if (overId.startsWith("folder-drop-")) {
+      const folderId = overId.replace("folder-drop-", "");
+      // Don't add if already in this folder
+      const folder = folders.find((f) => f.id === folderId);
+      if (folder && !folder.serverIds.includes(activeId)) {
+        addToFolder(folderId, activeId);
+      }
+      return;
+    }
+
+    // Normal server reorder
+    const ids = topLevelServers.map((s) => s.id);
+    const oldIdx = ids.indexOf(activeId);
+    const newIdx = ids.indexOf(overId);
+    if (oldIdx === -1 || newIdx === -1) return;
+    const newOrder = arrayMove(sortedServers.map((s) => s.id), sortedServers.findIndex((s) => s.id === activeId), sortedServers.findIndex((s) => s.id === overId));
+    setServerOrder(newOrder);
+    saveServerOrder(newOrder);
+  }
 
   // Compute per-server unread totals
   const serverUnreads = useMemo(() => {
@@ -87,11 +293,11 @@ export default function ServerBar() {
   const [confirmAction, setConfirmAction] = useState<{ type: "leave" | "delete"; serverId: string; serverName: string; isOwnerSoleMember?: boolean } | null>(null);
 
   useEffect(() => {
-    if (!ctxMenu) return;
-    const handler = () => setCtxMenu(null);
+    if (!ctxMenu && !folderCtxMenu) return;
+    const handler = () => { setCtxMenu(null); setFolderCtxMenu(null); };
     document.addEventListener("click", handler);
     return () => document.removeEventListener("click", handler);
-  }, [ctxMenu]);
+  }, [ctxMenu, folderCtxMenu]);
 
   function handleServerContextMenu(e: React.MouseEvent, serverId: string) {
     e.preventDefault();
@@ -186,41 +392,108 @@ export default function ServerBar() {
 
         <div className="server-bar-divider" />
 
-        {/* Server list */}
-        {servers.map((srv) => {
-          const name = parseServerName(srv.encrypted_meta);
-          const isActive = selectedServerId === srv.id;
-          const srvUnread = serverUnreads[srv.id] ?? 0;
-          return (
-            <div
-              key={srv.id}
-              className={`server-icon-wrapper ${isActive ? "active" : ""}`}
-              ref={(el) => { if (el) serverItemRefs.current.set(srv.id, el); else serverItemRefs.current.delete(srv.id); }}
-            >
-              <span className="server-pill" />
-              <button
-                className={`server-icon ${isActive ? "active" : ""}`}
-                onClick={() => selectServer(srv.id)}
-                onContextMenu={(e) => handleServerContextMenu(e, srv.id)}
-                title={name}
-                aria-label={name}
-                data-roving-item
-                tabIndex={isActive ? 0 : -1}
-              >
-                {srv.icon_url ? (
-                  <img
-                    src={srv.icon_url}
-                    alt={name}
-                    className="server-icon-img"
-                  />
-                ) : (
-                  name.charAt(0).toUpperCase()
-                )}
-                {srvUnread > 0 && <span className="server-unread-dot" />}
-              </button>
-            </div>
-          );
-        })}
+        {/* Server list (sortable) — includes folders */}
+        <DndContext
+          sensors={dndSensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleServerDragStart}
+          onDragEnd={handleServerDragEnd}
+        >
+          <SortableContext items={topLevelServers.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+            {/* Render folders first */}
+            {folders.map((folder) => {
+              const isExpanded = expandedFolders.has(folder.id);
+              const folderServers = folder.serverIds
+                .map((id) => servers.find((s) => s.id === id))
+                .filter(Boolean) as typeof servers;
+              const folderUnread = folderServers.reduce((sum, s) => sum + (serverUnreads[s.id] ?? 0), 0);
+              const hasActive = folderServers.some((s) => s.id === selectedServerId);
+              return (
+                <DroppableFolderIcon
+                  key={`folder-${folder.id}`}
+                  folderId={folder.id}
+                  folder={folder}
+                  isExpanded={isExpanded}
+                  hasActive={hasActive}
+                  folderUnread={folderUnread}
+                  onToggle={() => toggleFolder(folder.id)}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFolderCtxMenu({ x: e.clientX, y: e.clientY, folderId: folder.id }); }}
+                >
+                  {isExpanded && (
+                    <div className="server-folder-expanded">
+                      {folderServers.map((srv) => {
+                        const name = parseServerName(srv.encrypted_meta);
+                        const isActive = selectedServerId === srv.id;
+                        const srvUnread = serverUnreads[srv.id] ?? 0;
+                        return (
+                          <div key={srv.id} className={`server-icon-wrapper ${isActive ? "active" : ""}`}>
+                            <span className="server-pill" />
+                            <button
+                              className={`server-icon ${isActive ? "active" : ""}`}
+                              onClick={() => selectServer(srv.id)}
+                              onContextMenu={(e) => handleServerContextMenu(e, srv.id)}
+                              title={name}
+                              aria-label={name}
+                              data-roving-item
+                              tabIndex={isActive ? 0 : -1}
+                            >
+                              {srv.icon_url ? (
+                                <img src={srv.icon_url} alt={name} className="server-icon-img" />
+                              ) : (
+                                name.charAt(0).toUpperCase()
+                              )}
+                              {srvUnread > 0 && <span className="server-unread-dot" />}
+                            </button>
+                          </div>
+                        );
+                      })}
+                      <div className="server-folder-end-line" style={{ borderColor: folder.color }} />
+                    </div>
+                  )}
+                </DroppableFolderIcon>
+              );
+            })}
+
+            {/* Top-level servers (not in any folder) */}
+            {topLevelServers.map((srv) => {
+              const name = parseServerName(srv.encrypted_meta);
+              const isActive = selectedServerId === srv.id;
+              const srvUnread = serverUnreads[srv.id] ?? 0;
+              return (
+                <SortableServerIcon
+                  key={srv.id}
+                  id={srv.id}
+                  name={name}
+                  iconUrl={srv.icon_url}
+                  isActive={isActive}
+                  unread={srvUnread}
+                  onSelect={() => selectServer(srv.id)}
+                  onContextMenu={(e) => handleServerContextMenu(e, srv.id)}
+                  innerRef={(el) => { if (el) serverItemRefs.current.set(srv.id, el); else serverItemRefs.current.delete(srv.id); }}
+                />
+              );
+            })}
+          </SortableContext>
+
+          <DragOverlay>
+            {dragServerId ? (() => {
+              const srv = sortedServers.find((s) => s.id === dragServerId);
+              if (!srv) return null;
+              const name = parseServerName(srv.encrypted_meta);
+              return (
+                <div className="server-icon-wrapper server-drag-overlay">
+                  <div className="server-icon">
+                    {srv.icon_url ? (
+                      <img src={srv.icon_url} alt={name} className="server-icon-img" />
+                    ) : (
+                      name.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                </div>
+              );
+            })() : null}
+          </DragOverlay>
+        </DndContext>
 
         <div className="server-bar-divider" />
 
@@ -297,11 +570,14 @@ export default function ServerBar() {
         if (!srv) return null;
         const name = parseServerName(srv.encrypted_meta);
         const isOwner = user?.id === srv.owner_id;
+        const currentFolder = folders.find((f) => f.serverIds.includes(srv.id));
         return (
           <ServerBarContextMenu
             x={ctxMenu.x}
             y={ctxMenu.y}
             isOwner={isOwner}
+            folders={folders}
+            currentFolderId={currentFolder?.id ?? null}
             onLeave={() => {
               setCtxMenu(null);
               setConfirmAction({
@@ -318,9 +594,75 @@ export default function ServerBar() {
                 serverName: name,
               });
             }}
+            onCreateFolder={() => { setCtxMenu(null); createFolder(srv.id); }}
+            onAddToFolder={(folderId) => { setCtxMenu(null); addToFolder(folderId, srv.id); }}
+            onRemoveFromFolder={() => { if (currentFolder) { setCtxMenu(null); removeFromFolder(currentFolder.id, srv.id); } }}
           />
         );
       })()}
+
+      {/* Folder context menu */}
+      {folderCtxMenu && (() => {
+        const folder = folders.find((f) => f.id === folderCtxMenu.folderId);
+        if (!folder) return null;
+        return (
+          <FolderContextMenu
+            x={folderCtxMenu.x}
+            y={folderCtxMenu.y}
+            folder={folder}
+            onEdit={() => { setFolderCtxMenu(null); setEditingFolder({ id: folder.id, name: folder.name, color: folder.color }); }}
+            onDelete={() => { setFolderCtxMenu(null); deleteFolder(folder.id); }}
+          />
+        );
+      })()}
+
+      {/* Edit folder modal */}
+      {editingFolder && (
+        <div className="modal-overlay" onClick={() => setEditingFolder(null)} role="presentation">
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="edit-folder-title">
+            <h2 className="modal-title" id="edit-folder-title">Edit Folder</h2>
+            <label className="modal-label">FOLDER NAME</label>
+            <input
+              className="modal-input"
+              type="text"
+              value={editingFolder.name}
+              onChange={(e) => setEditingFolder({ ...editingFolder, name: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  updateFolder(editingFolder.id, { name: editingFolder.name.trim() || "Folder", color: editingFolder.color });
+                  setEditingFolder(null);
+                }
+              }}
+              autoFocus
+              maxLength={32}
+            />
+            <label className="modal-label" style={{ marginTop: 12 }}>COLOR</label>
+            <div className="folder-color-picker">
+              {FOLDER_COLORS.map((c) => (
+                <button
+                  key={c}
+                  className={`folder-color-swatch ${editingFolder.color === c ? "active" : ""}`}
+                  style={{ backgroundColor: c }}
+                  onClick={() => setEditingFolder({ ...editingFolder, color: c })}
+                  aria-label={c}
+                />
+              ))}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setEditingFolder(null)}>Cancel</button>
+              <button
+                className="btn-primary modal-submit"
+                onClick={() => {
+                  updateFolder(editingFolder.id, { name: editingFolder.name.trim() || "Folder", color: editingFolder.color });
+                  setEditingFolder(null);
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Confirm leave/delete dialog */}
       {confirmAction && (
@@ -432,18 +774,91 @@ export default function ServerBar() {
   );
 }
 
+function SortableServerIcon({
+  id,
+  name,
+  iconUrl,
+  isActive,
+  unread,
+  onSelect,
+  onContextMenu,
+  innerRef,
+}: {
+  id: string;
+  name: string;
+  iconUrl?: string | null;
+  isActive: boolean;
+  unread: number;
+  onSelect: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  innerRef: (el: HTMLDivElement | null) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    opacity: isDragging ? 0.3 : undefined,
+  };
+
+  return (
+    <div
+      ref={(el) => { setNodeRef(el); innerRef(el); }}
+      style={style}
+      className={`server-icon-wrapper ${isActive ? "active" : ""}`}
+      {...attributes}
+      {...listeners}
+    >
+      <span className="server-pill" />
+      <button
+        className={`server-icon ${isActive ? "active" : ""}`}
+        onClick={onSelect}
+        onContextMenu={onContextMenu}
+        title={name}
+        aria-label={name}
+        data-roving-item
+        tabIndex={isActive ? 0 : -1}
+      >
+        {iconUrl ? (
+          <img src={iconUrl} alt={name} className="server-icon-img" />
+        ) : (
+          name.charAt(0).toUpperCase()
+        )}
+        {unread > 0 && <span className="server-unread-dot" />}
+      </button>
+    </div>
+  );
+}
+
 function ServerBarContextMenu({
   x,
   y,
   isOwner,
+  folders,
+  currentFolderId,
   onLeave,
   onDelete,
+  onCreateFolder,
+  onAddToFolder,
+  onRemoveFromFolder,
 }: {
   x: number;
   y: number;
   isOwner: boolean;
+  folders: ServerFolder[];
+  currentFolderId: string | null;
   onLeave: () => void;
   onDelete: () => void;
+  onCreateFolder: () => void;
+  onAddToFolder: (folderId: string) => void;
+  onRemoveFromFolder: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
@@ -458,6 +873,29 @@ function ServerBarContextMenu({
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
+      {currentFolderId ? (
+        <button role="menuitem" tabIndex={-1} className="context-menu-item" onClick={onRemoveFromFolder}>
+          Remove from Folder
+        </button>
+      ) : (
+        <>
+          <button role="menuitem" tabIndex={-1} className="context-menu-item" onClick={onCreateFolder}>
+            Create Folder
+          </button>
+          {folders.length > 0 && (
+            <>
+              <div className="context-menu-separator" />
+              {folders.map((f) => (
+                <button key={f.id} role="menuitem" tabIndex={-1} className="context-menu-item" onClick={() => onAddToFolder(f.id)}>
+                  <span className="folder-menu-dot" style={{ backgroundColor: f.color }} />
+                  Add to {f.name}
+                </button>
+              ))}
+            </>
+          )}
+        </>
+      )}
+      <div className="context-menu-separator" />
       <button
         role="menuitem"
         tabIndex={-1}
@@ -476,6 +914,88 @@ function ServerBarContextMenu({
           Delete Server
         </button>
       )}
+    </div>
+  );
+}
+
+function DroppableFolderIcon({
+  folderId,
+  folder,
+  isExpanded,
+  hasActive,
+  folderUnread,
+  onToggle,
+  onContextMenu,
+  children,
+}: {
+  folderId: string;
+  folder: ServerFolder;
+  isExpanded: boolean;
+  hasActive: boolean;
+  folderUnread: number;
+  onToggle: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  children?: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `folder-drop-${folderId}` });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`server-folder-wrapper ${isOver ? "folder-drop-hover" : ""}`}
+      onContextMenu={onContextMenu}
+    >
+      <button
+        className={`server-folder-icon ${hasActive ? "active" : ""}`}
+        style={{ borderColor: folder.color }}
+        onClick={onToggle}
+        title={folder.name}
+        aria-label={`${folder.name} folder${isExpanded ? " (expanded)" : ""}`}
+        aria-expanded={isExpanded}
+        data-roving-item
+      >
+        <span style={{ color: folder.color, fontSize: 14, fontWeight: 700 }}>
+          {folder.name.charAt(0).toUpperCase()}
+        </span>
+        {folderUnread > 0 && <span className="server-unread-dot" />}
+      </button>
+      {children}
+    </div>
+  );
+}
+
+function FolderContextMenu({
+  x,
+  y,
+  folder,
+  onEdit,
+  onDelete,
+}: {
+  x: number;
+  y: number;
+  folder: ServerFolder;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown } = useMenuKeyboard(menuRef);
+
+  return (
+    <div
+      ref={menuRef}
+      className="channel-context-menu"
+      style={{ top: y, left: x }}
+      role="menu"
+      aria-label="Folder options"
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+    >
+      <button role="menuitem" tabIndex={-1} className="context-menu-item" onClick={onEdit}>
+        Edit Folder
+      </button>
+      <button role="menuitem" tabIndex={-1} className="context-menu-item-danger" onClick={onDelete}>
+        Delete Folder
+      </button>
     </div>
   );
 }

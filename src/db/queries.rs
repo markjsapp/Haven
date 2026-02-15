@@ -933,6 +933,43 @@ pub async fn ensure_future_partitions(_pool: &Pool) -> AppResult<()> {
     Ok(())
 }
 
+// ─── Data Retention Purge ──────────────────────────────
+
+/// Delete audit log entries older than `retention_days` days.
+/// Called by a daily background worker when audit_log_retention_days > 0.
+pub async fn purge_old_audit_logs(pool: &Pool, retention_days: u32) -> AppResult<u64> {
+    let result = sqlx::query(
+        "DELETE FROM audit_log WHERE created_at < CURRENT_TIMESTAMP - make_interval(days => $1)"
+    )
+    .bind(retention_days as i32)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Delete resolved/dismissed reports older than `retention_days` days.
+/// Pending reports are never auto-deleted.
+pub async fn purge_old_resolved_reports(pool: &Pool, retention_days: u32) -> AppResult<u64> {
+    let result = sqlx::query(
+        "DELETE FROM reports WHERE status != 'pending' AND created_at < CURRENT_TIMESTAMP - make_interval(days => $1)"
+    )
+    .bind(retention_days as i32)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Delete invites that have passed their expiration time.
+/// Invites with no expiry (expires_at IS NULL) are never deleted.
+pub async fn purge_expired_invites(pool: &Pool) -> AppResult<u64> {
+    let result = sqlx::query(
+        "DELETE FROM invites WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP"
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 // ─── Attachments ───────────────────────────────────────
 
 /// Link an attachment (uploaded via presigned URL) to a message.

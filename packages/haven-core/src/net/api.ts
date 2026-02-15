@@ -450,7 +450,7 @@ export class HavenApi {
   // ─── Server Members ───────────────────────────────
 
   async listServerMembers(serverId: string): Promise<ServerMemberResponse[]> {
-    return this.get<ServerMemberResponse[]>(`/api/v1/servers/${serverId}/members`);
+    return this.get<ServerMemberResponse[]>(`/api/v1/servers/${serverId}/members?limit=100`);
   }
 
   async kickMember(serverId: string, userId: string): Promise<void> {

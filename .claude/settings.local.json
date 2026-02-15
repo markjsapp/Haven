@@ -65,7 +65,8 @@
       "Bash(git stash:*)",
       "Bash(git stash pop:*)",
       "WebFetch(domain:crates.io)",
-      "Bash(npx tauri icon:*)"
+      "Bash(npx tauri icon:*)",
+      "WebFetch(domain:www.npmjs.com)"
     ]
   }
 }

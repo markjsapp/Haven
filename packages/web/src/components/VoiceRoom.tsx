@@ -8,7 +8,7 @@ import {
   useIsSpeaking,
   useTracks,
 } from "@livekit/components-react";
-import { Track, ScreenSharePresets, type VideoPreset } from "livekit-client";
+import { Track, ScreenSharePresets, VideoPreset } from "livekit-client";
 import type { TrackReference } from "@livekit/components-core";
 import { useVoiceStore, type ScreenShareQuality } from "../store/voice.js";
 import { useAuthStore } from "../store/auth.js";
@@ -20,7 +20,11 @@ const SCREEN_SHARE_PRESET_MAP: Record<ScreenShareQuality, VideoPreset> = {
   "720p": ScreenSharePresets.h720fps15,
   "720p60": ScreenSharePresets.h720fps30,
   "1080p": ScreenSharePresets.h1080fps15,
-  "1080p60": ScreenSharePresets.h1080fps30,
+  "1080p60": new VideoPreset(1920, 1080, 8_000_000, 60),
+  "1440p": new VideoPreset(2560, 1440, 12_000_000, 30),
+  "1440p60": new VideoPreset(2560, 1440, 16_000_000, 60),
+  "4k": new VideoPreset(3840, 2160, 20_000_000, 30),
+  "4k60": new VideoPreset(3840, 2160, 30_000_000, 60),
 };
 
 interface VoiceRoomProps {
@@ -381,6 +385,10 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
             <option value="720p60">720p 60fps</option>
             <option value="1080p">1080p</option>
             <option value="1080p60">1080p 60fps</option>
+            <option value="1440p">1440p</option>
+            <option value="1440p60">1440p 60fps</option>
+            <option value="4k">4K</option>
+            <option value="4k60">4K 60fps</option>
           </select>
         </div>
 
