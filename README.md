@@ -1,6 +1,6 @@
 # Haven
 
-A privacy-first, end-to-end encrypted chat platform. Think Discord, but the server can't read your messages.
+A privacy-first, end-to-end encrypted chat platform. 
 
 ## What is Haven?
 

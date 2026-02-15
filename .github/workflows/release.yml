@@ -5,14 +5,45 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: "true"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Build and push Docker image to GitHub Container Registry
+  docker:
+    name: Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+  # Build standalone server binaries for manual deployment
   build-server-linux:
-    name: Server (Linux x64)
+    name: Server Binary (Linux x64)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,145 +65,23 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           mkdir -p dist
+          cp target/release/haven-backend dist/
+          cp -r migrations dist/
           tar -czf dist/haven-server-linux-x64-${VERSION}.tar.gz \
-            -C target/release haven-server
+            -C dist haven-backend migrations
 
       - uses: actions/upload-artifact@v4
         with:
           name: server-linux-x64
           path: dist/haven-server-linux-x64-*.tar.gz
 
-  build-server-macos:
-    name: Server (macOS ARM64)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Build web frontend
-        run: |
-          cd packages/haven-core && npm ci && npm run build
-          cd ../web && npm ci && npm run build
-
-      - name: Build server
-        run: cargo build --release --features postgres,embed-ui
-
-      - name: Package
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          mkdir -p dist
-          tar -czf dist/haven-server-macos-arm64-${VERSION}.tar.gz \
-            -C target/release haven-server
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: server-macos-arm64
-          path: dist/haven-server-macos-arm64-*.tar.gz
-
-  build-client-windows:
-    name: Desktop Client (Windows)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: client/src-tauri
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install dependencies
-        run: |
-          cd packages/haven-core && npm ci && npm run build
-          cd ../web && npm ci
-          cd ../../client && npm ci
-
-      - name: Build Tauri
-        run: cd client && npx tauri build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: client-windows
-          path: |
-            client/src-tauri/target/release/bundle/msi/*.msi
-            client/src-tauri/target/release/bundle/nsis/*.exe
-
-  build-client-linux:
-    name: Desktop Client (Linux)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: client/src-tauri
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install Linux Tauri deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev \
-            patchelf libglib2.0-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev
-
-      - name: Install dependencies
-        run: |
-          cd packages/haven-core && npm ci && npm run build
-          cd ../web && npm ci
-          cd ../../client && npm ci
-
-      - name: Build Tauri
-        run: cd client && npx tauri build --bundles appimage,deb
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: client-linux
-          path: |
-            client/src-tauri/target/release/bundle/appimage/*.AppImage
-            client/src-tauri/target/release/bundle/deb/*.deb
-
-  build-client-macos:
-    name: Desktop Client (macOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: client/src-tauri
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install dependencies
-        run: |
-          cd packages/haven-core && npm ci && npm run build
-          cd ../web && npm ci
-          cd ../../client && npm ci
-
-      - name: Build Tauri
-        run: cd client && npx tauri build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: client-macos
-          path: client/src-tauri/target/release/bundle/dmg/*.dmg
-
+  # Create GitHub Release with artifacts
   release:
     name: Create Release
     runs-on: ubuntu-latest
     needs:
+      - docker
       - build-server-linux
-      - build-server-macos
-      - build-client-windows
-      - build-client-linux
-      - build-client-macos
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -184,7 +93,3 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/server-linux-x64/*
-            artifacts/server-macos-arm64/*
-            artifacts/client-windows/**/*
-            artifacts/client-linux/**/*
-            artifacts/client-macos/**/*
