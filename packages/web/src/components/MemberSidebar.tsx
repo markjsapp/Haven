@@ -15,8 +15,10 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
   const fetchPresence = usePresenceStore((s) => s.fetchPresence);
   const roles = useChatStore((s) => s.roles[serverId]) ?? [];
   const ownerId = useChatStore((s) => s.servers.find((sv) => sv.id === serverId)?.owner_id);
+  const memberListVersion = useChatStore((s) => s.memberListVersion);
 
   const [members, setMembers] = useState<ServerMemberResponse[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [profilePopup, setProfilePopup] = useState<{
     userId: string;
@@ -34,14 +36,16 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     api.listServerMembers(serverId).then((list) => {
       if (cancelled) return;
       setMembers(list);
+      setLoading(false);
       const ids = list.map((m) => m.user_id);
       if (ids.length > 0) fetchPresence(ids);
-    }).catch(() => {});
+    }).catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [serverId]);
+  }, [serverId, memberListVersion]);
 
   const filtered = searchQuery
     ? members.filter((m) => {
@@ -148,7 +152,7 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
           ))}
         </div>
       ))}
-      {filtered.length === 0 && (
+      {filtered.length === 0 && !loading && (
         <div className="member-group-header">
           {searchQuery ? "No matches" : "MEMBERS — 0"}
         </div>

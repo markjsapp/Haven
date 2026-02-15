@@ -50,8 +50,8 @@ pub async fn create_server(
     )
     .await?;
 
-    // Create a default "general" channel
-    let default_channel_meta = b"general"; // Would be encrypted in practice
+    // Create a default "welcome" channel
+    let default_channel_meta = b"welcome"; // Would be encrypted in practice
     let channel = queries::create_channel(
         state.db.write(),
         Some(server.id),

@@ -220,6 +220,7 @@ export default function Chat() {
 
   return (
     <div className={`chat-layout${isMobile ? " mobile" : ""}`}>
+      <div className="titlebar-drag-region" data-tauri-drag-region />
       <a href="#chat-body" className="skip-nav">Skip to chat</a>
 
       {/* Mobile sidebar overlay */}

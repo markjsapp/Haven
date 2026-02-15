@@ -137,7 +137,57 @@ async fn main() {
     state.pubsub_subscriptions = pubsub::start_subscriber(state.clone());
 
     // Spawn background workers
-    spawn_background_workers(db.clone());
+    spawn_background_workers(db.clone(), &config);
+
+    // Worker: Clean stale Redis presence entries every 60 seconds
+    // If the server crashes without graceful shutdown, presence entries persist.
+    // This cross-references against active WebSocket connections and removes orphans.
+    {
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                let Some(mut redis) = state_clone.redis.clone() else {
+                    continue;
+                };
+
+                // Get all presence entries
+                let all: Vec<String> = match redis::cmd("HKEYS")
+                    .arg("haven:presence")
+                    .query_async(&mut redis)
+                    .await
+                {
+                    Ok(keys) => keys,
+                    Err(_) => continue,
+                };
+
+                let mut removed = 0u32;
+                for user_id_str in &all {
+                    let Ok(uid) = user_id_str.parse::<uuid::Uuid>() else {
+                        continue;
+                    };
+                    // If user has no active WebSocket connections, remove their presence
+                    let has_connections = state_clone
+                        .connections
+                        .get(&uid)
+                        .map(|v| !v.is_empty())
+                        .unwrap_or(false);
+                    if !has_connections {
+                        let _: Result<(), redis::RedisError> = redis::cmd("HDEL")
+                            .arg("haven:presence")
+                            .arg(user_id_str.as_str())
+                            .query_async(&mut redis)
+                            .await;
+                        removed += 1;
+                    }
+                }
+                if removed > 0 {
+                    tracing::info!("Cleaned {} stale presence entries", removed);
+                }
+            }
+        });
+    }
 
     // Build router
     let app = build_router(state);
@@ -253,7 +303,7 @@ async fn inject_https_proto(
 
 // ─── Background Workers ────────────────────────────────
 
-fn spawn_background_workers(db: DbPools) {
+fn spawn_background_workers(db: DbPools, config: &AppConfig) {
     let pool = db.primary().clone();
     let pool2 = pool.clone();
     let pool3 = pool.clone();
@@ -308,4 +358,54 @@ fn spawn_background_workers(db: DbPools) {
             }
         }
     });
+
+    // Worker: Purge old audit log entries (daily, metadata minimization)
+    if config.audit_log_retention_days > 0 {
+        let pool = db.primary().clone();
+        let days = config.audit_log_retention_days;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(86400));
+            loop {
+                interval.tick().await;
+                match db::queries::purge_old_audit_logs(&pool, days).await {
+                    Ok(count) if count > 0 => tracing::info!("Purged {} old audit log entries", count),
+                    Err(e) => tracing::error!("Failed to purge audit logs: {}", e),
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    // Worker: Purge old resolved reports (daily, metadata minimization)
+    if config.resolved_report_retention_days > 0 {
+        let pool = db.primary().clone();
+        let days = config.resolved_report_retention_days;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(86400));
+            loop {
+                interval.tick().await;
+                match db::queries::purge_old_resolved_reports(&pool, days).await {
+                    Ok(count) if count > 0 => tracing::info!("Purged {} old resolved reports", count),
+                    Err(e) => tracing::error!("Failed to purge resolved reports: {}", e),
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    // Worker: Purge expired invites (hourly)
+    if config.expired_invite_cleanup {
+        let pool = db.primary().clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                match db::queries::purge_expired_invites(&pool).await {
+                    Ok(count) if count > 0 => tracing::info!("Purged {} expired invites", count),
+                    Err(e) => tracing::error!("Failed to purge expired invites: {}", e),
+                    _ => {}
+                }
+            }
+        });
+    }
 }

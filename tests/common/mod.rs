@@ -13,7 +13,37 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use base64::Engine;
+use sha2::{Digest, Sha256};
 use haven_backend::{build_router, config::AppConfig, memory_store::MemoryStore, middleware::UserRateLimiter, AppState};
+
+/// Solve a PoW challenge by brute-forcing a nonce until SHA-256(challenge + nonce)
+/// has the required number of leading zero bits.
+fn solve_pow(challenge: &str, difficulty: u32) -> String {
+    for nonce in 0u64.. {
+        let nonce_str = nonce.to_string();
+        let mut hasher = Sha256::new();
+        hasher.update(challenge.as_bytes());
+        hasher.update(nonce_str.as_bytes());
+        let hash = hasher.finalize();
+
+        let mut zero_bits = 0u32;
+        for &byte in hash.as_slice() {
+            if byte == 0 {
+                zero_bits += 8;
+            } else {
+                zero_bits += byte.leading_zeros();
+                break;
+            }
+            if zero_bits >= difficulty {
+                break;
+            }
+        }
+        if zero_bits >= difficulty {
+            return nonce_str;
+        }
+    }
+    unreachable!()
+}
 
 /// Test helper that wraps a fully-built Haven router.
 ///
@@ -48,6 +78,9 @@ impl TestApp {
             max_requests_per_minute: 10000,
             max_ws_connections_per_user: 10,
             broadcast_channel_capacity: 4096,
+            ws_heartbeat_timeout_secs: 30,
+            ws_session_buffer_size: 500,
+            ws_session_ttl_secs: 300,
             max_upload_size_bytes: 10_000_000,
             cdn_enabled: false,
             cdn_base_url: String::new(),
@@ -62,6 +95,9 @@ impl TestApp {
             tls_cert_path: "./data/certs/cert.pem".into(),
             tls_key_path: "./data/certs/key.pem".into(),
             tls_auto_generate: false,
+            audit_log_retention_days: 90,
+            resolved_report_retention_days: 180,
+            expired_invite_cleanup: true,
         };
 
         std::fs::create_dir_all(&config.storage_dir).ok();
@@ -167,6 +203,18 @@ impl TestApp {
 
     /// Register a new user with dummy crypto keys. Returns (access_token, user_id).
     pub async fn register_user(&self, username: &str) -> (String, Uuid) {
+        // Step 1: Get a PoW challenge from the server
+        let (challenge_status, challenge_value) = self
+            .request(Method::GET, "/api/v1/auth/challenge", None, None)
+            .await;
+        assert_eq!(challenge_status, StatusCode::OK, "Failed to get PoW challenge: {}", challenge_value);
+        let challenge = challenge_value["challenge"].as_str().unwrap().to_string();
+        let difficulty = challenge_value["difficulty"].as_u64().unwrap() as u32;
+
+        // Step 2: Solve the PoW challenge
+        let nonce = solve_pow(&challenge, difficulty);
+
+        // Step 3: Register with the solved challenge
         let b64 = &base64::engine::general_purpose::STANDARD;
         let fake_key = b64.encode([0u8; 32]);
         let fake_sig = b64.encode([0u8; 64]);
@@ -177,7 +225,9 @@ impl TestApp {
             "identity_key": fake_key,
             "signed_prekey": fake_key,
             "signed_prekey_signature": fake_sig,
-            "one_time_prekeys": []
+            "one_time_prekeys": [],
+            "pow_challenge": challenge,
+            "pow_nonce": nonce
         });
 
         let (status, value) = self.request(Method::POST, "/api/v1/auth/register", None, Some(body)).await;

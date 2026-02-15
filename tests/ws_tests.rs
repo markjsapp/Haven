@@ -119,7 +119,7 @@ async fn ws_ping_returns_pong(pool: Pool) {
 
     ws_send(&mut sink, json!({"type": "Ping"})).await;
 
-    let msg = ws_recv(&mut stream).await;
+    let msg = ws_recv_matching(&mut stream, |v| v["type"] == "Pong").await;
     assert_eq!(msg["type"].as_str(), Some("Pong"));
 }
 

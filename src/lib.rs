@@ -500,7 +500,12 @@ pub fn build_router(state: AppState) -> Router {
         ))
         .layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("permissions-policy"),
-            HeaderValue::from_static("camera=(), microphone=(self), geolocation=()"),
+            HeaderValue::from_static("camera=(), microphone=(self), geolocation=(), interest-cohort=(), browsing-topics=()"),
+        ))
+        // ─── Privacy Headers ──────────────────────────────
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("tk"),
+            HeaderValue::from_static("N"),
         ))
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,

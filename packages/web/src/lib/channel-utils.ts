@@ -3,10 +3,16 @@ import { unicodeAtob } from "./base64.js";
 /** Parse channel name from base64-encoded encrypted_meta. */
 export function parseChannelName(encryptedMeta: string): string {
   try {
-    const json = JSON.parse(unicodeAtob(encryptedMeta));
+    const decoded = unicodeAtob(encryptedMeta);
+    const json = JSON.parse(decoded);
     return json.name || json.type || "unnamed";
   } catch {
-    return "unnamed";
+    // Not JSON — treat the raw decoded string as the channel name
+    try {
+      return unicodeAtob(encryptedMeta) || "unnamed";
+    } catch {
+      return "unnamed";
+    }
   }
 }
 
@@ -78,6 +84,11 @@ export function parseChannelDisplay(
     }
     return { name: json.name || "unnamed", isDm: false, isGroup: false, topic: json.topic || undefined };
   } catch {
+    // Not JSON — treat raw decoded string as channel name
+    try {
+      const raw = unicodeAtob(encryptedMeta);
+      if (raw) return { name: raw, isDm: false, isGroup: false };
+    } catch { /* fall through */ }
     return { name: "unnamed", isDm: false, isGroup: false };
   }
 }

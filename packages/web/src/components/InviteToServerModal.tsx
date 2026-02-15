@@ -50,9 +50,9 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
     // Prevent StrictMode double-invoke from firing two API calls
     if (inviteFetchRef.current) return;
     inviteFetchRef.current = true;
-    setLoading(true);
+    // Only show loading spinner on initial fetch (when no invite code yet)
+    if (!inviteCode) setLoading(true);
     setError("");
-    setInviteCode(null);
     api.createInvite(selectedServerId, { expires_in_hours: expiresInHours, max_uses: maxUses }).then((invite) => {
       setInviteCode(invite.code);
     }).catch((err) => {

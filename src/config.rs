@@ -92,6 +92,14 @@ pub struct ConfigFile {
 
     #[serde(default)]
     pub tls: TlsConfig,
+
+    // Data Retention (days, 0 = keep forever)
+    #[serde(default = "default_audit_log_retention_days")]
+    pub audit_log_retention_days: u32,
+    #[serde(default = "default_resolved_report_retention_days")]
+    pub resolved_report_retention_days: u32,
+    #[serde(default = "default_expired_invite_cleanup")]
+    pub expired_invite_cleanup: bool,
 }
 
 // ─── TLS Config ───────────────────────────────────────
@@ -146,6 +154,9 @@ fn default_tls_port() -> u16 { 8443 }
 fn default_tls_cert_path() -> String { "./data/certs/cert.pem".into() }
 fn default_tls_key_path() -> String { "./data/certs/key.pem".into() }
 fn default_tls_auto_generate() -> bool { true }
+fn default_audit_log_retention_days() -> u32 { 90 }
+fn default_resolved_report_retention_days() -> u32 { 180 }
+fn default_expired_invite_cleanup() -> bool { true }
 
 // ─── Application Config ───────────────────────────────
 
@@ -214,6 +225,11 @@ pub struct AppConfig {
     pub tls_cert_path: String,
     pub tls_key_path: String,
     pub tls_auto_generate: bool,
+
+    // Data Retention (days, 0 = keep forever)
+    pub audit_log_retention_days: u32,
+    pub resolved_report_retention_days: u32,
+    pub expired_invite_cleanup: bool,
 }
 
 impl AppConfig {
@@ -266,6 +282,10 @@ impl AppConfig {
             tls_cert_path: "./data/certs/cert.pem".into(),
             tls_key_path: "./data/certs/key.pem".into(),
             tls_auto_generate: false,
+
+            audit_log_retention_days: 90,
+            resolved_report_retention_days: 180,
+            expired_invite_cleanup: true,
         }
     }
 
@@ -376,6 +396,19 @@ impl AppConfig {
                 .unwrap_or_else(|_| "true".into())
                 .parse()
                 .unwrap_or(true),
+
+            audit_log_retention_days: env::var("AUDIT_LOG_RETENTION_DAYS")
+                .unwrap_or_else(|_| "90".into())
+                .parse()
+                .unwrap_or(90),
+            resolved_report_retention_days: env::var("RESOLVED_REPORT_RETENTION_DAYS")
+                .unwrap_or_else(|_| "180".into())
+                .parse()
+                .unwrap_or(180),
+            expired_invite_cleanup: env::var("EXPIRED_INVITE_CLEANUP")
+                .unwrap_or_else(|_| "true".into())
+                .parse()
+                .unwrap_or(true),
         }
     }
 
@@ -438,6 +471,10 @@ impl AppConfig {
             tls_cert_path: file.tls.cert_path,
             tls_key_path: file.tls.key_path,
             tls_auto_generate: file.tls.auto_generate,
+
+            audit_log_retention_days: file.audit_log_retention_days,
+            resolved_report_retention_days: file.resolved_report_retention_days,
+            expired_invite_cleanup: file.expired_invite_cleanup,
         }
     }
 
@@ -492,6 +529,10 @@ impl AppConfig {
             livekit_bundled: default_livekit_bundled(),
             livekit_port: default_livekit_port(),
             tls: TlsConfig::default(),
+
+            audit_log_retention_days: default_audit_log_retention_days(),
+            resolved_report_retention_days: default_resolved_report_retention_days(),
+            expired_invite_cleanup: default_expired_invite_cleanup(),
         };
 
         // Write the TOML file
@@ -543,6 +584,10 @@ impl AppConfig {
             tls_cert_path: file.tls.cert_path,
             tls_key_path: file.tls.key_path,
             tls_auto_generate: file.tls.auto_generate,
+
+            audit_log_retention_days: file.audit_log_retention_days,
+            resolved_report_retention_days: file.resolved_report_retention_days,
+            expired_invite_cleanup: file.expired_invite_cleanup,
         }
     }
 }

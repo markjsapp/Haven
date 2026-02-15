@@ -786,7 +786,7 @@ pub struct Invite {
 #[derive(Debug, Deserialize)]
 pub struct CreateInviteRequest {
     pub max_uses: Option<i32>,
-    pub expires_in_hours: Option<i64>,
+    pub expires_in_hours: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
