@@ -98,6 +98,8 @@ impl TestApp {
             audit_log_retention_days: 90,
             resolved_report_retention_days: 180,
             expired_invite_cleanup: true,
+            registration_invite_only: false,
+            registration_invites_per_user: 3,
         };
 
         std::fs::create_dir_all(&config.storage_dir).ok();

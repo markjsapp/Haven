@@ -114,6 +114,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/register", post(api::auth_routes::register))
         .route("/login", post(api::auth_routes::login))
         .route("/refresh", post(api::auth_routes::refresh_token))
+        .route("/invite-required", get(api::registration_invites::invite_required))
         .layer(axum_mw::from_fn(move |req, next| {
             let limiter = auth_limiter_clone.clone();
             rate_limit_middleware(limiter, req, next)
@@ -433,12 +434,25 @@ pub fn build_router(state: AppState) -> Router {
         });
     }
 
+    // Registration invite routes (authenticated)
+    let registration_invite_routes = Router::new()
+        .route("/", get(api::registration_invites::list_my_invites));
+
     // Admin routes (requires instance admin)
     let admin_routes = Router::new()
         .route("/stats", get(api::admin::get_stats))
         .route("/users", get(api::admin::list_users))
         .route("/users/:user_id/admin", put(api::admin::set_admin))
-        .route("/users/:user_id", delete(api::admin::delete_user));
+        .route("/users/:user_id", delete(api::admin::delete_user))
+        .route(
+            "/registration-invites",
+            get(api::registration_invites::admin_list_invites)
+                .post(api::registration_invites::admin_create_invites),
+        )
+        .route(
+            "/registration-invites/:invite_id",
+            delete(api::registration_invites::admin_delete_invite),
+        );
 
     // Assemble the full API
     let api = Router::new()
@@ -456,7 +470,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(presence_routes)
         .merge(dm_privacy_routes)
         .nest("/reports", report_routes)
-        .nest("/voice", voice_routes);
+        .nest("/voice", voice_routes)
+        .nest("/registration-invites", registration_invite_routes);
 
     Router::new()
         .route("/api/v1/ws", get(ws::ws_handler))

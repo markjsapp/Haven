@@ -111,6 +111,31 @@ pub async fn register(
         return Err(AppError::Validation("Invalid Proof-of-Work solution".into()));
     }
 
+    // Validate registration invite code (if invite-only mode is enabled)
+    let is_first = queries::is_first_user_precheck(state.db.read()).await.unwrap_or(false);
+    let invite_to_consume = if state.config.registration_invite_only && !is_first {
+        let code = req.invite_code.as_deref()
+            .ok_or(AppError::Validation("Registration invite code required".into()))?;
+
+        let invite = queries::find_registration_invite_by_code(state.db.read(), code)
+            .await?
+            .ok_or(AppError::Validation("Invalid registration invite code".into()))?;
+
+        if invite.used_by.is_some() {
+            return Err(AppError::Validation("This invite code has already been used".into()));
+        }
+
+        if let Some(expires_at) = invite.expires_at {
+            if Utc::now() > expires_at {
+                return Err(AppError::Validation("This invite code has expired".into()));
+            }
+        }
+
+        Some(invite)
+    } else {
+        None
+    };
+
     // Hash password
     let password_hash = auth::hash_password(&req.password)?;
 
@@ -153,6 +178,24 @@ pub async fn register(
     if queries::is_first_user(state.db.read()).await.unwrap_or(false) {
         let _ = queries::set_instance_admin(state.db.write(), user.id, true).await;
         tracing::info!("First user {} auto-granted instance admin", user.username);
+        // First user gets invite codes even without using one
+        if state.config.registration_invite_only {
+            let _ = queries::create_registration_invites(
+                state.db.write(),
+                Some(user.id),
+                state.config.registration_invites_per_user,
+            ).await;
+        }
+    }
+
+    // Consume registration invite and grant new invites to the new user
+    if let Some(invite) = invite_to_consume {
+        queries::consume_registration_invite(state.db.write(), invite.id, user.id).await?;
+        let _ = queries::create_registration_invites(
+            state.db.write(),
+            Some(user.id),
+            state.config.registration_invites_per_user,
+        ).await;
     }
 
     // Store one-time prekeys

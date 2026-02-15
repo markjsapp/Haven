@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
 
@@ -7,10 +7,19 @@ export default function Register() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteRequired, setInviteRequired] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const register = useAuthStore((s) => s.register);
+  const api = useAuthStore((s) => s.api);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    api.checkInviteRequired()
+      .then((res) => setInviteRequired(res.invite_required))
+      .catch(() => setInviteRequired(false));
+  }, [api]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -27,7 +36,12 @@ export default function Register() {
 
     setLoading(true);
     try {
-      await register(username, password, displayName || undefined);
+      await register(
+        username,
+        password,
+        displayName || undefined,
+        inviteCode || undefined,
+      );
       navigate("/");
     } catch (err: any) {
       setError(err.message || "Registration failed");
@@ -43,6 +57,20 @@ export default function Register() {
         <p className="auth-subtitle">Create your account</p>
 
         <form onSubmit={handleSubmit}>
+          {inviteRequired && (
+            <div className="field">
+              <label htmlFor="inviteCode">Invite Code</label>
+              <input
+                id="inviteCode"
+                type="text"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                required
+                placeholder="Enter your invite code"
+              />
+            </div>
+          )}
+
           <div className="field">
             <label htmlFor="username">Username</label>
             <input
@@ -51,7 +79,7 @@ export default function Register() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              autoFocus
+              autoFocus={!inviteRequired}
               minLength={3}
               maxLength={32}
               pattern="^[a-zA-Z0-9_-]+$"

@@ -100,6 +100,12 @@ pub struct ConfigFile {
     pub resolved_report_retention_days: u32,
     #[serde(default = "default_expired_invite_cleanup")]
     pub expired_invite_cleanup: bool,
+
+    // Registration gating
+    #[serde(default)]
+    pub registration_invite_only: bool,
+    #[serde(default = "default_registration_invites_per_user")]
+    pub registration_invites_per_user: u32,
 }
 
 // ─── TLS Config ───────────────────────────────────────
@@ -157,6 +163,7 @@ fn default_tls_auto_generate() -> bool { true }
 fn default_audit_log_retention_days() -> u32 { 90 }
 fn default_resolved_report_retention_days() -> u32 { 180 }
 fn default_expired_invite_cleanup() -> bool { true }
+fn default_registration_invites_per_user() -> u32 { 3 }
 
 // ─── Application Config ───────────────────────────────
 
@@ -230,6 +237,10 @@ pub struct AppConfig {
     pub audit_log_retention_days: u32,
     pub resolved_report_retention_days: u32,
     pub expired_invite_cleanup: bool,
+
+    // Registration gating
+    pub registration_invite_only: bool,
+    pub registration_invites_per_user: u32,
 }
 
 impl AppConfig {
@@ -286,6 +297,9 @@ impl AppConfig {
             audit_log_retention_days: 90,
             resolved_report_retention_days: 180,
             expired_invite_cleanup: true,
+
+            registration_invite_only: false,
+            registration_invites_per_user: 3,
         }
     }
 
@@ -409,6 +423,15 @@ impl AppConfig {
                 .unwrap_or_else(|_| "true".into())
                 .parse()
                 .unwrap_or(true),
+
+            registration_invite_only: env::var("REGISTRATION_INVITE_ONLY")
+                .unwrap_or_else(|_| "false".into())
+                .parse()
+                .unwrap_or(false),
+            registration_invites_per_user: env::var("REGISTRATION_INVITES_PER_USER")
+                .unwrap_or_else(|_| "3".into())
+                .parse()
+                .unwrap_or(3),
         }
     }
 
@@ -475,6 +498,9 @@ impl AppConfig {
             audit_log_retention_days: file.audit_log_retention_days,
             resolved_report_retention_days: file.resolved_report_retention_days,
             expired_invite_cleanup: file.expired_invite_cleanup,
+
+            registration_invite_only: file.registration_invite_only,
+            registration_invites_per_user: file.registration_invites_per_user,
         }
     }
 
@@ -533,6 +559,9 @@ impl AppConfig {
             audit_log_retention_days: default_audit_log_retention_days(),
             resolved_report_retention_days: default_resolved_report_retention_days(),
             expired_invite_cleanup: default_expired_invite_cleanup(),
+
+            registration_invite_only: false,
+            registration_invites_per_user: default_registration_invites_per_user(),
         };
 
         // Write the TOML file
@@ -588,6 +617,9 @@ impl AppConfig {
             audit_log_retention_days: file.audit_log_retention_days,
             resolved_report_retention_days: file.resolved_report_retention_days,
             expired_invite_cleanup: file.expired_invite_cleanup,
+
+            registration_invite_only: file.registration_invite_only,
+            registration_invites_per_user: file.registration_invites_per_user,
         }
     }
 }

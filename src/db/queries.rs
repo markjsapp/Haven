@@ -2954,3 +2954,115 @@ pub async fn is_first_user(pool: &Pool) -> AppResult<bool> {
     // Count is 1 when the user just created is the only one
     Ok(row.0 <= 1)
 }
+
+/// Check if no users exist yet (called BEFORE user creation for invite bypass).
+pub async fn is_first_user_precheck(pool: &Pool) -> AppResult<bool> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0 == 0)
+}
+
+// ─── Registration Invites (instance-level) ────────────
+
+pub async fn find_registration_invite_by_code(
+    pool: &Pool,
+    code: &str,
+) -> AppResult<Option<RegistrationInvite>> {
+    let invite = sqlx::query_as::<_, RegistrationInvite>(
+        "SELECT * FROM registration_invites WHERE code = $1",
+    )
+    .bind(code)
+    .fetch_optional(pool)
+    .await?;
+    Ok(invite)
+}
+
+pub async fn consume_registration_invite(
+    pool: &Pool,
+    invite_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE registration_invites SET used_by = $1, used_at = NOW() WHERE id = $2 AND used_by IS NULL",
+    )
+    .bind(user_id)
+    .bind(invite_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn create_registration_invites(
+    pool: &Pool,
+    created_by: Option<Uuid>,
+    count: u32,
+) -> AppResult<Vec<RegistrationInvite>> {
+    let mut invites = Vec::new();
+    for _ in 0..count {
+        let code = crate::crypto::generate_invite_code();
+        let invite = sqlx::query_as::<_, RegistrationInvite>(
+            r#"INSERT INTO registration_invites (id, code, created_by, created_at)
+               VALUES ($1, $2, $3, NOW())
+               RETURNING *"#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&code)
+        .bind(created_by)
+        .fetch_one(pool)
+        .await?;
+        invites.push(invite);
+    }
+    Ok(invites)
+}
+
+pub async fn list_registration_invites_by_user(
+    pool: &Pool,
+    user_id: Uuid,
+) -> AppResult<Vec<RegistrationInvite>> {
+    let invites = sqlx::query_as::<_, RegistrationInvite>(
+        "SELECT * FROM registration_invites WHERE created_by = $1 ORDER BY created_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(invites)
+}
+
+pub async fn count_registration_invites_by_user(
+    pool: &Pool,
+    user_id: Uuid,
+) -> AppResult<i64> {
+    let row: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM registration_invites WHERE created_by = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.0)
+}
+
+pub async fn list_all_registration_invites(
+    pool: &Pool,
+    limit: i64,
+    offset: i64,
+) -> AppResult<Vec<RegistrationInvite>> {
+    let invites = sqlx::query_as::<_, RegistrationInvite>(
+        "SELECT * FROM registration_invites ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+    Ok(invites)
+}
+
+pub async fn delete_registration_invite(pool: &Pool, invite_id: Uuid) -> AppResult<bool> {
+    let result = sqlx::query(
+        "DELETE FROM registration_invites WHERE id = $1 AND used_by IS NULL",
+    )
+    .bind(invite_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}

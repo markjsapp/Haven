@@ -69,6 +69,8 @@ import type {
   AdminStats,
   AdminUserResponse,
   SetAdminRequest,
+  InviteRequiredResponse,
+  RegistrationInviteResponse,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -806,6 +808,18 @@ export class HavenApi {
 
   async deleteServerIcon(serverId: string): Promise<void> {
     await this.delete(`/api/v1/servers/${serverId}/icon`);
+  }
+
+  // ─── Registration Invites ──────────────────────
+
+  /** Check if the instance requires an invite code to register (no auth needed). */
+  async checkInviteRequired(): Promise<InviteRequiredResponse> {
+    return this.get<InviteRequiredResponse>("/api/v1/auth/invite-required");
+  }
+
+  /** List the current user's registration invite codes. */
+  async listMyRegistrationInvites(): Promise<RegistrationInviteResponse[]> {
+    return this.get<RegistrationInviteResponse[]>("/api/v1/registration-invites");
   }
 
   // ─── Account Deletion ──────────────────────────
