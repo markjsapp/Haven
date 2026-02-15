@@ -20,6 +20,7 @@ interface UiState {
   memberSidebarOpen: boolean;
   showFriends: boolean; // Show FriendsList in main content area
   showUserSettings: boolean;
+  showAdminPanel: boolean;
   pinnedPanelOpen: boolean;
   searchPanelOpen: boolean;
   mentionPopup: MentionPopup | null;
@@ -41,10 +42,17 @@ interface UiState {
   /** Private user notes (userId -> note text, only visible to you) */
   userNotes: Record<string, string>;
 
+  /** Custom CSS injected by the user */
+  customCss: string;
+
+  /** Mobile sidebar overlay state (not persisted) */
+  mobileSidebarOpen: boolean;
+
   selectServer(id: string | null): void;
   toggleMemberSidebar(): void;
   setShowFriends(show: boolean): void;
   setShowUserSettings(show: boolean): void;
+  setShowAdminPanel(show: boolean): void;
   togglePinnedPanel(): void;
   toggleSearchPanel(): void;
   setMentionPopup(popup: MentionPopup | null): void;
@@ -60,6 +68,9 @@ interface UiState {
   setA11yHighContrast(enabled: boolean): void;
   setA11yAlwaysShowTimestamps(enabled: boolean): void;
   setUserNote(userId: string, note: string): void;
+  setCustomCss(css: string): void;
+  toggleMobileSidebar(): void;
+  setMobileSidebarOpen(open: boolean): void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -69,6 +80,7 @@ export const useUiStore = create<UiState>()(
       memberSidebarOpen: true,
       showFriends: false,
       showUserSettings: false,
+      showAdminPanel: false,
       pinnedPanelOpen: false,
       searchPanelOpen: false,
       mentionPopup: null,
@@ -83,6 +95,8 @@ export const useUiStore = create<UiState>()(
       a11yAlwaysShowTimestamps: false,
 
       userNotes: {},
+      customCss: "",
+      mobileSidebarOpen: false,
 
       selectServer(id) {
         set({
@@ -102,6 +116,10 @@ export const useUiStore = create<UiState>()(
 
       setShowUserSettings(show) {
         set({ showUserSettings: show });
+      },
+
+      setShowAdminPanel(show) {
+        set({ showAdminPanel: show });
       },
 
       togglePinnedPanel() {
@@ -162,6 +180,9 @@ export const useUiStore = create<UiState>()(
       setA11yFont(font) { set({ a11yFont: font }); },
       setA11yHighContrast(enabled) { set({ a11yHighContrast: enabled }); },
       setA11yAlwaysShowTimestamps(enabled) { set({ a11yAlwaysShowTimestamps: enabled }); },
+      setCustomCss(css) { set({ customCss: css }); },
+      toggleMobileSidebar() { set((s) => ({ mobileSidebarOpen: !s.mobileSidebarOpen })); },
+      setMobileSidebarOpen(open) { set({ mobileSidebarOpen: open }); },
       setUserNote(userId, note) {
         set((s) => {
           if (!note.trim()) {
@@ -185,6 +206,7 @@ export const useUiStore = create<UiState>()(
         a11yHighContrast: state.a11yHighContrast,
         a11yAlwaysShowTimestamps: state.a11yAlwaysShowTimestamps,
         userNotes: state.userNotes,
+        customCss: state.customCss,
       }),
     },
   ),

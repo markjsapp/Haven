@@ -24,16 +24,20 @@ pub async fn pow_challenge(
     // Generate a random 32-byte challenge
     let challenge = Uuid::new_v4().to_string();
 
-    // Store in Redis with TTL
-    let redis_key = format!("haven:pow:{}", challenge);
-    let mut redis = state.redis.clone();
-    let _: Result<(), redis::RedisError> = redis::cmd("SET")
-        .arg(&redis_key)
-        .arg("1")
-        .arg("EX")
-        .arg(POW_CHALLENGE_TTL)
-        .query_async(&mut redis)
-        .await;
+    // Store challenge with TTL
+    if let Some(mut redis) = state.redis.clone() {
+        let redis_key = format!("haven:pow:{}", challenge);
+        let _: Result<(), redis::RedisError> = redis::cmd("SET")
+            .arg(&redis_key)
+            .arg("1")
+            .arg("EX")
+            .arg(POW_CHALLENGE_TTL)
+            .query_async(&mut redis)
+            .await;
+    } else {
+        let expiry = std::time::Instant::now() + std::time::Duration::from_secs(POW_CHALLENGE_TTL);
+        state.memory.pow_challenges.insert(challenge.clone(), expiry);
+    }
 
     Ok(Json(PowChallengeResponse {
         challenge,
@@ -73,26 +77,35 @@ pub async fn register(
     req.validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
 
-    // Verify Proof-of-Work
-    let redis_key = format!("haven:pow:{}", req.pow_challenge);
-    let mut redis = state.redis.clone();
-    let exists: Option<String> = redis::cmd("GET")
-        .arg(&redis_key)
-        .query_async(&mut redis)
-        .await
-        .unwrap_or(None);
+    // Verify Proof-of-Work challenge exists and consume it (single-use)
+    let challenge_valid = if let Some(mut redis) = state.redis.clone() {
+        let redis_key = format!("haven:pow:{}", req.pow_challenge);
+        let exists: Option<String> = redis::cmd("GET")
+            .arg(&redis_key)
+            .query_async(&mut redis)
+            .await
+            .unwrap_or(None);
+        if exists.is_some() {
+            let _: Result<(), redis::RedisError> = redis::cmd("DEL")
+                .arg(&redis_key)
+                .query_async(&mut redis)
+                .await;
+            true
+        } else {
+            false
+        }
+    } else {
+        // In-memory: remove and check expiry
+        state.memory.pow_challenges.remove(&req.pow_challenge)
+            .map(|(_, expiry)| std::time::Instant::now() < expiry)
+            .unwrap_or(false)
+    };
 
-    if exists.is_none() {
+    if !challenge_valid {
         return Err(AppError::Validation(
             "Invalid or expired PoW challenge — request a new one from /auth/challenge".into(),
         ));
     }
-
-    // Delete challenge so it can't be reused
-    let _: Result<(), redis::RedisError> = redis::cmd("DEL")
-        .arg(&redis_key)
-        .query_async(&mut redis)
-        .await;
 
     if !verify_pow(&req.pow_challenge, &req.pow_nonce, POW_DIFFICULTY) {
         return Err(AppError::Validation("Invalid Proof-of-Work solution".into()));
@@ -135,6 +148,12 @@ pub async fn register(
         &signed_prekey_sig,
     )
     .await?;
+
+    // Auto-grant instance admin to the first registered user
+    if queries::is_first_user(state.db.read()).await.unwrap_or(false) {
+        let _ = queries::set_instance_admin(state.db.write(), user.id, true).await;
+        tracing::info!("First user {} auto-granted instance admin", user.username);
+    }
 
     // Store one-time prekeys
     if !req.one_time_prekeys.is_empty() {
@@ -478,8 +497,8 @@ pub async fn delete_account(
     let _ = state.storage.delete_blob(&avatar_key).await;
     let _ = state.storage.delete_blob(&banner_key).await;
 
-    // 9. Invalidate Redis caches
-    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:user:{}", user_id)).await;
+    // 9. Invalidate caches
+    crate::cache::invalidate(state.redis.clone().as_mut(), &state.memory, &format!("haven:user:{}", user_id)).await;
 
     Ok(StatusCode::NO_CONTENT)
 }

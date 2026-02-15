@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "Haven — Privacy-first communication platform backend"
 
+[features]
+default = ["postgres", "embed-ui"]
+postgres = ["sqlx/postgres"]
+sqlite = ["sqlx/sqlite"]
+embed-ui = ["dep:rust-embed", "dep:mime_guess"]
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -19,7 +25,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "uuid", "chrono", "migrate"] }
+
+# Config file support
+toml = "0.8"
 
 # Redis
 redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
@@ -56,6 +65,7 @@ hmac = "0.12"
 hex = "0.4"
 
 # Misc
+which = "7"
 thiserror = "1"
 anyhow = "1"
 futures = "0.3"
@@ -70,6 +80,16 @@ urlencoding = "2"
 
 # LiveKit (voice channels)
 livekit-api = "0.4"
+
+# TLS / HTTPS
+rcgen = "0.13"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rustls-pemfile = "2"
+
+# Embedded Web UI (optional)
+rust-embed = { version = "8", optional = true }
+mime_guess = { version = "2", optional = true }
 
 [dev-dependencies]
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }

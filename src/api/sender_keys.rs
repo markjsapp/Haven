@@ -60,7 +60,7 @@ pub async fn distribute_sender_keys(
                 let _ = sender.send(sk_msg.clone());
             }
         }
-        crate::pubsub::publish_user_event(&mut state.redis.clone(), *to_user_id, &sk_msg).await;
+        crate::pubsub::publish_user_event(state.redis.clone().as_mut(), *to_user_id, &sk_msg).await;
     }
 
     Ok(Json(serde_json::json!({ "distributed": count })))

@@ -61,6 +61,14 @@ import type {
   KeyBackupStatusResponse,
   CustomEmojiResponse,
   PowChallengeResponse,
+  AuditLogEntry,
+  TimeoutMemberRequest,
+  BulkDeleteRequest,
+  ReadStateResponse,
+  ChannelUnreadInfo,
+  AdminStats,
+  AdminUserResponse,
+  SetAdminRequest,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -175,6 +183,11 @@ export class HavenApi {
 
   async uploadPreKeys(req: UploadPreKeysRequest): Promise<void> {
     await this.post("/api/v1/keys/prekeys", req);
+  }
+
+  /** Delete all unused one-time prekeys from the server (stale keys whose private keys are lost). */
+  async clearPreKeys(): Promise<void> {
+    await this.delete("/api/v1/keys/prekeys");
   }
 
   async getPreKeyCount(): Promise<PreKeyCountResponse> {
@@ -472,6 +485,68 @@ export class HavenApi {
 
   async listBans(serverId: string): Promise<BanResponse[]> {
     return this.get<BanResponse[]>(`/api/v1/servers/${serverId}/bans`);
+  }
+
+  // ─── Read States ─────────────────────────────────────
+
+  async markChannelRead(channelId: string): Promise<ReadStateResponse> {
+    return this.put<ReadStateResponse>(`/api/v1/channels/${channelId}/read-state`, {});
+  }
+
+  async getReadStates(): Promise<ChannelUnreadInfo[]> {
+    return this.get<ChannelUnreadInfo[]>("/api/v1/channels/read-states");
+  }
+
+  // ─── Admin Dashboard ────────────────────────────────
+
+  async getAdminStats(): Promise<AdminStats> {
+    return this.get<AdminStats>("/api/v1/admin/stats");
+  }
+
+  async listAdminUsers(search?: string, limit?: number, offset?: number): Promise<AdminUserResponse[]> {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (offset !== undefined) params.set("offset", String(offset));
+    const qs = params.toString();
+    return this.get<AdminUserResponse[]>(`/api/v1/admin/users${qs ? `?${qs}` : ""}`);
+  }
+
+  async setUserAdmin(userId: string, isAdmin: boolean): Promise<void> {
+    const body: SetAdminRequest = { is_admin: isAdmin };
+    await this.put(`/api/v1/admin/users/${userId}/admin`, body);
+  }
+
+  async adminDeleteUser(userId: string): Promise<void> {
+    await this.delete(`/api/v1/admin/users/${userId}`);
+  }
+
+  // ─── Timeouts ───────────────────────────────────────
+
+  async timeoutMember(serverId: string, userId: string, durationSeconds: number, reason?: string): Promise<void> {
+    const body: TimeoutMemberRequest = { duration_seconds: durationSeconds, reason };
+    await this.put(`/api/v1/servers/${serverId}/members/${userId}/timeout`, body);
+  }
+
+  async removeTimeout(serverId: string, userId: string): Promise<void> {
+    await this.put(`/api/v1/servers/${serverId}/members/${userId}/timeout`, { duration_seconds: 0 });
+  }
+
+  // ─── Bulk Delete ────────────────────────────────────
+
+  async bulkDeleteMessages(channelId: string, messageIds: string[]): Promise<void> {
+    const body: BulkDeleteRequest = { message_ids: messageIds };
+    await this.post(`/api/v1/channels/${channelId}/messages/bulk-delete`, body);
+  }
+
+  // ─── Audit Log ──────────────────────────────────────
+
+  async getAuditLog(serverId: string, opts?: { limit?: number; before?: string }): Promise<AuditLogEntry[]> {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.before) params.set("before", opts.before);
+    const qs = params.toString();
+    return this.get<AuditLogEntry[]>(`/api/v1/servers/${serverId}/audit-log${qs ? `?${qs}` : ""}`);
   }
 
   // ─── Group DM Members ──────────────────────────────

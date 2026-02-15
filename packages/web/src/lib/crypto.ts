@@ -291,8 +291,20 @@ export async function encryptOutgoing(
     payloadObj.link_previews = linkPreviews;
   }
 
-  // If no DM peer mapped — this is a group channel, use Sender Keys
-  if (!peerId || !sessions.has(peerId)) {
+  // DM channel with peer mapped but no session — try to establish one
+  if (peerId && !sessions.has(peerId)) {
+    const api = useAuthStore.getState().api;
+    try {
+      const bundle = await api.getKeyBundle(peerId);
+      await ensureSession(peerId, bundle);
+    } catch {
+      // If session establishment fails, we can't send in this DM
+      throw new Error("Cannot send: no E2EE session with peer (try reloading)");
+    }
+  }
+
+  // No DM peer mapped — this is a group/server channel, use Sender Keys
+  if (!peerId) {
     await ensureSenderKeyDistributed(channelId);
     const senderKey = mySenderKeys.get(channelId);
     if (!senderKey) throw new Error("Failed to establish sender key");
@@ -393,18 +405,14 @@ export async function decryptIncoming(raw: MessageResponse): Promise<DecryptedMe
     }
     const serializedMsg = bodyBytes.slice(drOffset);
 
-    // Check if we already have a session for the peer on this channel
-    const existingPeerId = channelPeerMap.get(raw.channel_id);
-    if (existingPeerId && sessions.has(existingPeerId)) {
-      // Already have a session — just decrypt
-      const session = sessions.get(existingPeerId)!;
-      const encrypted = deserializeMessage(serializedMsg);
-      const plaintext = session.decrypt(encrypted);
-      const payload = JSON.parse(new TextDecoder().decode(plaintext));
-      return buildDecryptedMessage(raw, payload);
-    }
-
-    // No session — perform X3DH responder to establish one
+    // Always perform X3DH respond for initial messages. We must NOT reuse an
+    // existing session because:
+    //  1. It may be an initiator session we created (via ensureSession/encryptOutgoing)
+    //     which uses a DIFFERENT shared secret than the peer's initial message.
+    //  2. Attempting decrypt with the wrong session corrupts DR state
+    //     (ratchet advances before the AEAD check, leaving the session unusable).
+    //  3. The peer may have re-established their session (e.g., after re-login),
+    //     so the old session is obsolete anyway.
     const { identityKeyPair, signedPreKey, store } = useAuthStore.getState();
     if (!identityKeyPair || !signedPreKey) {
       throw new Error("Missing identity or signed prekey for X3DH respond");
@@ -437,11 +445,14 @@ export async function decryptIncoming(raw: MessageResponse): Promise<DecryptedMe
     const plaintext = session.decrypt(encrypted);
     const payload = JSON.parse(new TextDecoder().decode(plaintext));
 
-    // Cache the session keyed by the sender's user ID (discovered from payload)
+    // Cache the session keyed by the sender's user ID (discovered from payload).
+    // This replaces any existing session for this peer (e.g., a stale initiator session).
     const senderId = payload.sender_id;
     sessions.set(senderId, session);
     sessionAD.set(senderId, x3dhResult.associatedData);
     channelPeerMap.set(raw.channel_id, senderId);
+
+    scheduleAutoBackup();
     return buildDecryptedMessage(raw, payload);
   }
 

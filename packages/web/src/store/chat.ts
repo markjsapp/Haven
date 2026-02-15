@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getServerUrl } from "../lib/serverUrl";
 import {
   HavenWs,
   encryptFile,
@@ -14,9 +15,10 @@ import {
 } from "@haven/core";
 import { useAuthStore } from "./auth.js";
 import { usePresenceStore } from "./presence.js";
-import { decryptIncoming, encryptOutgoing, ensureSession, fetchSenderKeys, mapChannelToPeer } from "../lib/crypto.js";
+import { decryptIncoming, encryptOutgoing, fetchSenderKeys, mapChannelToPeer } from "../lib/crypto.js";
 import { cacheMessage, getCachedMessage, uncacheMessage } from "../lib/message-cache.js";
 import { unicodeBtoa, unicodeAtob } from "../lib/base64.js";
+import { sendNotification } from "../lib/notifications.js";
 
 export interface AttachmentMeta {
   id: string;
@@ -81,6 +83,8 @@ interface ChatState {
   typingUsers: Record<string, Array<{ userId: string; username: string; expiry: number }>>;
   /** Global userId -> displayName map, populated from server member lists */
   userNames: Record<string, string>;
+  /** Global userId -> avatar URL map, populated from server member lists */
+  userAvatars: Record<string, string>;
   /** messageId -> array of { emoji, userIds } */
   reactions: Record<string, Array<{ emoji: string; userIds: string[] }>>;
   /** IDs of users blocked by the current user */
@@ -95,6 +99,8 @@ interface ChatState {
   userRoleColors: Record<string, string>;
   /** serverId -> custom emojis for that server */
   customEmojis: Record<string, CustomEmojiResponse[]>;
+  /** "serverId:userId" -> timed_out_until timestamp (null = no timeout) */
+  memberTimeouts: Record<string, string | null>;
 
   connect(): void;
   disconnect(): void;
@@ -103,6 +109,10 @@ interface ChatState {
   sendMessage(text: string, attachments?: AttachmentMeta[], formatting?: { contentType: string; data: object }): Promise<void>;
   sendTyping(): void;
   startDm(targetUsername: string): Promise<ChannelResponse>;
+  /** Get or create a DM channel without navigating (no currentChannelId change). */
+  getOrCreateDmChannel(targetUsername: string): Promise<ChannelResponse>;
+  /** Send a message to a specific channel (used for invites, etc. without navigating). */
+  sendMessageToChannel(channelId: string, text: string, formatting?: { contentType: string; data: object }): Promise<void>;
   addFiles(files: File[]): void;
   removePendingUpload(index: number): void;
   uploadPendingFiles(): Promise<AttachmentMeta[]>;
@@ -162,6 +172,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   wsState: "disconnected",
   typingUsers: {},
   userNames: {},
+  userAvatars: {},
   reactions: {},
   blockedUserIds: [],
   unreadCounts: {},
@@ -169,6 +180,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   myPermissions: {},
   userRoleColors: {},
   customEmojis: {},
+  memberTimeouts: {},
 
   connect() {
     const { api } = useAuthStore.getState();
@@ -176,7 +188,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!token) return;
 
     const ws = new HavenWs({
-      baseUrl: window.location.origin,
+      baseUrl: getServerUrl(),
       token,
     });
 
@@ -185,6 +197,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     ws.on("NewMessage", (msg: Extract<WsServerMessage, { type: "NewMessage" }>) => {
       handleIncomingMessage(msg.payload);
+      const authUser = useAuthStore.getState().user;
+      if (msg.payload.sender_token !== authUser?.id) {
+        sendNotification("New Message", "You received a new message");
+      }
     });
 
     ws.on("MessageEdited", (msg: Extract<WsServerMessage, { type: "MessageEdited" }>) => {
@@ -204,6 +220,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
           },
         };
       });
+    });
+
+    ws.on("BulkMessagesDeleted", (msg: Extract<WsServerMessage, { type: "BulkMessagesDeleted" }>) => {
+      const { channel_id, message_ids } = msg.payload;
+      const idsSet = new Set(message_ids);
+      for (const id of message_ids) uncacheMessage(id);
+      set((state) => {
+        const channelMsgs = state.messages[channel_id];
+        if (!channelMsgs) return state;
+        return {
+          messages: {
+            ...state.messages,
+            [channel_id]: channelMsgs.filter((m) => !idsSet.has(m.id)),
+          },
+        };
+      });
+    });
+
+    ws.on("MemberTimedOut", (msg: Extract<WsServerMessage, { type: "MemberTimedOut" }>) => {
+      const { server_id, user_id, timed_out_until } = msg.payload;
+      set((state) => ({
+        memberTimeouts: {
+          ...state.memberTimeouts,
+          [`${server_id}:${user_id}`]: timed_out_until,
+        },
+      }));
+    });
+
+    ws.on("ReadStateUpdated", (msg: Extract<WsServerMessage, { type: "ReadStateUpdated" }>) => {
+      const { channel_id } = msg.payload;
+      // Another device marked this channel as read — clear local unread
+      if (channel_id !== get().currentChannelId) {
+        set((state) => {
+          const { [channel_id]: _, ...restUnread } = state.unreadCounts;
+          const { [channel_id]: __, ...restMention } = state.mentionCounts;
+          return { unreadCounts: restUnread, mentionCounts: restMention };
+        });
+      }
     });
 
     ws.on("ReactionAdded", (msg: Extract<WsServerMessage, { type: "ReactionAdded" }>) => {
@@ -311,6 +365,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       import("./friends.js").then(({ useFriendsStore }) => {
         useFriendsStore.getState().loadFriends();
       });
+      sendNotification("Friend Request", "You received a new friend request");
     });
     ws.on("FriendRequestAccepted", () => {
       import("./friends.js").then(({ useFriendsStore }) => {
@@ -425,6 +480,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       memberArrays,
       blockedUsers,
       serverEmojiArrays,
+      readStates,
     ] = await Promise.all([
       Promise.all(servers.map((server) => api.listServerChannels(server.id))),
       Promise.all(servers.map((server) => api.listCategories(server.id))),
@@ -433,6 +489,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       Promise.all(servers.map((server) => api.listServerMembers(server.id))),
       api.getBlockedUsers().catch(() => [] as Array<{ user_id: string; username: string; blocked_at: string }>),
       Promise.all(servers.map((server) => api.listServerEmojis(server.id).catch(() => [] as CustomEmojiResponse[]))),
+      api.getReadStates().catch(() => []),
     ]);
 
     const allChannels: ChannelResponse[] = serverChannelArrays.flat();
@@ -470,11 +527,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } catch { /* non-fatal */ }
     }
 
-    // Build global userId -> displayName map from server members
+    // Build global userId -> displayName and avatar maps from server members
     const userNames: Record<string, string> = {};
+    const userAvatars: Record<string, string> = {};
     for (const members of memberArrays) {
       for (const m of members) {
         userNames[m.user_id] = m.nickname || m.display_name || m.username;
+        if (m.avatar_url) userAvatars[m.user_id] = m.avatar_url;
       }
     }
 
@@ -504,6 +563,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Merge DM/group names (server member names take priority)
     const mergedUserNames = { ...dmUserNames, ...userNames };
+
+    // Build server-side unread counts
+    const serverUnreads: Record<string, number> = {};
+    for (const rs of readStates) {
+      if (rs.unread_count > 0) {
+        serverUnreads[rs.channel_id] = rs.unread_count;
+      }
+    }
+
     set({
       servers,
       channels: allChannels,
@@ -511,9 +579,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       roles,
       customEmojis,
       userNames: mergedUserNames,
+      userAvatars,
       blockedUserIds: blockedUsers.map((b) => b.user_id),
       myPermissions,
       userRoleColors,
+      unreadCounts: serverUnreads,
     });
 
     // Subscribe to all channels via WebSocket
@@ -531,6 +601,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { [channelId]: __, ...restMention } = state.mentionCounts;
       return { currentChannelId: channelId, unreadCounts: restUnread, mentionCounts: restMention };
     });
+
+    // Mark channel as read on server (fire-and-forget via WS)
+    const wsConn = get().ws;
+    if (wsConn) {
+      try { wsConn.markRead(channelId); } catch { /* non-fatal */ }
+    }
 
     // Fetch any pending sender key distributions for this channel
     try {
@@ -896,16 +972,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   async startDm(targetUsername) {
     const { api } = useAuthStore.getState();
-    const { user, identityKeyPair } = useAuthStore.getState();
-    if (!user || !identityKeyPair) throw new Error("Not authenticated");
+    const { user } = useAuthStore.getState();
+    if (!user) throw new Error("Not authenticated");
 
     // Look up the target user by username
     const targetUser = await api.getUserByUsername(targetUsername);
     const targetUserId = targetUser.id;
 
-    // Fetch their key bundle and establish E2EE session
-    const bundle = await api.getKeyBundle(targetUserId);
-    await ensureSession(targetUserId, bundle);
+    // Don't pre-establish E2EE session here. Sessions are created on-demand:
+    //  - For sending: encryptOutgoing() fetches key bundle and calls ensureSession()
+    //  - For receiving: decryptIncoming() runs X3DH respond on initial messages
+    // Pre-creating a session here would conflict with incoming initial messages
+    // from the peer, causing decryption failures.
 
     // Create the DM channel (includes usernames for display)
     const meta = JSON.stringify({
@@ -938,6 +1016,86 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
 
     return channel;
+  },
+
+  async getOrCreateDmChannel(targetUsername) {
+    const { api } = useAuthStore.getState();
+    const { user } = useAuthStore.getState();
+    if (!user) throw new Error("Not authenticated");
+
+    const targetUser = await api.getUserByUsername(targetUsername);
+    const targetUserId = targetUser.id;
+
+    const meta = JSON.stringify({
+      type: "dm",
+      participants: [user.id, targetUserId],
+      names: { [user.id]: user.username, [targetUserId]: targetUser.username },
+    });
+    const metaBase64 = unicodeBtoa(meta);
+
+    const channel = await api.createDm({
+      target_user_id: targetUserId,
+      encrypted_meta: metaBase64,
+    });
+
+    mapChannelToPeer(channel.id, targetUserId);
+
+    const { ws } = get();
+    if (ws) ws.subscribe(channel.id);
+
+    // Add channel to state WITHOUT changing currentChannelId
+    set((state) => {
+      const exists = state.channels.some((ch) => ch.id === channel.id);
+      return {
+        channels: exists ? state.channels : [...state.channels, channel],
+        messages: { ...state.messages, [channel.id]: state.messages[channel.id] ?? [] },
+      };
+    });
+
+    return channel;
+  },
+
+  async sendMessageToChannel(channelId, text, formatting) {
+    const { ws } = get();
+    if (!ws) return;
+
+    if (!ws.isConnected) {
+      ws.connect();
+      await new Promise((r) => setTimeout(r, 1000));
+      if (!ws.isConnected) return;
+    }
+
+    const { user } = useAuthStore.getState();
+    if (!user) return;
+
+    try {
+      const { senderToken, encryptedBody } = await encryptOutgoing(
+        user.id,
+        channelId,
+        text,
+        undefined,
+        formatting,
+      );
+
+      const tempId = `temp-${crypto.randomUUID()}`;
+      pendingAcks.push(tempId);
+
+      const optimistic: DecryptedMessage = {
+        id: tempId,
+        channelId,
+        senderId: user.id,
+        text,
+        contentType: formatting?.contentType,
+        formatting: formatting?.data,
+        timestamp: new Date().toISOString(),
+        raw: {} as MessageResponse,
+      };
+      set((state) => appendMessage(state, channelId, optimistic));
+
+      ws.sendMessage(channelId, senderToken, encryptedBody);
+    } catch (err) {
+      console.error("[sendMessageToChannel] Failed to send:", err);
+    }
   },
 
   async loadBlockedUsers() {
@@ -1005,6 +1163,10 @@ function clearTypingForUser(channelId: string, userId: string): void {
   });
 }
 
+// Track recently processed message IDs to deduplicate (DM messages may arrive
+// via both channel broadcast and direct delivery to user connections).
+const processedMsgIds = new Set<string>();
+
 async function handleIncomingMessage(raw: MessageResponse) {
   // Skip our own messages — already displayed via optimistic insert
   if (ownMessageIds.has(raw.id)) {
@@ -1012,10 +1174,27 @@ async function handleIncomingMessage(raw: MessageResponse) {
     return;
   }
 
+  // Deduplicate: DM messages may arrive twice (broadcast + direct delivery)
+  if (processedMsgIds.has(raw.id)) return;
+  processedMsgIds.add(raw.id);
+  if (processedMsgIds.size > 500) {
+    const toRemove = [...processedMsgIds].slice(0, 250);
+    for (const id of toRemove) processedMsgIds.delete(id);
+  }
+
   // If this message is for an unknown channel, reload channels to discover it
   const knownChannels = useChatStore.getState().channels;
   if (!knownChannels.some((ch) => ch.id === raw.channel_id)) {
     await useChatStore.getState().loadChannels();
+
+    // Subscribe to the newly discovered channel and map DM peer
+    const { ws } = useChatStore.getState();
+    if (ws) ws.subscribe(raw.channel_id);
+    const newChannel = useChatStore.getState().channels.find((ch) => ch.id === raw.channel_id);
+    if (newChannel) {
+      const myId = useAuthStore.getState().user?.id;
+      if (myId) mapDmChannelPeer(newChannel, myId);
+    }
   }
 
   // Increment unread count if this message is for a non-active channel

@@ -23,6 +23,7 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
   loading: false,
 
   async loadFriends() {
+    if (get().loading) return; // Prevent duplicate in-flight requests (StrictMode)
     const { api } = useAuthStore.getState();
     set({ loading: true });
     try {

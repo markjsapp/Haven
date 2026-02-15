@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use axum::{
     extract::{
@@ -28,6 +29,20 @@ pub type ConnectionMap = Arc<DashMap<Uuid, Vec<mpsc::UnboundedSender<WsServerMes
 
 /// Tracks channel subscriptions. Maps channel_id -> broadcast sender.
 pub type ChannelBroadcastMap = Arc<DashMap<Uuid, broadcast::Sender<WsServerMessage>>>;
+
+/// Represents a WebSocket session that can survive brief disconnections.
+pub struct WsSession {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub event_buffer: tokio::sync::Mutex<VecDeque<WsServerMessage>>,
+    pub buffer_capacity: usize,
+    pub created_at: Instant,
+    pub last_active: tokio::sync::Mutex<Instant>,
+    pub subscribed_channels: tokio::sync::Mutex<HashSet<Uuid>>,
+}
+
+/// Maps session_id -> Session for resume support.
+pub type SessionMap = Arc<DashMap<Uuid, Arc<WsSession>>>;
 
 /// Query params for WebSocket upgrade — token passed as query param
 /// since WebSocket doesn't support custom headers in browsers.
@@ -74,6 +89,20 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
     let subscriptions: Arc<tokio::sync::Mutex<HashMap<Uuid, JoinHandle<()>>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
+    // --- Session management ---
+    let session_id = Uuid::new_v4();
+    let buffer_capacity = state.config.ws_session_buffer_size;
+    let session = Arc::new(WsSession {
+        session_id,
+        user_id,
+        event_buffer: tokio::sync::Mutex::new(VecDeque::with_capacity(buffer_capacity)),
+        buffer_capacity,
+        created_at: Instant::now(),
+        last_active: tokio::sync::Mutex::new(Instant::now()),
+        subscribed_channels: tokio::sync::Mutex::new(HashSet::new()),
+    });
+    state.sessions.insert(session_id, session.clone());
+
     // Register this connection
     state
         .connections
@@ -81,7 +110,14 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
         .or_insert_with(Vec::new)
         .push(tx.clone());
 
-    tracing::info!("WebSocket connected: user={}", user_id);
+    tracing::info!("WebSocket connected: user={}, session={}", user_id, session_id);
+
+    // Send Hello immediately
+    let hello = WsServerMessage::Hello {
+        session_id,
+        heartbeat_interval_ms: (state.config.ws_heartbeat_timeout_secs * 1000) / 3,
+    };
+    let _ = tx.send(hello);
 
     // Track this user in Redis pub/sub for cross-instance delivery
     pubsub::subscribe_redis_user(&state, user_id).await;
@@ -89,9 +125,20 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
     // Always broadcast online — handles reconnect-before-disconnect race on page refresh
     broadcast_presence(user_id, "online", &state).await;
 
-    // Task: forward messages from our channel to the WebSocket sink
+    // Task: forward messages from our channel to the WebSocket sink,
+    // and buffer events in the session for resume support.
+    let session_for_send = session.clone();
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
+            // Buffer the event for resume (skip Hello/Resumed/InvalidSession/Pong)
+            if should_buffer_event(&msg) {
+                let mut buf = session_for_send.event_buffer.lock().await;
+                if buf.len() >= session_for_send.buffer_capacity {
+                    buf.pop_front();
+                }
+                buf.push_back(msg.clone());
+            }
+
             let text = match serde_json::to_string(&msg) {
                 Ok(t) => t,
                 Err(e) => {
@@ -105,19 +152,34 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
         }
     });
 
-    // Task: read messages from the WebSocket and process them
+    // Task: read messages from the WebSocket and process them, with heartbeat timeout.
+    let heartbeat_timeout = Duration::from_secs(state.config.ws_heartbeat_timeout_secs);
     let state_clone = state.clone();
     let tx_clone = tx.clone();
     let subs_clone = subscriptions.clone();
+    let session_for_recv = session.clone();
     let recv_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = ws_stream.next().await {
-            match msg {
-                Message::Text(text) => {
-                    handle_client_message(&text, user_id, &state_clone, &tx_clone, &subs_clone).await;
+        loop {
+            match tokio::time::timeout(heartbeat_timeout, ws_stream.next()).await {
+                Ok(Some(Ok(msg))) => {
+                    // Update session last_active on any message
+                    *session_for_recv.last_active.lock().await = Instant::now();
+                    match msg {
+                        Message::Text(text) => {
+                            handle_client_message(&text, user_id, &state_clone, &tx_clone, &subs_clone).await;
+                        }
+                        Message::Close(_) => break,
+                        Message::Ping(_) => {} // axum auto-responds with pong
+                        _ => {}
+                    }
                 }
-                Message::Close(_) => break,
-                Message::Ping(_) => {} // axum auto-responds with pong
-                _ => {}
+                Ok(Some(Err(_))) => break, // WebSocket error
+                Ok(None) => break,         // Stream ended
+                Err(_) => {
+                    // Heartbeat timeout — client is dead
+                    tracing::info!("WebSocket heartbeat timeout: user={}, session={}", user_id, session_id);
+                    break;
+                }
             }
         }
     });
@@ -126,6 +188,13 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
     tokio::select! {
         _ = send_task => {},
         _ = recv_task => {},
+    }
+
+    // Snapshot subscribed channels into the session for resume
+    {
+        let subs = subscriptions.lock().await;
+        let mut session_subs = session.subscribed_channels.lock().await;
+        *session_subs = subs.keys().copied().collect();
     }
 
     // Cleanup: abort all subscription tasks and prune empty broadcasts
@@ -165,7 +234,21 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
         pubsub::unsubscribe_redis_user(&state, user_id).await;
     }
 
-    tracing::info!("WebSocket disconnected: user={}", user_id);
+    tracing::info!("WebSocket disconnected: user={}, session={}", user_id, session_id);
+}
+
+/// Returns true if this event type should be buffered for resume support.
+/// Transient control messages (Hello, Pong, Resumed, InvalidSession) are not buffered.
+fn should_buffer_event(msg: &WsServerMessage) -> bool {
+    !matches!(
+        msg,
+        WsServerMessage::Hello { .. }
+            | WsServerMessage::Pong
+            | WsServerMessage::Resumed { .. }
+            | WsServerMessage::InvalidSession
+            | WsServerMessage::Subscribed { .. }
+            | WsServerMessage::Error { .. }
+    )
 }
 
 /// Process an incoming client message.
@@ -266,26 +349,126 @@ async fn handle_client_message(
             handle_unpin_message(user_id, channel_id, message_id, state, reply_tx).await;
         }
 
+        WsClientMessage::MarkRead { channel_id } => {
+            handle_mark_read(user_id, channel_id, state, reply_tx).await;
+        }
+
+        WsClientMessage::Resume { session_id } => {
+            handle_resume(session_id, user_id, state, reply_tx).await;
+        }
+
         WsClientMessage::Ping => {
             let _ = reply_tx.send(WsServerMessage::Pong);
             // Refresh presence on each ping to handle stale entries
-            let mut redis = state.redis.clone();
-            let current: Option<String> = redis::cmd("HGET")
-                .arg("haven:presence")
-                .arg(user_id.to_string())
-                .query_async(&mut redis)
-                .await
-                .unwrap_or(None);
-            if let Some(status) = current {
-                let _: Result<(), _> = redis::cmd("HSET")
+            if let Some(mut redis) = state.redis.clone() {
+                let current: Option<String> = redis::cmd("HGET")
                     .arg("haven:presence")
                     .arg(user_id.to_string())
-                    .arg(status)
                     .query_async(&mut redis)
-                    .await;
+                    .await
+                    .unwrap_or(None);
+                if let Some(status) = current {
+                    let _: Result<(), _> = redis::cmd("HSET")
+                        .arg("haven:presence")
+                        .arg(user_id.to_string())
+                        .arg(status)
+                        .query_async(&mut redis)
+                        .await;
+                }
             }
+            // In-memory presence is always kept up-to-date via broadcast_presence
         }
     }
+}
+
+/// Handle a MarkRead command: update read state and sync across devices.
+async fn handle_mark_read(
+    user_id: Uuid,
+    channel_id: Uuid,
+    state: &AppState,
+    reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
+) {
+    // Verify channel access
+    match queries::can_access_channel(state.db.read(), channel_id, user_id).await {
+        Ok(true) => {}
+        _ => {
+            let _ = reply_tx.send(WsServerMessage::Error {
+                message: "Cannot access this channel".into(),
+            });
+            return;
+        }
+    }
+
+    // Upsert read state
+    match queries::upsert_read_state(state.db.write(), user_id, channel_id).await {
+        Ok(read_state) => {
+            // Broadcast to other connections of the same user (multi-device sync)
+            let sync_msg = WsServerMessage::ReadStateUpdated {
+                channel_id,
+                last_read_at: read_state.last_read_at,
+            };
+            if let Some(conns) = state.connections.get(&user_id) {
+                for conn in conns.iter() {
+                    // Send to all connections (including this one for confirmation)
+                    let _ = conn.send(sync_msg.clone());
+                }
+            }
+            pubsub::publish_user_event(state.redis.clone().as_mut(), user_id, &sync_msg).await;
+        }
+        Err(e) => {
+            tracing::warn!("Failed to upsert read state: {}", e);
+        }
+    }
+}
+
+/// Handle a Resume command: replay buffered events from a previous session.
+async fn handle_resume(
+    session_id: Uuid,
+    user_id: Uuid,
+    state: &AppState,
+    reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
+) {
+    let session = match state.sessions.get(&session_id) {
+        Some(s) => s.clone(),
+        None => {
+            let _ = reply_tx.send(WsServerMessage::InvalidSession);
+            return;
+        }
+    };
+
+    // Verify session belongs to this user
+    if session.user_id != user_id {
+        let _ = reply_tx.send(WsServerMessage::InvalidSession);
+        return;
+    }
+
+    // Check if session has expired
+    let ttl = Duration::from_secs(state.config.ws_session_ttl_secs);
+    if session.last_active.lock().await.elapsed() > ttl {
+        state.sessions.remove(&session_id);
+        let _ = reply_tx.send(WsServerMessage::InvalidSession);
+        return;
+    }
+
+    // Replay buffered events
+    let events: Vec<WsServerMessage> = {
+        let mut buf = session.event_buffer.lock().await;
+        buf.drain(..).collect()
+    };
+    let replayed_count = events.len() as u32;
+
+    for event in events {
+        let _ = reply_tx.send(event);
+    }
+
+    // Update last_active
+    *session.last_active.lock().await = Instant::now();
+
+    let _ = reply_tx.send(WsServerMessage::Resumed { replayed_count });
+    tracing::info!(
+        "WebSocket session resumed: user={}, session={}, replayed={}",
+        user_id, session_id, replayed_count
+    );
 }
 
 /// Handle a SendMessage command: persist and fan out.
@@ -315,6 +498,21 @@ async fn handle_send_message(
                 message: "Internal error".into(),
             });
             return;
+        }
+    }
+
+    // Check if member is timed out (server channels only)
+    if let Ok(Some(channel)) = queries::find_channel_by_id(state.db.read(), channel_id).await {
+        if let Some(server_id) = channel.server_id {
+            if queries::is_member_timed_out(state.db.read(), server_id, user_id)
+                .await
+                .unwrap_or(false)
+            {
+                let _ = reply_tx.send(WsServerMessage::Error {
+                    message: "You are timed out in this server".into(),
+                });
+                return;
+            }
         }
     }
 
@@ -393,7 +591,25 @@ async fn handle_send_message(
         let _ = broadcaster.send(new_msg.clone());
     }
     // Publish to Redis for cross-instance delivery
-    pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &new_msg).await;
+    pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &new_msg).await;
+
+    // For DM/group channels, also deliver directly to all member connections.
+    // Members may not have subscribed to the channel broadcast yet (e.g., new DM
+    // from someone they haven't messaged before). Client deduplicates by message ID.
+    if let Ok(Some(channel)) = queries::find_channel_by_id(state.db.read(), channel_id).await {
+        if channel.channel_type == "dm" || channel.channel_type == "group" {
+            if let Ok(member_ids) = queries::get_channel_member_ids(state.db.read(), channel_id).await {
+                for member_id in member_ids {
+                    if member_id == user_id { continue; } // Skip the sender
+                    if let Some(conns) = state.connections.get(&member_id) {
+                        for conn in conns.iter() {
+                            let _ = conn.send(new_msg.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Handle a Subscribe command: join a channel broadcast group.
@@ -485,14 +701,16 @@ async fn handle_set_status(
     // For invisible, we store it in Redis but broadcast as "offline"
     let broadcast_status = if status == "invisible" { "offline" } else { status };
 
-    // Update Redis
-    let mut redis = state.redis.clone();
-    let _: Result<(), _> = redis::cmd("HSET")
-        .arg("haven:presence")
-        .arg(user_id.to_string())
-        .arg(status)
-        .query_async(&mut redis)
-        .await;
+    // Update presence store
+    if let Some(mut redis) = state.redis.clone() {
+        let _: Result<(), _> = redis::cmd("HSET")
+            .arg("haven:presence")
+            .arg(user_id.to_string())
+            .arg(status)
+            .query_async(&mut redis)
+            .await;
+    }
+    state.memory.presence.insert(user_id, status.to_string());
 
     // Broadcast to all channels this user belongs to
     let channel_ids = match queries::get_user_channel_ids(state.db.read(), user_id).await {
@@ -511,14 +729,14 @@ async fn handle_set_status(
         }
     }
     for channel_id in channel_ids {
-        pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &msg).await;
+        pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &msg).await;
     }
 }
 
 /// Handle typing indicator — ephemeral, no persistence.
 async fn handle_typing(user_id: Uuid, channel_id: Uuid, state: &AppState) {
     // Look up username for display (cached)
-    let username = match queries::find_user_by_id_cached(state.db.read(), &mut state.redis.clone(), user_id).await {
+    let username = match queries::find_user_by_id_cached(state.db.read(), &mut state.redis.clone(), &state.memory, user_id).await {
         Ok(Some(user)) => user.display_name.unwrap_or(user.username),
         _ => return, // Can't resolve user — skip
     };
@@ -531,7 +749,7 @@ async fn handle_typing(user_id: Uuid, channel_id: Uuid, state: &AppState) {
     if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
         let _ = broadcaster.send(typing_msg.clone());
     }
-    pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &typing_msg).await;
+    pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &typing_msg).await;
 }
 
 /// Handle an EditMessage command: verify ownership, update DB, broadcast.
@@ -586,7 +804,7 @@ async fn handle_edit_message(
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {
         let _ = broadcaster.send(edit_msg.clone());
     }
-    pubsub::publish_channel_event(&mut state.redis.clone(), message.channel_id, &edit_msg).await;
+    pubsub::publish_channel_event(state.redis.clone().as_mut(), message.channel_id, &edit_msg).await;
 }
 
 /// Handle a DeleteMessage command: verify ownership or server admin, delete from DB, broadcast.
@@ -639,9 +857,9 @@ async fn handle_delete_message(
                 }
             };
 
-            // Check if user is the server owner
-            let server = match queries::find_server_by_id(state.db.read(), server_id).await {
-                Ok(Some(s)) if s.owner_id == user_id => s,
+            // Check if user is the server owner or has MANAGE_MESSAGES
+            let (is_owner, perms) = match queries::get_member_permissions(state.db.read(), server_id, user_id).await {
+                Ok(p) => p,
                 _ => {
                     let _ = reply_tx.send(WsServerMessage::Error {
                         message: "Cannot delete this message".into(),
@@ -649,11 +867,24 @@ async fn handle_delete_message(
                     return;
                 }
             };
-            let _ = server; // used above in the guard
+            if !is_owner && !crate::permissions::has_permission(perms, crate::permissions::MANAGE_MESSAGES) {
+                let _ = reply_tx.send(WsServerMessage::Error {
+                    message: "Cannot delete this message".into(),
+                });
+                return;
+            }
 
-            // User is the server owner — delete unconditionally
+            // User is owner or has MANAGE_MESSAGES — delete unconditionally
             match queries::delete_message_admin(state.db.write(), message_id).await {
-                Ok(m) => m,
+                Ok(m) => {
+                    // Audit log for moderator delete (not the sender)
+                    let _ = queries::insert_audit_log(
+                        state.db.write(), server_id, user_id, "message_delete",
+                        Some("message"), Some(message_id),
+                        Some(&serde_json::json!({ "channel_id": msg.channel_id.to_string() })), None,
+                    ).await;
+                    m
+                }
                 Err(e) => {
                     let _ = reply_tx.send(WsServerMessage::Error {
                         message: format!("Failed to delete message: {}", e),
@@ -672,7 +903,7 @@ async fn handle_delete_message(
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {
         let _ = broadcaster.send(del_msg.clone());
     }
-    pubsub::publish_channel_event(&mut state.redis.clone(), message.channel_id, &del_msg).await;
+    pubsub::publish_channel_event(state.redis.clone().as_mut(), message.channel_id, &del_msg).await;
 }
 
 /// Handle an AddReaction command: persist and broadcast.
@@ -700,6 +931,21 @@ async fn handle_add_reaction(
         }
     };
 
+    // Check if member is timed out (server channels only)
+    if let Ok(Some(channel)) = queries::find_channel_by_id(state.db.read(), message.channel_id).await {
+        if let Some(server_id) = channel.server_id {
+            if queries::is_member_timed_out(state.db.read(), server_id, user_id)
+                .await
+                .unwrap_or(false)
+            {
+                let _ = reply_tx.send(WsServerMessage::Error {
+                    message: "You are timed out in this server".into(),
+                });
+                return;
+            }
+        }
+    }
+
     // Persist the reaction
     if let Err(e) = queries::add_reaction(state.db.write(), message_id, user_id, emoji).await {
         let _ = reply_tx.send(WsServerMessage::Error {
@@ -718,7 +964,7 @@ async fn handle_add_reaction(
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {
         let _ = broadcaster.send(react_msg.clone());
     }
-    pubsub::publish_channel_event(&mut state.redis.clone(), message.channel_id, &react_msg).await;
+    pubsub::publish_channel_event(state.redis.clone().as_mut(), message.channel_id, &react_msg).await;
 }
 
 /// Handle a RemoveReaction command: delete and broadcast.
@@ -768,30 +1014,37 @@ async fn handle_remove_reaction(
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {
         let _ = broadcaster.send(unreact_msg.clone());
     }
-    pubsub::publish_channel_event(&mut state.redis.clone(), message.channel_id, &unreact_msg).await;
+    pubsub::publish_channel_event(state.redis.clone().as_mut(), message.channel_id, &unreact_msg).await;
 }
 
 /// Broadcast a presence update (online/offline) to all channels the user belongs to,
 /// and track the state in Redis for multi-instance queries.
 pub(crate) async fn broadcast_presence(user_id: Uuid, status: &str, state: &AppState) {
-    // Update Redis presence hash
-    let mut redis = state.redis.clone();
-    let redis_result: Result<(), _> = if status == "offline" {
-        redis::cmd("HDEL")
-            .arg("haven:presence")
-            .arg(user_id.to_string())
-            .query_async(&mut redis)
-            .await
+    // Update presence stores
+    if let Some(mut redis) = state.redis.clone() {
+        let redis_result: Result<(), _> = if status == "offline" {
+            redis::cmd("HDEL")
+                .arg("haven:presence")
+                .arg(user_id.to_string())
+                .query_async(&mut redis)
+                .await
+        } else {
+            redis::cmd("HSET")
+                .arg("haven:presence")
+                .arg(user_id.to_string())
+                .arg(status)
+                .query_async(&mut redis)
+                .await
+        };
+        if let Err(e) = redis_result {
+            tracing::warn!("Failed to update presence in Redis: {}", e);
+        }
+    }
+    // Always update in-memory presence
+    if status == "offline" {
+        state.memory.presence.remove(&user_id);
     } else {
-        redis::cmd("HSET")
-            .arg("haven:presence")
-            .arg(user_id.to_string())
-            .arg(status)
-            .query_async(&mut redis)
-            .await
-    };
-    if let Err(e) = redis_result {
-        tracing::warn!("Failed to update presence in Redis: {}", e);
+        state.memory.presence.insert(user_id, status.to_string());
     }
 
     // Get all channels this user belongs to and broadcast
@@ -815,7 +1068,7 @@ pub(crate) async fn broadcast_presence(user_id: Uuid, status: &str, state: &AppS
     }
     // Publish presence to all subscribed channels via Redis
     for ch_id in channel_ids {
-        pubsub::publish_channel_event(&mut state.redis.clone(), ch_id, &msg).await;
+        pubsub::publish_channel_event(state.redis.clone().as_mut(), ch_id, &msg).await;
     }
 }
 
@@ -862,7 +1115,7 @@ async fn handle_pin_message(
             if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
                 let _ = broadcaster.send(pin_msg.clone());
             }
-            pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &pin_msg).await;
+            pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &pin_msg).await;
 
             // Insert system message for pin
             if let Ok(Some(user)) = queries::find_user_by_id(state.db.read(), user_id).await {
@@ -881,7 +1134,7 @@ async fn handle_pin_message(
                     if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
                         let _ = broadcaster.send(sys_ws_msg.clone());
                     }
-                    pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &sys_ws_msg).await;
+                    pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &sys_ws_msg).await;
                 }
             }
         }
@@ -922,7 +1175,7 @@ async fn handle_unpin_message(
             if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
                 let _ = broadcaster.send(unpin_msg.clone());
             }
-            pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &unpin_msg).await;
+            pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &unpin_msg).await;
 
             // Insert system message for unpin
             if let Ok(Some(user)) = queries::find_user_by_id(state.db.read(), user_id).await {
@@ -941,7 +1194,7 @@ async fn handle_unpin_message(
                     if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
                         let _ = broadcaster.send(sys_ws_msg.clone());
                     }
-                    pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &sys_ws_msg).await;
+                    pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &sys_ws_msg).await;
                 }
             }
         }

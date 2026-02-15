@@ -60,7 +60,12 @@
       "WebFetch(domain:daveprotocol.com)",
       "WebFetch(domain:www.gethopp.app)",
       "WebFetch(domain:kb.livekit.io)",
-      "WebFetch(domain:wiki.hcink.org)"
+      "WebFetch(domain:wiki.hcink.org)",
+      "Bash(echo:*)",
+      "Bash(git stash:*)",
+      "Bash(git stash pop:*)",
+      "WebFetch(domain:crates.io)",
+      "Bash(npx tauri icon:*)"
     ]
   }
 }

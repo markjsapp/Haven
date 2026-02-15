@@ -4,6 +4,7 @@ import type { VoiceParticipant } from "@haven/core";
 import { useAuthStore } from "./auth.js";
 
 export type VoiceConnectionState = "disconnected" | "connecting" | "connected";
+export type ScreenShareQuality = "360p" | "720p" | "720p60" | "1080p" | "1080p60";
 
 interface VoiceSettings {
   inputDeviceId: string;
@@ -30,6 +31,12 @@ interface VoiceState extends VoiceSettings {
 
   /** Per-user volume overrides (userId -> 0–200, default 100) */
   userVolumes: Record<string, number>;
+
+  // Screen share
+  isScreenSharing: boolean;
+  screenSharePreset: ScreenShareQuality;
+  setScreenSharePreset(preset: ScreenShareQuality): void;
+  setIsScreenSharing(sharing: boolean): void;
 
   // Actions
   joinVoice(channelId: string): Promise<void>;
@@ -88,6 +95,10 @@ export const useVoiceStore = create<VoiceState>()(
       // Per-user volume (persisted)
       userVolumes: {},
 
+      // Screen share
+      isScreenSharing: false,
+      screenSharePreset: "720p" as ScreenShareQuality,
+
       // Audio settings (defaults)
       inputDeviceId: "",
       outputDeviceId: "",
@@ -133,6 +144,7 @@ export const useVoiceStore = create<VoiceState>()(
           livekitUrl: null,
           isMuted: false,
           isDeafened: false,
+          isScreenSharing: false,
         });
       },
 
@@ -171,6 +183,12 @@ export const useVoiceStore = create<VoiceState>()(
         set((s) => ({
           userVolumes: { ...s.userVolumes, [userId]: volume },
         }));
+      },
+      setScreenSharePreset(preset) {
+        set({ screenSharePreset: preset });
+      },
+      setIsScreenSharing(sharing) {
+        set({ isScreenSharing: sharing });
       },
 
       handleVoiceStateUpdate(channelId, userId, username, displayName, avatarUrl, joined) {
@@ -244,6 +262,7 @@ export const useVoiceStore = create<VoiceState>()(
         echoCancellation: state.echoCancellation,
         noiseSuppression: state.noiseSuppression,
         userVolumes: state.userVolumes,
+        screenSharePreset: state.screenSharePreset,
       }),
     },
   ),

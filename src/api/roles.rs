@@ -60,6 +60,13 @@ pub async fn create_role(
     )
     .await?;
 
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "role_create",
+        Some("role"), Some(role.id),
+        Some(&serde_json::json!({ "name": &role.name })), None,
+    ).await;
+
     Ok(Json(RoleResponse::from(role)))
 }
 
@@ -111,8 +118,16 @@ pub async fn update_role(
 
     // Invalidate all permission caches for this server (role changed affects everyone)
     crate::cache::invalidate_pattern(
-        &mut state.redis.clone(),
+        state.redis.clone().as_mut(),
+        &state.memory,
         &format!("haven:perms:{}:*", server_id),
+    ).await;
+
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "role_update",
+        Some("role"), Some(role_id),
+        Some(&serde_json::json!({ "name": &updated.name })), None,
     ).await;
 
     Ok(Json(RoleResponse::from(updated)))
@@ -157,8 +172,16 @@ pub async fn delete_role(
 
     // Invalidate all permission caches for this server
     crate::cache::invalidate_pattern(
-        &mut state.redis.clone(),
+        state.redis.clone().as_mut(),
+        &state.memory,
         &format!("haven:perms:{}:*", server_id),
+    ).await;
+
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "role_delete",
+        Some("role"), Some(role_id),
+        Some(&serde_json::json!({ "name": &target_role.name })), None,
     ).await;
 
     Ok(Json(serde_json::json!({ "message": "Role deleted" })))
@@ -201,8 +224,16 @@ pub async fn assign_role(
 
     // Invalidate permission cache for target user
     crate::cache::invalidate(
-        &mut state.redis.clone(),
+        state.redis.clone().as_mut(),
+        &state.memory,
         &format!("haven:perms:{}:{}", server_id, target_user_id),
+    ).await;
+
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "member_role_add",
+        Some("member"), Some(target_user_id),
+        Some(&serde_json::json!({ "role_id": req.role_id, "role_name": &role.name })), None,
     ).await;
 
     Ok(Json(serde_json::json!({ "message": "Role assigned" })))
@@ -244,8 +275,16 @@ pub async fn unassign_role(
 
     // Invalidate permission cache for target user
     crate::cache::invalidate(
-        &mut state.redis.clone(),
+        state.redis.clone().as_mut(),
+        &state.memory,
         &format!("haven:perms:{}:{}", server_id, target_user_id),
+    ).await;
+
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "member_role_remove",
+        Some("member"), Some(target_user_id),
+        Some(&serde_json::json!({ "role_id": role_id, "role_name": &role.name })), None,
     ).await;
 
     Ok(Json(serde_json::json!({ "message": "Role removed" })))
@@ -310,6 +349,14 @@ pub async fn set_overwrite(
     )
     .await?;
 
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "overwrite_update",
+        Some("channel"), Some(channel_id),
+        Some(&serde_json::json!({ "target_type": &req.target_type, "target_id": req.target_id, "allow": &req.allow_bits, "deny": &req.deny_bits })),
+        None,
+    ).await;
+
     Ok(Json(OverwriteResponse::from(overwrite)))
 }
 
@@ -334,5 +381,14 @@ pub async fn delete_overwrite(
     .await?;
 
     queries::delete_channel_overwrite(state.db.write(), channel_id, &target_type, target_id).await?;
+
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "overwrite_delete",
+        Some("channel"), Some(channel_id),
+        Some(&serde_json::json!({ "target_type": &target_type, "target_id": target_id })),
+        None,
+    ).await;
+
     Ok(Json(serde_json::json!({ "message": "Overwrite removed" })))
 }

@@ -1,4 +1,153 @@
 use std::env;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+// ─── TOML Config File ─────────────────────────────────
+
+/// TOML-serializable config file format. Only fields that make sense
+/// in a config file are included; runtime-only fields stay on AppConfig.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConfigFile {
+    #[serde(default = "default_host")]
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+
+    #[serde(default)]
+    pub database_url: String,
+    #[serde(default)]
+    pub database_replica_url: String,
+    #[serde(default = "default_db_max_connections")]
+    pub db_max_connections: u32,
+
+    #[serde(default)]
+    pub redis_url: String,
+
+    #[serde(default)]
+    pub jwt_secret: String,
+    #[serde(default = "default_jwt_expiry_hours")]
+    pub jwt_expiry_hours: i64,
+    #[serde(default = "default_refresh_token_expiry_days")]
+    pub refresh_token_expiry_days: i64,
+
+    #[serde(default = "default_storage_backend")]
+    pub storage_backend: String,
+    #[serde(default = "default_storage_dir")]
+    pub storage_dir: String,
+    #[serde(default)]
+    pub storage_encryption_key: String,
+
+    #[serde(default)]
+    pub s3_endpoint: String,
+    #[serde(default)]
+    pub s3_bucket: String,
+    #[serde(default)]
+    pub s3_access_key: String,
+    #[serde(default)]
+    pub s3_secret_key: String,
+    #[serde(default = "default_s3_region")]
+    pub s3_region: String,
+
+    #[serde(default = "default_cors_origins")]
+    pub cors_origins: String,
+
+    #[serde(default = "default_max_requests_per_minute")]
+    pub max_requests_per_minute: u32,
+    #[serde(default = "default_max_ws_connections_per_user")]
+    pub max_ws_connections_per_user: u32,
+
+    #[serde(default = "default_broadcast_channel_capacity")]
+    pub broadcast_channel_capacity: usize,
+
+    #[serde(default = "default_ws_heartbeat_timeout_secs")]
+    pub ws_heartbeat_timeout_secs: u64,
+
+    #[serde(default = "default_ws_session_buffer_size")]
+    pub ws_session_buffer_size: usize,
+
+    #[serde(default = "default_ws_session_ttl_secs")]
+    pub ws_session_ttl_secs: u64,
+
+    #[serde(default = "default_max_upload_size_bytes")]
+    pub max_upload_size_bytes: u64,
+
+    #[serde(default)]
+    pub cdn_enabled: bool,
+    #[serde(default)]
+    pub cdn_base_url: String,
+    #[serde(default = "default_cdn_presign_expiry_secs")]
+    pub cdn_presign_expiry_secs: u64,
+
+    #[serde(default)]
+    pub livekit_url: String,
+    #[serde(default)]
+    pub livekit_api_key: String,
+    #[serde(default)]
+    pub livekit_api_secret: String,
+    #[serde(default = "default_livekit_bundled")]
+    pub livekit_bundled: bool,
+    #[serde(default = "default_livekit_port")]
+    pub livekit_port: u16,
+
+    #[serde(default)]
+    pub tls: TlsConfig,
+}
+
+// ─── TLS Config ───────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TlsConfig {
+    #[serde(default = "default_tls_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_tls_port")]
+    pub port: u16,
+    #[serde(default = "default_tls_cert_path")]
+    pub cert_path: String,
+    #[serde(default = "default_tls_key_path")]
+    pub key_path: String,
+    #[serde(default = "default_tls_auto_generate")]
+    pub auto_generate: bool,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_tls_enabled(),
+            port: default_tls_port(),
+            cert_path: default_tls_cert_path(),
+            key_path: default_tls_key_path(),
+            auto_generate: default_tls_auto_generate(),
+        }
+    }
+}
+
+fn default_host() -> String { "0.0.0.0".into() }
+fn default_port() -> u16 { 8080 }
+fn default_db_max_connections() -> u32 { 50 }
+fn default_jwt_expiry_hours() -> i64 { 24 }
+fn default_refresh_token_expiry_days() -> i64 { 30 }
+fn default_storage_backend() -> String { "local".into() }
+fn default_storage_dir() -> String { "./data/attachments".into() }
+fn default_s3_region() -> String { "us-east-1".into() }
+fn default_cors_origins() -> String { "*".into() }
+fn default_max_requests_per_minute() -> u32 { 300 }
+fn default_max_ws_connections_per_user() -> u32 { 5 }
+fn default_broadcast_channel_capacity() -> usize { 4096 }
+fn default_ws_heartbeat_timeout_secs() -> u64 { 90 }
+fn default_ws_session_buffer_size() -> usize { 500 }
+fn default_ws_session_ttl_secs() -> u64 { 300 }
+fn default_max_upload_size_bytes() -> u64 { 524_288_000 }
+fn default_cdn_presign_expiry_secs() -> u64 { 3600 }
+fn default_livekit_bundled() -> bool { true }
+fn default_livekit_port() -> u16 { 7880 }
+fn default_tls_enabled() -> bool { true }
+fn default_tls_port() -> u16 { 8443 }
+fn default_tls_cert_path() -> String { "./data/certs/cert.pem".into() }
+fn default_tls_key_path() -> String { "./data/certs/key.pem".into() }
+fn default_tls_auto_generate() -> bool { true }
+
+// ─── Application Config ───────────────────────────────
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {
@@ -40,6 +189,9 @@ pub struct AppConfig {
 
     // WebSocket
     pub broadcast_channel_capacity: usize,
+    pub ws_heartbeat_timeout_secs: u64,
+    pub ws_session_buffer_size: usize,
+    pub ws_session_ttl_secs: u64,
 
     // File Upload
     pub max_upload_size_bytes: u64,
@@ -53,6 +205,15 @@ pub struct AppConfig {
     pub livekit_url: String,
     pub livekit_api_key: String,
     pub livekit_api_secret: String,
+    pub livekit_bundled: bool,
+    pub livekit_port: u16,
+
+    // TLS — auto-generated self-signed certs by default
+    pub tls_enabled: bool,
+    pub tls_port: u16,
+    pub tls_cert_path: String,
+    pub tls_key_path: String,
+    pub tls_auto_generate: bool,
 }
 
 impl AppConfig {
@@ -88,6 +249,9 @@ impl AppConfig {
             max_requests_per_minute: 1000,
             max_ws_connections_per_user: 10,
             broadcast_channel_capacity: 4096,
+            ws_heartbeat_timeout_secs: 90,
+            ws_session_buffer_size: 500,
+            ws_session_ttl_secs: 300,
             max_upload_size_bytes: 10_000_000,
             cdn_enabled: false,
             cdn_base_url: String::new(),
@@ -95,9 +259,17 @@ impl AppConfig {
             livekit_url: String::new(),
             livekit_api_key: String::new(),
             livekit_api_secret: String::new(),
+            livekit_bundled: false,
+            livekit_port: 7880,
+            tls_enabled: false,
+            tls_port: 8443,
+            tls_cert_path: "./data/certs/cert.pem".into(),
+            tls_key_path: "./data/certs/key.pem".into(),
+            tls_auto_generate: false,
         }
     }
 
+    /// Load config from environment variables (existing behavior for PostgreSQL mode).
     pub fn from_env() -> Self {
         Self {
             host: env::var("HAVEN_HOST").unwrap_or_else(|_| "0.0.0.0".into()),
@@ -144,9 +316,9 @@ impl AppConfig {
                 .unwrap_or_else(|_| "http://localhost:5173".into()),
 
             max_requests_per_minute: env::var("MAX_REQUESTS_PER_MINUTE")
-                .unwrap_or_else(|_| "120".into())
+                .unwrap_or_else(|_| "300".into())
                 .parse()
-                .unwrap_or(120),
+                .unwrap_or(300),
             max_ws_connections_per_user: env::var("MAX_WS_CONNECTIONS_PER_USER")
                 .unwrap_or_else(|_| "5".into())
                 .parse()
@@ -156,6 +328,10 @@ impl AppConfig {
                 .unwrap_or_else(|_| "4096".into())
                 .parse()
                 .unwrap_or(4096),
+
+            ws_heartbeat_timeout_secs: default_ws_heartbeat_timeout_secs(),
+            ws_session_buffer_size: default_ws_session_buffer_size(),
+            ws_session_ttl_secs: default_ws_session_ttl_secs(),
 
             max_upload_size_bytes: env::var("MAX_UPLOAD_SIZE_BYTES")
                 .unwrap_or_else(|_| "524288000".into()) // 500MB
@@ -175,6 +351,198 @@ impl AppConfig {
             livekit_url: env::var("LIVEKIT_URL").unwrap_or_default(),
             livekit_api_key: env::var("LIVEKIT_API_KEY").unwrap_or_default(),
             livekit_api_secret: env::var("LIVEKIT_API_SECRET").unwrap_or_default(),
+            livekit_bundled: env::var("LIVEKIT_BUNDLED")
+                .unwrap_or_else(|_| "true".into())
+                .parse()
+                .unwrap_or(true),
+            livekit_port: env::var("LIVEKIT_PORT")
+                .unwrap_or_else(|_| "7880".into())
+                .parse()
+                .unwrap_or(7880),
+
+            tls_enabled: env::var("TLS_ENABLED")
+                .unwrap_or_else(|_| "true".into())
+                .parse()
+                .unwrap_or(true),
+            tls_port: env::var("TLS_PORT")
+                .unwrap_or_else(|_| "8443".into())
+                .parse()
+                .unwrap_or(8443),
+            tls_cert_path: env::var("TLS_CERT_PATH")
+                .unwrap_or_else(|_| default_tls_cert_path()),
+            tls_key_path: env::var("TLS_KEY_PATH")
+                .unwrap_or_else(|_| default_tls_key_path()),
+            tls_auto_generate: env::var("TLS_AUTO_GENERATE")
+                .unwrap_or_else(|_| "true".into())
+                .parse()
+                .unwrap_or(true),
+        }
+    }
+
+    /// Load config from TOML file, auto-generating one with secure defaults if it doesn't exist.
+    /// Used for zero-config SQLite mode: `./haven-server` just works.
+    pub fn from_file_or_generate(path: &str) -> Self {
+        if Path::new(path).exists() {
+            Self::from_toml_file(path)
+        } else {
+            tracing::info!("No config file found at {}, generating with secure defaults...", path);
+            let config = Self::generate_default_config(path);
+            tracing::info!("Config file written to {}", path);
+            config
+        }
+    }
+
+    /// Parse a TOML config file into AppConfig.
+    fn from_toml_file(path: &str) -> Self {
+        let content = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("Failed to read config file {}: {}", path, e));
+        let file: ConfigFile = toml::from_str(&content)
+            .unwrap_or_else(|e| panic!("Failed to parse config file {}: {}", path, e));
+
+        Self {
+            host: file.host,
+            port: file.port,
+            database_url: file.database_url,
+            database_replica_url: file.database_replica_url,
+            db_max_connections: file.db_max_connections,
+            redis_url: file.redis_url,
+            jwt_secret: file.jwt_secret,
+            jwt_expiry_hours: file.jwt_expiry_hours,
+            refresh_token_expiry_days: file.refresh_token_expiry_days,
+            storage_backend: file.storage_backend,
+            storage_dir: file.storage_dir,
+            storage_encryption_key: file.storage_encryption_key,
+            s3_endpoint: file.s3_endpoint,
+            s3_bucket: file.s3_bucket,
+            s3_access_key: file.s3_access_key,
+            s3_secret_key: file.s3_secret_key,
+            s3_region: file.s3_region,
+            cors_origins: file.cors_origins,
+            max_requests_per_minute: file.max_requests_per_minute,
+            max_ws_connections_per_user: file.max_ws_connections_per_user,
+            broadcast_channel_capacity: file.broadcast_channel_capacity,
+            ws_heartbeat_timeout_secs: file.ws_heartbeat_timeout_secs,
+            ws_session_buffer_size: file.ws_session_buffer_size,
+            ws_session_ttl_secs: file.ws_session_ttl_secs,
+            max_upload_size_bytes: file.max_upload_size_bytes,
+            cdn_enabled: file.cdn_enabled,
+            cdn_base_url: file.cdn_base_url,
+            cdn_presign_expiry_secs: file.cdn_presign_expiry_secs,
+            livekit_url: file.livekit_url,
+            livekit_api_key: file.livekit_api_key,
+            livekit_api_secret: file.livekit_api_secret,
+            livekit_bundled: file.livekit_bundled,
+            livekit_port: file.livekit_port,
+            tls_enabled: file.tls.enabled,
+            tls_port: file.tls.port,
+            tls_cert_path: file.tls.cert_path,
+            tls_key_path: file.tls.key_path,
+            tls_auto_generate: file.tls.auto_generate,
+        }
+    }
+
+    /// Generate a config file with secure random secrets and sane defaults.
+    fn generate_default_config(path: &str) -> Self {
+        use rand::Rng;
+
+        let mut rng = rand::thread_rng();
+
+        // Generate 64-char hex strings (32 bytes of entropy)
+        let jwt_secret: String = (0..32).map(|_| format!("{:02x}", rng.gen::<u8>())).collect();
+        let storage_key: String = (0..32).map(|_| format!("{:02x}", rng.gen::<u8>())).collect();
+
+        // Ensure data directory exists
+        std::fs::create_dir_all("./data").ok();
+
+        let file = ConfigFile {
+            host: default_host(),
+            port: default_port(),
+            #[cfg(feature = "sqlite")]
+            database_url: "sqlite:./data/haven.db?mode=rwc".into(),
+            #[cfg(feature = "postgres")]
+            database_url: String::new(),
+            database_replica_url: String::new(),
+            db_max_connections: default_db_max_connections(),
+            redis_url: String::new(),
+            jwt_secret,
+            jwt_expiry_hours: default_jwt_expiry_hours(),
+            refresh_token_expiry_days: default_refresh_token_expiry_days(),
+            storage_backend: default_storage_backend(),
+            storage_dir: default_storage_dir(),
+            storage_encryption_key: storage_key,
+            s3_endpoint: String::new(),
+            s3_bucket: String::new(),
+            s3_access_key: String::new(),
+            s3_secret_key: String::new(),
+            s3_region: default_s3_region(),
+            cors_origins: default_cors_origins(),
+            max_requests_per_minute: default_max_requests_per_minute(),
+            max_ws_connections_per_user: default_max_ws_connections_per_user(),
+            broadcast_channel_capacity: default_broadcast_channel_capacity(),
+            ws_heartbeat_timeout_secs: default_ws_heartbeat_timeout_secs(),
+            ws_session_buffer_size: default_ws_session_buffer_size(),
+            ws_session_ttl_secs: default_ws_session_ttl_secs(),
+            max_upload_size_bytes: default_max_upload_size_bytes(),
+            cdn_enabled: false,
+            cdn_base_url: String::new(),
+            cdn_presign_expiry_secs: default_cdn_presign_expiry_secs(),
+            livekit_url: String::new(),
+            livekit_api_key: String::new(),
+            livekit_api_secret: String::new(),
+            livekit_bundled: default_livekit_bundled(),
+            livekit_port: default_livekit_port(),
+            tls: TlsConfig::default(),
+        };
+
+        // Write the TOML file
+        if let Some(parent) = Path::new(path).parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        let toml_string = toml::to_string_pretty(&file)
+            .expect("Failed to serialize config to TOML");
+        std::fs::write(path, &toml_string)
+            .unwrap_or_else(|e| panic!("Failed to write config file {}: {}", path, e));
+
+        // Convert to AppConfig
+        Self {
+            host: file.host,
+            port: file.port,
+            database_url: file.database_url,
+            database_replica_url: file.database_replica_url,
+            db_max_connections: file.db_max_connections,
+            redis_url: file.redis_url,
+            jwt_secret: file.jwt_secret,
+            jwt_expiry_hours: file.jwt_expiry_hours,
+            refresh_token_expiry_days: file.refresh_token_expiry_days,
+            storage_backend: file.storage_backend,
+            storage_dir: file.storage_dir,
+            storage_encryption_key: file.storage_encryption_key,
+            s3_endpoint: file.s3_endpoint,
+            s3_bucket: file.s3_bucket,
+            s3_access_key: file.s3_access_key,
+            s3_secret_key: file.s3_secret_key,
+            s3_region: file.s3_region,
+            cors_origins: file.cors_origins,
+            max_requests_per_minute: file.max_requests_per_minute,
+            max_ws_connections_per_user: file.max_ws_connections_per_user,
+            broadcast_channel_capacity: file.broadcast_channel_capacity,
+            ws_heartbeat_timeout_secs: file.ws_heartbeat_timeout_secs,
+            ws_session_buffer_size: file.ws_session_buffer_size,
+            ws_session_ttl_secs: file.ws_session_ttl_secs,
+            max_upload_size_bytes: file.max_upload_size_bytes,
+            cdn_enabled: file.cdn_enabled,
+            cdn_base_url: file.cdn_base_url,
+            cdn_presign_expiry_secs: file.cdn_presign_expiry_secs,
+            livekit_url: file.livekit_url,
+            livekit_api_key: file.livekit_api_key,
+            livekit_api_secret: file.livekit_api_secret,
+            livekit_bundled: file.livekit_bundled,
+            livekit_port: file.livekit_port,
+            tls_enabled: file.tls.enabled,
+            tls_port: file.tls.port,
+            tls_cert_path: file.tls.cert_path,
+            tls_key_path: file.tls.key_path,
+            tls_auto_generate: file.tls.auto_generate,
         }
     }
 }
@@ -238,5 +606,26 @@ mod tests {
     fn livekit_disabled_by_default() {
         let config = AppConfig::test_default();
         assert!(!config.livekit_enabled());
+    }
+
+    #[test]
+    fn config_roundtrip_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_haven.toml");
+        let path_str = path.to_str().unwrap();
+
+        // Generate config
+        let config = AppConfig::generate_default_config(path_str);
+        assert!(!config.jwt_secret.is_empty());
+        assert_eq!(config.jwt_secret.len(), 64);
+        assert!(!config.storage_encryption_key.is_empty());
+        assert_eq!(config.storage_encryption_key.len(), 64);
+
+        // Re-read it
+        let config2 = AppConfig::from_toml_file(path_str);
+        assert_eq!(config.jwt_secret, config2.jwt_secret);
+        assert_eq!(config.storage_encryption_key, config2.storage_encryption_key);
+        assert_eq!(config.host, config2.host);
+        assert_eq!(config.port, config2.port);
     }
 }

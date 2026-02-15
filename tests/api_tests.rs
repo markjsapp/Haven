@@ -3,7 +3,7 @@ mod common;
 use axum::http::{Method, StatusCode};
 use base64::Engine;
 use serde_json::json;
-use sqlx::PgPool;
+use haven_backend::db::Pool;
 use uuid::Uuid;
 
 use common::TestApp;
@@ -12,8 +12,9 @@ const B64: &base64::engine::GeneralPurpose = &base64::engine::general_purpose::S
 
 // ─── Auth ────────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn register_returns_tokens_and_user(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn register_returns_tokens_and_user(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, user_id) = app.register_user("alice").await;
 
@@ -21,8 +22,9 @@ async fn register_returns_tokens_and_user(pool: PgPool) {
     assert!(!user_id.is_nil());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn login_with_correct_password(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn login_with_correct_password(pool: Pool) {
     let app = TestApp::new(pool).await;
     app.register_user("bob").await;
 
@@ -32,8 +34,9 @@ async fn login_with_correct_password(pool: PgPool) {
     assert!(!user_id.is_nil());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn login_with_wrong_password_returns_401(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn login_with_wrong_password_returns_401(pool: Pool) {
     let app = TestApp::new(pool).await;
     app.register_user("carol").await;
 
@@ -45,8 +48,9 @@ async fn login_with_wrong_password_returns_401(pool: PgPool) {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn protected_route_without_token_returns_401(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn protected_route_without_token_returns_401(pool: Pool) {
     let app = TestApp::new(pool).await;
 
     let (status, _) = app
@@ -56,8 +60,9 @@ async fn protected_route_without_token_returns_401(pool: PgPool) {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn protected_route_with_valid_token_returns_200(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn protected_route_with_valid_token_returns_200(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("dave").await;
 
@@ -68,8 +73,9 @@ async fn protected_route_with_valid_token_returns_200(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn duplicate_username_returns_error(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn duplicate_username_returns_error(pool: Pool) {
     let app = TestApp::new(pool).await;
     app.register_user("duplicate").await;
 
@@ -95,8 +101,9 @@ async fn duplicate_username_returns_error(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn refresh_token_returns_new_access_token(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn refresh_token_returns_new_access_token(pool: Pool) {
     let app = TestApp::new(pool).await;
     app.register_user("refresh_user").await;
 
@@ -113,8 +120,9 @@ async fn refresh_token_returns_new_access_token(pool: PgPool) {
 
 // ─── Servers ─────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_server_returns_server(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_server_returns_server(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, user_id) = app.register_user("server_owner").await;
 
@@ -128,8 +136,9 @@ async fn create_server_returns_server(pool: PgPool) {
     assert_eq!(value["owner_id"].as_str().unwrap(), user_id.to_string());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn list_servers_includes_created_server(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn list_servers_includes_created_server(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("lister").await;
 
@@ -144,8 +153,9 @@ async fn list_servers_includes_created_server(pool: PgPool) {
     assert_eq!(servers.len(), 1);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn non_member_cannot_access_server(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn non_member_cannot_access_server(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("owner_a").await;
     let (token_b, _) = app.register_user("outsider_b").await;
@@ -160,8 +170,9 @@ async fn non_member_cannot_access_server(pool: PgPool) {
 
 // ─── Channels ────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_channel_and_list(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_channel_and_list(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("chan_owner").await;
     let server_id = app.create_server(&token, "Channel Test").await;
@@ -178,8 +189,9 @@ async fn create_channel_and_list(pool: PgPool) {
     assert_eq!(channels.len(), 2);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn delete_channel_removes_it(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn delete_channel_removes_it(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("del_owner").await;
     let server_id = app.create_server(&token, "Del Test").await;
@@ -202,8 +214,9 @@ async fn delete_channel_removes_it(pool: PgPool) {
 
 // ─── Categories ──────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_and_list_categories(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_and_list_categories(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("cat_owner").await;
     let server_id = app.create_server(&token, "Cat Test").await;
@@ -224,8 +237,9 @@ async fn create_and_list_categories(pool: PgPool) {
     assert!(categories.iter().any(|c| c["id"].as_str() == Some(cat_id)));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn assign_channel_to_category(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn assign_channel_to_category(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("assign_owner").await;
     let server_id = app.create_server(&token, "Assign Test").await;
@@ -272,8 +286,9 @@ async fn assign_channel_to_category(pool: PgPool) {
 
 // ─── Roles ───────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn server_has_default_everyone_role(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn server_has_default_everyone_role(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("role_owner").await;
     let server_id = app.create_server(&token, "Role Test").await;
@@ -286,8 +301,9 @@ async fn server_has_default_everyone_role(pool: PgPool) {
     assert!(roles.iter().any(|r| r["is_default"].as_bool() == Some(true)));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_custom_role(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_custom_role(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("role_creator").await;
     let server_id = app.create_server(&token, "Custom Role Test").await;
@@ -308,8 +324,9 @@ async fn create_custom_role(pool: PgPool) {
     assert_eq!(value["color"].as_str(), Some("#00ff00"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn assign_role_to_member(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn assign_role_to_member(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("role_assigner").await;
     let (token_member, member_id) = app.register_user("role_target").await;
@@ -364,8 +381,9 @@ async fn assign_role_to_member(pool: PgPool) {
 
 // ─── Permissions ─────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn user_without_manage_channels_gets_403(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn user_without_manage_channels_gets_403(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("perm_owner").await;
     let (token_member, _) = app.register_user("perm_member").await;
@@ -399,8 +417,9 @@ async fn user_without_manage_channels_gets_403(pool: PgPool) {
 
 // ─── Invites ─────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_and_use_invite(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_and_use_invite(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("inv_owner").await;
     let (token_joiner, _) = app.register_user("inv_joiner").await;
@@ -434,8 +453,9 @@ async fn create_and_use_invite(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn invalid_invite_code_returns_error(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn invalid_invite_code_returns_error(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("bad_inv").await;
 
@@ -453,8 +473,9 @@ async fn invalid_invite_code_returns_error(pool: PgPool) {
 
 // ─── Friends ─────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn send_and_accept_friend_request(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn send_and_accept_friend_request(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("friend_a").await;
     let (token_b, _) = app.register_user("friend_b").await;
@@ -499,8 +520,9 @@ async fn send_and_accept_friend_request(pool: PgPool) {
         .any(|f| f["status"].as_str() == Some("accepted")));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn decline_friend_request(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn decline_friend_request(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("decl_a").await;
     let (token_b, _) = app.register_user("decl_b").await;
@@ -533,8 +555,9 @@ async fn decline_friend_request(pool: PgPool) {
         .all(|f| f["status"].as_str() != Some("accepted")));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn mutual_friend_request_auto_accepts(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn mutual_friend_request_auto_accepts(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("mutual_a").await;
     let (token_b, _) = app.register_user("mutual_b").await;
@@ -563,8 +586,9 @@ async fn mutual_friend_request_auto_accepts(pool: PgPool) {
 
 // ─── Health Check ────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn health_check_returns_ok(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn health_check_returns_ok(pool: Pool) {
     let app = TestApp::new(pool).await;
 
     let (status, value) = app.request(Method::GET, "/health", None, None).await;
@@ -575,8 +599,9 @@ async fn health_check_returns_ok(pool: PgPool) {
 
 // ─── Auth Extended ──────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn logout_revokes_tokens(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn logout_revokes_tokens(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("logout_user").await;
 
@@ -586,8 +611,9 @@ async fn logout_revokes_tokens(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn change_password_success(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn change_password_success(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("pw_change").await;
 
@@ -623,8 +649,9 @@ async fn change_password_success(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn change_password_wrong_current_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn change_password_wrong_current_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("pw_wrong").await;
 
@@ -640,8 +667,9 @@ async fn change_password_wrong_current_fails(pool: PgPool) {
 
 // ─── Messages ───────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn send_and_get_messages(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn send_and_get_messages(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("msg_user").await;
     let server_id = app.create_server(&token, "Msg Server").await;
@@ -660,8 +688,9 @@ async fn send_and_get_messages(pool: PgPool) {
     assert!(messages.iter().any(|m| m["id"].as_str().unwrap() == msg_id.to_string()));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn send_reply_includes_reply_to_id(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn send_reply_includes_reply_to_id(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("reply_user").await;
     let server_id = app.create_server(&token, "Reply Server").await;
@@ -677,8 +706,9 @@ async fn send_reply_includes_reply_to_id(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn non_member_cannot_get_messages(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn non_member_cannot_get_messages(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("msg_owner").await;
     let (token_b, _) = app.register_user("msg_outsider").await;
@@ -692,8 +722,9 @@ async fn non_member_cannot_get_messages(pool: PgPool) {
 
 // ─── Pins ───────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_pins_empty_initially(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_pins_empty_initially(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("pin_user").await;
     let server_id = app.create_server(&token, "Pin Server").await;
@@ -705,8 +736,9 @@ async fn get_pins_empty_initially(pool: PgPool) {
     assert_eq!(value.as_array().unwrap().len(), 0);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_pin_ids_empty_initially(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_pin_ids_empty_initially(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("pinid_user").await;
     let server_id = app.create_server(&token, "PinId Server").await;
@@ -720,8 +752,9 @@ async fn get_pin_ids_empty_initially(pool: PgPool) {
 
 // ─── Reports ────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_report_success(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_report_success(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("reporter").await;
     let server_id = app.create_server(&token, "Report Server").await;
@@ -742,8 +775,9 @@ async fn create_report_success(pool: PgPool) {
     assert!(value["id"].as_str().is_some());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_report_short_reason_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_report_short_reason_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("short_report").await;
     let server_id = app.create_server(&token, "Report2").await;
@@ -763,8 +797,9 @@ async fn create_report_short_reason_fails(pool: PgPool) {
 
 // ─── Bans ───────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ban_and_list_bans(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ban_and_list_bans(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("ban_owner").await;
     let (token_target, target_id) = app.register_user("ban_target").await;
@@ -795,8 +830,9 @@ async fn ban_and_list_bans(pool: PgPool) {
     assert_eq!(bans.len(), 1);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn revoke_ban(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn revoke_ban(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("unban_owner").await;
     let (token_target, target_id) = app.register_user("unban_target").await;
@@ -828,8 +864,9 @@ async fn revoke_ban(pool: PgPool) {
     assert_eq!(value.as_array().unwrap().len(), 0);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn banned_user_cannot_rejoin(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn banned_user_cannot_rejoin(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("banrej_owner").await;
     let (token_target, target_id) = app.register_user("banrej_target").await;
@@ -867,8 +904,9 @@ async fn banned_user_cannot_rejoin(pool: PgPool) {
 
 // ─── User Profiles ──────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_user_profile(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_user_profile(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("profile_a").await;
     let (_, user_b) = app.register_user("profile_b").await;
@@ -881,8 +919,9 @@ async fn get_user_profile(pool: PgPool) {
     assert_eq!(value["is_blocked"].as_bool(), Some(false));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_profile(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_profile(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("update_prof").await;
 
@@ -900,8 +939,9 @@ async fn update_profile(pool: PgPool) {
     assert_eq!(value["about_me"].as_str(), Some("Hello world"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn search_user_by_username(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn search_user_by_username(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("search_me").await;
 
@@ -917,8 +957,9 @@ async fn search_user_by_username(pool: PgPool) {
     assert_eq!(value["username"].as_str(), Some("search_me"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn search_nonexistent_user_returns_404(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn search_nonexistent_user_returns_404(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("searcher").await;
 
@@ -935,8 +976,9 @@ async fn search_nonexistent_user_returns_404(pool: PgPool) {
 
 // ─── Blocked Users ──────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn block_and_unblock_user(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn block_and_unblock_user(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("blocker").await;
     let (_, user_b) = app.register_user("blockee").await;
@@ -970,8 +1012,9 @@ async fn block_and_unblock_user(pool: PgPool) {
     assert_eq!(value.as_array().unwrap().len(), 0);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn cannot_block_self(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn cannot_block_self(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, user_id) = app.register_user("self_blocker").await;
 
@@ -980,8 +1023,9 @@ async fn cannot_block_self(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn blocked_user_cannot_send_friend_request(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn blocked_user_cannot_send_friend_request(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("block_fr_a").await;
     let (token_b, user_b) = app.register_user("block_fr_b").await;
@@ -1004,8 +1048,9 @@ async fn blocked_user_cannot_send_friend_request(pool: PgPool) {
 
 // ─── DMs ────────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_and_list_dm(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_and_list_dm(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("dm_a").await;
     let (token_b, user_b) = app.register_user("dm_b").await;
@@ -1038,8 +1083,9 @@ async fn create_and_list_dm(pool: PgPool) {
     assert_eq!(value.as_array().unwrap().len(), 1);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_group_dm(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_group_dm(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("gdm_a").await;
     let (token_b, user_b) = app.register_user("gdm_b").await;
@@ -1063,8 +1109,9 @@ async fn create_group_dm(pool: PgPool) {
     assert_eq!(value["channel_type"].as_str(), Some("group"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn group_dm_requires_friends(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn group_dm_requires_friends(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("gdm_nf_a").await;
     let (_, user_b) = app.register_user("gdm_nf_b").await;
@@ -1086,8 +1133,9 @@ async fn group_dm_requires_friends(pool: PgPool) {
 
 // ─── Channel Members & Leave ────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn list_channel_members(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn list_channel_members(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ch_mem").await;
     let server_id = app.create_server(&token, "Member Test").await;
@@ -1100,8 +1148,9 @@ async fn list_channel_members(pool: PgPool) {
     assert!(members.len() >= 1);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn leave_group_dm(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn leave_group_dm(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("leave_a").await;
     let (token_b, user_b) = app.register_user("leave_b").await;
@@ -1133,8 +1182,9 @@ async fn leave_group_dm(pool: PgPool) {
 
 // ─── Roles Extended ─────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_role(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_role(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("role_updater").await;
     let server_id = app.create_server(&token, "Role Update Test").await;
@@ -1166,8 +1216,9 @@ async fn update_role(pool: PgPool) {
     assert_eq!(value["color"].as_str(), Some("#ff0000"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn delete_role(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn delete_role(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("role_deleter").await;
     let server_id = app.create_server(&token, "Role Delete Test").await;
@@ -1198,8 +1249,9 @@ async fn delete_role(pool: PgPool) {
     assert!(roles.iter().all(|r| r["name"].as_str() != Some("Deletable")));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn cannot_delete_default_role(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn cannot_delete_default_role(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("no_del_default").await;
     let server_id = app.create_server(&token, "Default Role").await;
@@ -1224,8 +1276,9 @@ async fn cannot_delete_default_role(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn unassign_role_from_member(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn unassign_role_from_member(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("unassign_owner").await;
     let (token_member, member_id) = app.register_user("unassign_target").await;
@@ -1267,8 +1320,9 @@ async fn unassign_role_from_member(pool: PgPool) {
 
 // ─── Categories Extended ────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_category(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_category(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("cat_updater").await;
     let server_id = app.create_server(&token, "Cat Update").await;
@@ -1297,8 +1351,9 @@ async fn update_category(pool: PgPool) {
     assert_eq!(value["name"].as_str(), Some("Renamed Category"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn delete_category(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn delete_category(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("cat_deleter").await;
     let server_id = app.create_server(&token, "Cat Delete").await;
@@ -1328,8 +1383,9 @@ async fn delete_category(pool: PgPool) {
     assert!(cats.iter().all(|c| c["id"].as_str() != Some(cat_id)));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn reorder_categories(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn reorder_categories(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("cat_reorder").await;
     let server_id = app.create_server(&token, "Reorder").await;
@@ -1367,8 +1423,9 @@ async fn reorder_categories(pool: PgPool) {
 
 // ─── Invites Extended ───────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn list_invites(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn list_invites(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("inv_lister").await;
     let server_id = app.create_server(&token, "Invite List").await;
@@ -1395,8 +1452,9 @@ async fn list_invites(pool: PgPool) {
     assert_eq!(value.as_array().unwrap().len(), 2);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn delete_invite(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn delete_invite(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("inv_deleter").await;
     let server_id = app.create_server(&token, "Invite Delete").await;
@@ -1422,8 +1480,9 @@ async fn delete_invite(pool: PgPool) {
 
 // ─── Server Members ─────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn list_server_members(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn list_server_members(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("mem_owner").await;
     let (token_member, _) = app.register_user("mem_member").await;
@@ -1440,8 +1499,9 @@ async fn list_server_members(pool: PgPool) {
     assert_eq!(members.len(), 2);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn kick_member(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn kick_member(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("kick_owner").await;
     let (token_member, member_id) = app.register_user("kick_target").await;
@@ -1466,8 +1526,9 @@ async fn kick_member(pool: PgPool) {
 
 // ─── Channel Update ─────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_channel_meta(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_channel_meta(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ch_updater").await;
     let server_id = app.create_server(&token, "Ch Update").await;
@@ -1484,8 +1545,9 @@ async fn update_channel_meta(pool: PgPool) {
     assert!(value["encrypted_meta"].as_str().is_some());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn join_channel(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn join_channel(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("join_owner").await;
     let (token_member, _) = app.register_user("join_member").await;
@@ -1504,8 +1566,9 @@ async fn join_channel(pool: PgPool) {
 
 // ─── Channel Overwrites ─────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn set_and_list_overwrites(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn set_and_list_overwrites(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ow_user").await;
     let server_id = app.create_server(&token, "Overwrite Test").await;
@@ -1546,8 +1609,9 @@ async fn set_and_list_overwrites(pool: PgPool) {
     assert_eq!(value.as_array().unwrap().len(), 1);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn delete_overwrite(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn delete_overwrite(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ow_del").await;
     let server_id = app.create_server(&token, "OW Delete").await;
@@ -1600,8 +1664,9 @@ async fn delete_overwrite(pool: PgPool) {
 
 // ─── Keys ───────────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_key_bundle(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_key_bundle(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("key_requester").await;
     let (_, user_b) = app.register_user("key_target").await;
@@ -1614,8 +1679,9 @@ async fn get_key_bundle(pool: PgPool) {
     assert!(value["signed_prekey_sig"].as_str().is_some());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn upload_and_count_prekeys(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn upload_and_count_prekeys(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("prekey_user").await;
 
@@ -1648,8 +1714,9 @@ async fn upload_and_count_prekeys(pool: PgPool) {
     assert_eq!(value["count"].as_i64(), Some(5));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_identity_keys(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_identity_keys(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("key_updater").await;
 
@@ -1674,8 +1741,9 @@ async fn update_identity_keys(pool: PgPool) {
 
 // ─── Attachments ────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn upload_attachment(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn upload_attachment(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("attach_user").await;
 
@@ -1688,8 +1756,9 @@ async fn upload_attachment(pool: PgPool) {
     assert!(value["storage_key"].as_str().is_some());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn upload_empty_attachment_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn upload_empty_attachment_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("empty_attach").await;
 
@@ -1701,8 +1770,9 @@ async fn upload_empty_attachment_fails(pool: PgPool) {
 
 // ─── DM Privacy ─────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_dm_privacy(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_dm_privacy(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("dm_priv_user").await;
 
@@ -1719,8 +1789,9 @@ async fn update_dm_privacy(pool: PgPool) {
     assert_eq!(value["dm_privacy"].as_str(), Some("friends_only"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_dm_privacy_invalid_value(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_dm_privacy_invalid_value(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("dm_priv_bad").await;
 
@@ -1736,8 +1807,9 @@ async fn update_dm_privacy_invalid_value(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn dm_friends_only_creates_pending_dm(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn dm_friends_only_creates_pending_dm(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("dm_fo_a").await;
     let (token_b, user_b) = app.register_user("dm_fo_b").await;
@@ -1767,8 +1839,9 @@ async fn dm_friends_only_creates_pending_dm(pool: PgPool) {
 
 // ─── Friends Extended ───────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn remove_friend(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn remove_friend(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("remove_a").await;
     let (token_b, _) = app.register_user("remove_b").await;
@@ -1791,8 +1864,9 @@ async fn remove_friend(pool: PgPool) {
 
 // ─── Reactions ──────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_channel_reactions_empty(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_channel_reactions_empty(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("react_user").await;
     let server_id = app.create_server(&token, "React Server").await;
@@ -1806,8 +1880,9 @@ async fn get_channel_reactions_empty(pool: PgPool) {
 
 // ─── Presence ───────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_presence_returns_offline_for_unknown(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_presence_returns_offline_for_unknown(pool: Pool) {
     let app = TestApp::new(pool).await;
     let random_id = Uuid::new_v4();
     let uri = format!("/api/v1/presence?user_ids={}", random_id);
@@ -1818,8 +1893,9 @@ async fn get_presence_returns_offline_for_unknown(pool: PgPool) {
     assert_eq!(entries[0]["status"].as_str(), Some("offline"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_presence_empty_ids_returns_empty(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_presence_empty_ids_returns_empty(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (status, value) = app
         .request(Method::GET, "/api/v1/presence?user_ids=", None, None)
@@ -1830,8 +1906,9 @@ async fn get_presence_empty_ids_returns_empty(pool: PgPool) {
 
 // ─── TOTP (2FA) ──────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn totp_setup_returns_secret(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn totp_setup_returns_secret(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("totp_setup").await;
 
@@ -1843,8 +1920,9 @@ async fn totp_setup_returns_secret(pool: PgPool) {
     assert!(value["qr_code_uri"].as_str().is_some());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn totp_setup_twice_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn totp_setup_twice_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("totp_dup").await;
 
@@ -1873,8 +1951,9 @@ async fn totp_setup_twice_fails(pool: PgPool) {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn totp_verify_activates_2fa(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn totp_verify_activates_2fa(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("totp_verify").await;
 
@@ -1898,8 +1977,9 @@ async fn totp_verify_activates_2fa(pool: PgPool) {
     assert!(value["message"].as_str().unwrap().contains("enabled"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn totp_verify_wrong_code_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn totp_verify_wrong_code_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("totp_bad").await;
 
@@ -1919,8 +1999,9 @@ async fn totp_verify_wrong_code_fails(pool: PgPool) {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn totp_disable_removes_2fa(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn totp_disable_removes_2fa(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("totp_disable").await;
 
@@ -1957,8 +2038,9 @@ async fn totp_disable_removes_2fa(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn login_requires_totp_when_enabled(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn login_requires_totp_when_enabled(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("totp_login").await;
 
@@ -2023,8 +2105,9 @@ fn generate_totp_code(secret_b32: &str) -> String {
 
 // ─── Server Update & Nickname ────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_server_system_channel(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_server_system_channel(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("srv_update").await;
     let server_id = app.create_server(&token, "Update Test").await;
@@ -2047,8 +2130,9 @@ async fn update_server_system_channel(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_server_invalid_channel_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_server_invalid_channel_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("srv_bad_ch").await;
     let server_id = app.create_server(&token, "Bad Channel").await;
@@ -2062,8 +2146,9 @@ async fn update_server_invalid_channel_fails(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_server_requires_permission(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_server_requires_permission(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("srv_perm_own").await;
     let (token_member, _) = app.register_user("srv_perm_mem").await;
@@ -2082,8 +2167,9 @@ async fn update_server_requires_permission(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn set_and_clear_nickname(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn set_and_clear_nickname(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("nick_user").await;
     let server_id = app.create_server(&token, "Nick Test").await;
@@ -2120,8 +2206,9 @@ async fn set_and_clear_nickname(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn nickname_too_long_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn nickname_too_long_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("nick_long").await;
     let server_id = app.create_server(&token, "Nick Long").await;
@@ -2139,8 +2226,9 @@ async fn nickname_too_long_fails(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_my_permissions(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_my_permissions(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("perm_me").await;
     let server_id = app.create_server(&token, "Perm Check").await;
@@ -2154,8 +2242,9 @@ async fn get_my_permissions(pool: PgPool) {
 
 // ─── Channel Reorder ─────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn reorder_channels(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn reorder_channels(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ch_reorder").await;
     let server_id = app.create_server(&token, "Reorder Ch").await;
@@ -2183,8 +2272,9 @@ async fn reorder_channels(pool: PgPool) {
     assert_eq!(ch1_entry["position"].as_i64(), Some(2));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn reorder_channels_requires_permission(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn reorder_channels_requires_permission(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("reord_own").await;
     let (token_member, _) = app.register_user("reord_mem").await;
@@ -2204,8 +2294,9 @@ async fn reorder_channels_requires_permission(pool: PgPool) {
 
 // ─── Avatar Upload/Download ──────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn upload_and_download_avatar(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn upload_and_download_avatar(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, user_id) = app.register_user("avatar_user").await;
 
@@ -2224,8 +2315,9 @@ async fn upload_and_download_avatar(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn upload_empty_avatar_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn upload_empty_avatar_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("avatar_empty").await;
 
@@ -2235,8 +2327,9 @@ async fn upload_empty_avatar_fails(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_avatar_no_avatar_returns_404(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_avatar_no_avatar_returns_404(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (_, user_id) = app.register_user("no_avatar").await;
 
@@ -2247,8 +2340,9 @@ async fn get_avatar_no_avatar_returns_404(pool: PgPool) {
 
 // ─── Profile Keys ────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn distribute_and_get_profile_keys(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn distribute_and_get_profile_keys(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, user_a) = app.register_user("pk_sender").await;
     let (token_b, user_b) = app.register_user("pk_receiver").await;
@@ -2279,8 +2373,9 @@ async fn distribute_and_get_profile_keys(pool: PgPool) {
     assert!(value["encrypted_profile_key"].as_str().is_some());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_profile_key_not_found(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_profile_key_not_found(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("pk_miss").await;
 
@@ -2292,8 +2387,9 @@ async fn get_profile_key_not_found(pool: PgPool) {
 
 // ─── DM Requests ─────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn dm_request_accept_flow(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn dm_request_accept_flow(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("dmr_a").await;
     let (token_b, user_b) = app.register_user("dmr_b").await;
@@ -2348,8 +2444,9 @@ async fn dm_request_accept_flow(pool: PgPool) {
     assert_eq!(value.as_array().unwrap().len(), 0);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn dm_request_decline_flow(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn dm_request_decline_flow(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("dmrd_a").await;
     let (token_b, user_b) = app.register_user("dmrd_b").await;
@@ -2387,8 +2484,9 @@ async fn dm_request_decline_flow(pool: PgPool) {
     assert!(value["message"].as_str().unwrap().contains("declined"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn dm_request_invalid_action(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn dm_request_invalid_action(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("dmri_a").await;
     let (token_b, user_b) = app.register_user("dmri_b").await;
@@ -2424,8 +2522,9 @@ async fn dm_request_invalid_action(pool: PgPool) {
 
 // ─── Sender Keys ─────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn distribute_and_get_sender_keys(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn distribute_and_get_sender_keys(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, user_a) = app.register_user("sk_sender").await;
     let (token_b, user_b) = app.register_user("sk_receiver").await;
@@ -2465,8 +2564,9 @@ async fn distribute_and_get_sender_keys(pool: PgPool) {
     assert_eq!(keys[0]["distribution_id"].as_str().unwrap(), dist_id.to_string());
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn distribute_sender_keys_empty_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn distribute_sender_keys_empty_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("sk_empty").await;
     let server_id = app.create_server(&token, "SK Empty").await;
@@ -2480,8 +2580,9 @@ async fn distribute_sender_keys_empty_fails(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_channel_member_keys(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_channel_member_keys(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("mk_a").await;
     let (token_b, user_b) = app.register_user("mk_b").await;
@@ -2504,8 +2605,9 @@ async fn get_channel_member_keys(pool: PgPool) {
     assert!(keys.iter().all(|k| k["identity_key"].as_str().is_some()));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn sender_keys_non_member_forbidden(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn sender_keys_non_member_forbidden(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("sk_own").await;
     let (token_b, _) = app.register_user("sk_outsider").await;
@@ -2520,8 +2622,9 @@ async fn sender_keys_non_member_forbidden(pool: PgPool) {
 
 // ─── User Profile Extended ───────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn profile_shows_friendship_status(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn profile_shows_friendship_status(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("prof_a").await;
     let (token_b, user_b) = app.register_user("prof_b").await;
@@ -2556,8 +2659,9 @@ async fn profile_shows_friendship_status(pool: PgPool) {
     assert_eq!(value["is_friend"].as_bool(), Some(true));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn profile_shows_blocked_status(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn profile_shows_blocked_status(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("prof_blk_a").await;
     let (_, user_b) = app.register_user("prof_blk_b").await;
@@ -2572,8 +2676,9 @@ async fn profile_shows_blocked_status(pool: PgPool) {
     assert_eq!(value["is_blocked"].as_bool(), Some(true));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn profile_shows_mutual_friends(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn profile_shows_mutual_friends(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("mut_a").await;
     let (token_b, user_b) = app.register_user("mut_b").await;
@@ -2592,8 +2697,9 @@ async fn profile_shows_mutual_friends(pool: PgPool) {
     assert_eq!(mutuals[0]["username"].as_str(), Some("mut_c"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn profile_with_server_roles(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn profile_with_server_roles(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("role_prof_own").await;
     let (token_member, member_id) = app.register_user("role_prof_mem").await;
@@ -2632,8 +2738,9 @@ async fn profile_with_server_roles(pool: PgPool) {
 
 // ─── Auth Edge Cases ─────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn change_password_revokes_refresh_tokens(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn change_password_revokes_refresh_tokens(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("pw_revoke").await;
 
@@ -2664,8 +2771,9 @@ async fn change_password_revokes_refresh_tokens(pool: PgPool) {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn change_password_too_short_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn change_password_too_short_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("pw_short").await;
 
@@ -2681,8 +2789,9 @@ async fn change_password_too_short_fails(pool: PgPool) {
 
 // ─── Group DM Extended ───────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn add_member_to_group_dm(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn add_member_to_group_dm(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("grp_add_a").await;
     let (token_b, user_b) = app.register_user("grp_add_b").await;
@@ -2725,8 +2834,9 @@ async fn add_member_to_group_dm(pool: PgPool) {
 
 // ─── Message Search ──────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn search_messages(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn search_messages(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("search_user").await;
     let server_id = app.create_server(&token, "Search Server").await;
@@ -2746,8 +2856,9 @@ async fn search_messages(pool: PgPool) {
 
 // ─── DM with Server Members Privacy ─────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn dm_server_members_privacy(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn dm_server_members_privacy(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("sm_a").await;
     let (token_b, user_b) = app.register_user("sm_b").await;
@@ -2773,8 +2884,9 @@ async fn dm_server_members_privacy(pool: PgPool) {
     assert_eq!(value["dm_status"].as_str(), Some("pending"));
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn dm_server_members_shared_server_is_active(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn dm_server_members_shared_server_is_active(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("sms_a").await;
     let (token_b, user_b) = app.register_user("sms_b").await;
@@ -2806,8 +2918,9 @@ async fn dm_server_members_shared_server_is_active(pool: PgPool) {
 
 // ─── Attachment Download ─────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn download_attachment_not_found(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn download_attachment_not_found(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("att_404").await;
 
@@ -2818,8 +2931,9 @@ async fn download_attachment_not_found(pool: PgPool) {
 
 // ─── Prekey Count ────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn prekey_count_zero_initially(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn prekey_count_zero_initially(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("pk_zero").await;
 
@@ -2832,8 +2946,9 @@ async fn prekey_count_zero_initially(pool: PgPool) {
 
 // ─── Friend Request Edge Cases ───────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn friend_request_to_self_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn friend_request_to_self_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("self_friend").await;
 
@@ -2848,8 +2963,9 @@ async fn friend_request_to_self_fails(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn friend_request_when_already_friends_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn friend_request_when_already_friends_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("alr_a").await;
     let (token_b, _) = app.register_user("alr_b").await;
@@ -2867,8 +2983,9 @@ async fn friend_request_when_already_friends_fails(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn friend_request_unknown_user_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn friend_request_unknown_user_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("fr_unknown").await;
 
@@ -2885,8 +3002,9 @@ async fn friend_request_unknown_user_fails(pool: PgPool) {
 
 // ─── Invite Edge Cases ───────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn join_invite_already_member(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn join_invite_already_member(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("inv_alr_own").await;
     let (token_member, _) = app.register_user("inv_alr_mem").await;
@@ -2904,8 +3022,9 @@ async fn join_invite_already_member(pool: PgPool) {
 
 // ─── Kick / Ban Edge Cases ───────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn kick_member_by_non_owner_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn kick_member_by_non_owner_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("kick_p_own").await;
     let (token_member, _) = app.register_user("kick_p_mem").await;
@@ -2922,8 +3041,9 @@ async fn kick_member_by_non_owner_fails(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn cannot_ban_self(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn cannot_ban_self(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, user_id) = app.register_user("ban_self").await;
     let server_id = app.create_server(&token, "Ban Self").await;
@@ -2937,8 +3057,9 @@ async fn cannot_ban_self(pool: PgPool) {
 
 // ─── DM Edge Cases ───────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn create_dm_returns_existing_if_exists(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn create_dm_returns_existing_if_exists(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("dup_dm_a").await;
     let (_, user_b) = app.register_user("dup_dm_b").await;
@@ -2963,8 +3084,9 @@ async fn create_dm_returns_existing_if_exists(pool: PgPool) {
 
 // ─── Message Pagination ──────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn get_messages_with_limit_and_pagination(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn get_messages_with_limit_and_pagination(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("msg_page").await;
     let server_id = app.create_server(&token, "Page Test").await;
@@ -2995,8 +3117,9 @@ async fn get_messages_with_limit_and_pagination(pool: PgPool) {
 
 // ─── Registration Validation ─────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn register_short_password_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn register_short_password_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let fake_key = B64.encode([0u8; 32]);
     let fake_sig = B64.encode([0u8; 64]);
@@ -3015,8 +3138,9 @@ async fn register_short_password_fails(pool: PgPool) {
     assert_ne!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn register_short_username_fails(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn register_short_username_fails(pool: Pool) {
     let app = TestApp::new(pool).await;
     let fake_key = B64.encode([0u8; 32]);
     let fake_sig = B64.encode([0u8; 64]);
@@ -3037,8 +3161,9 @@ async fn register_short_username_fails(pool: PgPool) {
 
 // ─── Channel Permission Checks ───────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn delete_channel_requires_permission(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn delete_channel_requires_permission(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("del_ch_own").await;
     let (token_member, _) = app.register_user("del_ch_mem").await;
@@ -3055,8 +3180,9 @@ async fn delete_channel_requires_permission(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn update_channel_requires_permission(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn update_channel_requires_permission(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("upd_ch_own").await;
     let (token_member, _) = app.register_user("upd_ch_mem").await;

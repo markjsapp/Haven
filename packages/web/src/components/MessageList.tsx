@@ -80,6 +80,7 @@ export default function MessageList() {
   const startEditing = useChatStore((s) => s.startEditing);
   const deleteMessage = useChatStore((s) => s.deleteMessage);
   const userNames = useChatStore((s) => s.userNames);
+  const userAvatars = useChatStore((s) => s.userAvatars);
   const reactions = useChatStore((s) => s.reactions);
   const toggleReaction = useChatStore((s) => s.toggleReaction);
   const blockedUserIds = useChatStore((s) => s.blockedUserIds);
@@ -294,6 +295,7 @@ export default function MessageList() {
                   onClick={(e) => handleAvatarClick(msg.senderId, e)}
                 >
                   <Avatar
+                    avatarUrl={msg.senderId === user?.id ? user?.avatar_url : userAvatars[msg.senderId]}
                     name={senderName}
                     size={40}
                   />
@@ -346,7 +348,9 @@ export default function MessageList() {
                     )}
                   </div>
                 )}
-                {(() => {
+                {msg.contentType === "server_invite" && msg.formatting ? (
+                  <InviteCard invite={msg.formatting as { invite_code: string; server_name: string; server_id: string; server_icon_url?: string | null }} senderId={msg.senderId} />
+                ) : (() => {
                   const displayText = stripEmbeddedImageUrls(msg.text, msg.linkPreviews);
                   return displayText ? <MessageBody text={displayText} contentType={msg.contentType} formatting={msg.formatting} customEmojiMap={customEmojiMap} /> : null;
                 })()}
@@ -505,6 +509,92 @@ export default function MessageList() {
           onClose={() => setReportingMessageId(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Invite Card (rendered inline in messages) ─────
+
+interface InviteCardProps {
+  invite: {
+    invite_code: string;
+    server_name: string;
+    server_id: string;
+    server_icon_url?: string | null;
+  };
+  senderId: string;
+}
+
+function InviteCard({ invite, senderId }: InviteCardProps) {
+  const user = useAuthStore((s) => s.user);
+  const servers = useChatStore((s) => s.servers);
+  const [joining, setJoining] = useState(false);
+  const [joined, setJoined] = useState(false);
+  const [error, setError] = useState("");
+
+  const isSender = user?.id === senderId;
+  const alreadyMember = servers.some((s) => s.id === invite.server_id);
+  const initial = (invite.server_name || "?").charAt(0).toUpperCase();
+
+  async function handleAccept() {
+    if (joining || joined) return;
+    setJoining(true);
+    setError("");
+    try {
+      const api = useAuthStore.getState().api;
+      await api.joinByInvite(invite.invite_code);
+      setJoined(true);
+      // Reload channels to pick up the new server
+      await useChatStore.getState().loadChannels();
+    } catch (err: any) {
+      const msg = err.message || "Failed to join";
+      if (msg.includes("Already a member")) {
+        setJoined(true);
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setJoining(false);
+    }
+  }
+
+  return (
+    <div className="invite-card">
+      <div className="invite-card-header">
+        <div className="invite-card-icon">
+          {invite.server_icon_url ? (
+            <img src={invite.server_icon_url} alt="" />
+          ) : (
+            <span>{initial}</span>
+          )}
+        </div>
+        <div className="invite-card-info">
+          <span className="invite-card-label">Server Invite</span>
+          <span className="invite-card-name">{invite.server_name}</span>
+        </div>
+      </div>
+      <div className="invite-card-actions">
+        {alreadyMember || joined ? (
+          <span className="invite-card-status joined">Joined</span>
+        ) : isSender ? (
+          <span className="invite-card-status waiting">Invite Sent</span>
+        ) : error ? (
+          <span className="invite-card-status error">{error}</span>
+        ) : (
+          <>
+            <button
+              className="invite-card-btn accept"
+              onClick={handleAccept}
+              disabled={joining}
+            >
+              {joining ? "Joining..." : "Accept"}
+            </button>
+            <button className="invite-card-btn ignore" disabled>
+              Ignore
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

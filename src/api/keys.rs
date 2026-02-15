@@ -145,6 +145,21 @@ pub async fn update_identity_keys(
     Ok(Json(serde_json::json!({ "message": "Keys updated" })))
 }
 
+/// DELETE /api/v1/keys/prekeys
+/// Delete all unused one-time prekeys for the authenticated user.
+/// Called on login before uploading fresh prekeys so the server only holds
+/// OTPs whose private keys exist in the client's current MemoryStore.
+pub async fn delete_prekeys(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    let deleted = queries::delete_unused_prekeys(state.db.write(), user_id).await?;
+    Ok(Json(serde_json::json!({
+        "message": "Unused prekeys cleared",
+        "deleted": deleted,
+    })))
+}
+
 /// GET /api/v1/keys/prekeys/count
 /// Check how many unused prekeys the authenticated user has remaining.
 pub async fn prekey_count(

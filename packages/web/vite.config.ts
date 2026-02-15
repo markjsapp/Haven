@@ -26,8 +26,12 @@ export default defineConfig({
       "@dnd-kit/accessibility",
     ],
   },
+  // Allow TAURI_ env vars to be accessed via import.meta.env
+  envPrefix: ["VITE_", "TAURI_"],
   build: {
     target: "esnext",
+    minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
+    sourcemap: !!process.env.TAURI_DEBUG,
   },
   server: {
     host: "0.0.0.0",

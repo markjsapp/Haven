@@ -25,6 +25,7 @@ import UserPanel from "./UserPanel.js";
 const ServerSettings = lazy(() => import("./ServerSettings.js"));
 import VoiceChannelPreview from "./VoiceChannelPreview.js";
 import ChannelSettings from "./ChannelSettings.js";
+import InviteToServerModal from "./InviteToServerModal.js";
 import { useVoiceStore } from "../store/voice.js";
 import {
   DndContext,
@@ -629,76 +630,6 @@ function ServerDropdownMenu({
       <button role="menuitem" tabIndex={-1} className="context-menu-item-danger" onClick={() => { onClose(); onLeave(); }}>
         Leave Server
       </button>
-    </div>
-  );
-}
-
-// ─── Invite Modal ────────────────────────────────────
-function InviteModal({
-  serverId,
-  onClose,
-}: {
-  serverId: string;
-  onClose: () => void;
-}) {
-  const api = useAuthStore((s) => s.api);
-  const [inviteCode, setInviteCode] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api.createInvite(serverId, {}).then((invite) => {
-      if (!cancelled) setInviteCode(invite.code);
-    }).catch((err) => {
-      if (!cancelled) setError(err.message || "Failed to create invite");
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [api, serverId]);
-
-  const inviteUrl = inviteCode ? `${window.location.origin}/invite/${inviteCode}` : "";
-
-  async function handleCopy() {
-    if (!inviteCode) return;
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // fallback
-    }
-  }
-
-  return (
-    <div className="confirm-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="confirm-dialog" role="dialog" aria-label="Invite People">
-        <h3>Invite People</h3>
-        {loading && <p className="settings-description">Creating invite link...</p>}
-        {error && <p className="settings-description" style={{ color: "var(--red)" }}>{error}</p>}
-        {inviteCode && (
-          <>
-            <p className="settings-description">Share this link to invite people to the server:</p>
-            <div className="invite-code-row">
-              <input
-                className="settings-input"
-                readOnly
-                value={inviteUrl}
-                onFocus={(e) => e.target.select()}
-              />
-              <button className="btn-primary" onClick={handleCopy}>
-                {copied ? "Copied!" : "Copy"}
-              </button>
-            </div>
-          </>
-        )}
-        <div className="confirm-actions">
-          <button className="btn-ghost" onClick={onClose}>Close</button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1711,7 +1642,7 @@ function ServerView({ serverId }: { serverId: string }) {
       )}
 
       {showInviteModal && (
-        <InviteModal
+        <InviteToServerModal
           serverId={serverId}
           onClose={() => setShowInviteModal(false)}
         />

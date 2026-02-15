@@ -243,8 +243,8 @@ export async function downloadAndRestoreBackup(securityPhrase: string): Promise<
     distributedChannels,
   });
 
-  // Persist identity key and update auth store
-  persistIdentityKeyFromBackup(identityKeyPair);
+  // Persist identity key and signed prekey, then update auth store
+  persistKeysFromBackup(identityKeyPair, signedPreKey);
 
   // Update auth store with restored keys
   useAuthStore.setState({
@@ -254,16 +254,27 @@ export async function downloadAndRestoreBackup(securityPhrase: string): Promise<
 }
 
 /**
- * Persist the identity key from a backup restore to localStorage.
+ * Persist the identity key and signed prekey from a backup restore to localStorage.
  */
-function persistIdentityKeyFromBackup(kp: { publicKey: Uint8Array; privateKey: Uint8Array }): void {
+function persistKeysFromBackup(
+  kp: { publicKey: Uint8Array; privateKey: Uint8Array },
+  spk: { keyPair: { publicKey: Uint8Array; privateKey: Uint8Array }; signature: Uint8Array },
+): void {
   const user = useAuthStore.getState().user;
   if (!user) return;
-  const data = JSON.stringify({
+
+  // Identity key
+  localStorage.setItem(`haven:identity:${user.id}`, JSON.stringify({
     publicKey: toBase64(kp.publicKey),
     privateKey: toBase64(kp.privateKey),
-  });
-  localStorage.setItem(`haven:identity:${user.id}`, data);
+  }));
+
+  // Signed prekey
+  localStorage.setItem(`haven:signedPreKey:${user.id}`, JSON.stringify({
+    publicKey: toBase64(spk.keyPair.publicKey),
+    privateKey: toBase64(spk.keyPair.privateKey),
+    signature: toBase64(spk.signature),
+  }));
 }
 
 /**

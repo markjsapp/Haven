@@ -3,6 +3,7 @@ use axum::{
     Json,
 };
 use livekit_api::access_token::{AccessToken, VideoGrants};
+use std::collections::HashSet;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -42,52 +43,41 @@ pub async fn join_voice(
         ));
     }
 
-    let mut redis = state.redis.clone();
-    let user_id_str = user_id.to_string();
-
     // Remove user from any current voice channel
-    let keys: Vec<String> = redis::cmd("KEYS")
-        .arg("haven:voice:*")
-        .query_async(&mut redis)
-        .await
-        .unwrap_or_default();
-
-    for key in &keys {
-        let removed: i64 = redis::cmd("SREM")
-            .arg(key)
-            .arg(&user_id_str)
-            .query_async(&mut redis)
-            .await
-            .unwrap_or(0);
-
-        if removed > 0 {
-            // Broadcast leave for the old channel
-            if let Some(old_channel_id_str) = key.strip_prefix("haven:voice:") {
-                if let Ok(old_channel_id) = Uuid::parse_str(old_channel_id_str) {
-                    if old_channel_id != channel_id {
-                        broadcast_voice_state(
-                            &state, old_channel_id, user_id, &user_id_str, false,
-                        )
-                        .await;
-                    }
-                }
+    let mut old_channels = Vec::new();
+    for entry in state.memory.voice_participants.iter() {
+        if entry.value().contains(&user_id) {
+            old_channels.push(*entry.key());
+        }
+    }
+    for old_ch in &old_channels {
+        if let Some(mut participants) = state.memory.voice_participants.get_mut(old_ch) {
+            participants.remove(&user_id);
+        }
+        if *old_ch != channel_id {
+            // Clean up mute/deafen for old channel
+            if let Some(mut muted) = state.memory.voice_muted.get_mut(old_ch) {
+                muted.remove(&user_id);
             }
+            if let Some(mut deafened) = state.memory.voice_deafened.get_mut(old_ch) {
+                deafened.remove(&user_id);
+            }
+            broadcast_voice_state(&state, *old_ch, user_id, &user_id.to_string(), false).await;
         }
     }
 
     // Add user to the new voice channel
-    let _: () = redis::cmd("SADD")
-        .arg(format!("haven:voice:{}", channel_id))
-        .arg(&user_id_str)
-        .query_async(&mut redis)
-        .await?;
+    state.memory.voice_participants
+        .entry(channel_id)
+        .or_insert_with(HashSet::new)
+        .insert(user_id);
 
     // Generate LiveKit token
     let token = AccessToken::with_api_key(
         &state.config.livekit_api_key,
         &state.config.livekit_api_secret,
     )
-    .with_identity(&user_id_str)
+    .with_identity(&user_id.to_string())
     .with_ttl(Duration::from_secs(6 * 3600)) // 6 hours
     .with_grants(VideoGrants {
         room_join: true,
@@ -100,7 +90,7 @@ pub async fn join_voice(
     .map_err(|e| AppError::BadRequest(format!("Failed to generate voice token: {}", e)))?;
 
     // Broadcast join to channel subscribers
-    broadcast_voice_state(&state, channel_id, user_id, &user_id_str, true).await;
+    broadcast_voice_state(&state, channel_id, user_id, &user_id.to_string(), true).await;
 
     Ok(Json(VoiceTokenResponse {
         token,
@@ -117,29 +107,20 @@ pub async fn leave_voice(
     AuthUser(user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let mut redis = state.redis.clone();
-    let user_id_str = user_id.to_string();
+    let removed = state.memory.voice_participants
+        .get_mut(&channel_id)
+        .map(|mut set| set.remove(&user_id))
+        .unwrap_or(false);
 
-    let removed: i64 = redis::cmd("SREM")
-        .arg(format!("haven:voice:{}", channel_id))
-        .arg(&user_id_str)
-        .query_async(&mut redis)
-        .await
-        .unwrap_or(0);
-
-    if removed > 0 {
+    if removed {
         // Clean up server mute/deafen state
-        let _: Result<(), _> = redis::cmd("SREM")
-            .arg(format!("haven:voice:{}:smuted", channel_id))
-            .arg(&user_id_str)
-            .query_async(&mut redis)
-            .await;
-        let _: Result<(), _> = redis::cmd("SREM")
-            .arg(format!("haven:voice:{}:sdeafened", channel_id))
-            .arg(&user_id_str)
-            .query_async(&mut redis)
-            .await;
-        broadcast_voice_state(&state, channel_id, user_id, &user_id_str, false).await;
+        if let Some(mut muted) = state.memory.voice_muted.get_mut(&channel_id) {
+            muted.remove(&user_id);
+        }
+        if let Some(mut deafened) = state.memory.voice_deafened.get_mut(&channel_id) {
+            deafened.remove(&user_id);
+        }
+        broadcast_voice_state(&state, channel_id, user_id, &user_id.to_string(), false).await;
     }
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -153,39 +134,32 @@ pub async fn get_participants(
     AuthUser(_user_id): AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<VoiceParticipantResponse>>> {
-    let mut redis = state.redis.clone();
-
-    let member_ids: Vec<String> = redis::cmd("SMEMBERS")
-        .arg(format!("haven:voice:{}", channel_id))
-        .query_async(&mut redis)
-        .await
+    let member_ids: Vec<Uuid> = state.memory.voice_participants
+        .get(&channel_id)
+        .map(|set| set.iter().cloned().collect())
         .unwrap_or_default();
 
-    // Fetch server mute/deafen sets
-    let muted_ids: Vec<String> = redis::cmd("SMEMBERS")
-        .arg(format!("haven:voice:{}:smuted", channel_id))
-        .query_async(&mut redis)
-        .await
+    let muted_ids: HashSet<Uuid> = state.memory.voice_muted
+        .get(&channel_id)
+        .map(|set| set.clone())
         .unwrap_or_default();
-    let deafened_ids: Vec<String> = redis::cmd("SMEMBERS")
-        .arg(format!("haven:voice:{}:sdeafened", channel_id))
-        .query_async(&mut redis)
-        .await
+
+    let deafened_ids: HashSet<Uuid> = state.memory.voice_deafened
+        .get(&channel_id)
+        .map(|set| set.clone())
         .unwrap_or_default();
 
     let mut participants = Vec::new();
-    for id_str in &member_ids {
-        if let Ok(uid) = Uuid::parse_str(id_str) {
-            if let Ok(Some(user)) = queries::find_user_by_id(state.db.read(), uid).await {
-                participants.push(VoiceParticipantResponse {
-                    user_id: uid,
-                    username: user.username,
-                    display_name: user.display_name,
-                    avatar_url: user.avatar_url,
-                    server_muted: muted_ids.contains(id_str),
-                    server_deafened: deafened_ids.contains(id_str),
-                });
-            }
+    for uid in &member_ids {
+        if let Ok(Some(user)) = queries::find_user_by_id(state.db.read(), *uid).await {
+            participants.push(VoiceParticipantResponse {
+                user_id: *uid,
+                username: user.username,
+                display_name: user.display_name,
+                avatar_url: user.avatar_url,
+                server_muted: muted_ids.contains(uid),
+                server_deafened: deafened_ids.contains(uid),
+            });
         }
     }
 
@@ -215,31 +189,29 @@ pub async fn server_mute(
     }
 
     // Verify target is in the voice channel
-    let mut redis = state.redis.clone();
-    let target_str = target_user_id.to_string();
-    let in_channel: bool = redis::cmd("SISMEMBER")
-        .arg(format!("haven:voice:{}", channel_id))
-        .arg(&target_str)
-        .query_async(&mut redis)
-        .await
+    let in_channel = state.memory.voice_participants
+        .get(&channel_id)
+        .map(|set| set.contains(&target_user_id))
         .unwrap_or(false);
     if !in_channel {
         return Err(AppError::BadRequest("User is not in this voice channel".into()));
     }
 
-    let key = format!("haven:voice:{}:smuted", channel_id);
     if req.muted {
-        let _: () = redis::cmd("SADD").arg(&key).arg(&target_str).query_async(&mut redis).await?;
+        state.memory.voice_muted
+            .entry(channel_id)
+            .or_insert_with(HashSet::new)
+            .insert(target_user_id);
     } else {
-        let _: () = redis::cmd("SREM").arg(&key).arg(&target_str).query_async(&mut redis).await?;
+        if let Some(mut set) = state.memory.voice_muted.get_mut(&channel_id) {
+            set.remove(&target_user_id);
+        }
     }
 
     // Get current deafen state
-    let is_deafened: bool = redis::cmd("SISMEMBER")
-        .arg(format!("haven:voice:{}:sdeafened", channel_id))
-        .arg(&target_str)
-        .query_async(&mut redis)
-        .await
+    let is_deafened = state.memory.voice_deafened
+        .get(&channel_id)
+        .map(|set| set.contains(&target_user_id))
         .unwrap_or(false);
 
     // Broadcast to channel
@@ -268,31 +240,29 @@ pub async fn server_deafen(
         return Err(AppError::Forbidden("Missing MUTE_MEMBERS permission".into()));
     }
 
-    let mut redis = state.redis.clone();
-    let target_str = target_user_id.to_string();
-    let in_channel: bool = redis::cmd("SISMEMBER")
-        .arg(format!("haven:voice:{}", channel_id))
-        .arg(&target_str)
-        .query_async(&mut redis)
-        .await
+    let in_channel = state.memory.voice_participants
+        .get(&channel_id)
+        .map(|set| set.contains(&target_user_id))
         .unwrap_or(false);
     if !in_channel {
         return Err(AppError::BadRequest("User is not in this voice channel".into()));
     }
 
-    let key = format!("haven:voice:{}:sdeafened", channel_id);
     if req.deafened {
-        let _: () = redis::cmd("SADD").arg(&key).arg(&target_str).query_async(&mut redis).await?;
+        state.memory.voice_deafened
+            .entry(channel_id)
+            .or_insert_with(HashSet::new)
+            .insert(target_user_id);
     } else {
-        let _: () = redis::cmd("SREM").arg(&key).arg(&target_str).query_async(&mut redis).await?;
+        if let Some(mut set) = state.memory.voice_deafened.get_mut(&channel_id) {
+            set.remove(&target_user_id);
+        }
     }
 
     // Get current mute state
-    let is_muted: bool = redis::cmd("SISMEMBER")
-        .arg(format!("haven:voice:{}:smuted", channel_id))
-        .arg(&target_str)
-        .query_async(&mut redis)
-        .await
+    let is_muted = state.memory.voice_muted
+        .get(&channel_id)
+        .map(|set| set.contains(&target_user_id))
         .unwrap_or(false);
 
     broadcast_voice_mute_state(&state, channel_id, target_user_id, is_muted, req.deafened).await;
@@ -303,30 +273,23 @@ pub async fn server_deafen(
 /// Remove a user from all voice channels and broadcast their departure.
 /// Called during WebSocket disconnect cleanup.
 pub async fn cleanup_voice_state(state: &AppState, user_id: Uuid) {
-    let mut redis = state.redis.clone();
-    let user_id_str = user_id.to_string();
+    let mut left_channels = Vec::new();
 
-    let keys: Vec<String> = redis::cmd("KEYS")
-        .arg("haven:voice:*")
-        .query_async(&mut redis)
-        .await
-        .unwrap_or_default();
-
-    for key in &keys {
-        let removed: i64 = redis::cmd("SREM")
-            .arg(key)
-            .arg(&user_id_str)
-            .query_async(&mut redis)
-            .await
-            .unwrap_or(0);
-
-        if removed > 0 {
-            if let Some(channel_id_str) = key.strip_prefix("haven:voice:") {
-                if let Ok(channel_id) = Uuid::parse_str(channel_id_str) {
-                    broadcast_voice_state(state, channel_id, user_id, &user_id_str, false).await;
-                }
-            }
+    for mut entry in state.memory.voice_participants.iter_mut() {
+        if entry.value_mut().remove(&user_id) {
+            left_channels.push(*entry.key());
         }
+    }
+
+    // Clean up mute/deafen state
+    for ch_id in &left_channels {
+        if let Some(mut muted) = state.memory.voice_muted.get_mut(ch_id) {
+            muted.remove(&user_id);
+        }
+        if let Some(mut deafened) = state.memory.voice_deafened.get_mut(ch_id) {
+            deafened.remove(&user_id);
+        }
+        broadcast_voice_state(state, *ch_id, user_id, &user_id.to_string(), false).await;
     }
 }
 

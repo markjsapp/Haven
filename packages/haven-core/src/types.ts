@@ -59,6 +59,7 @@ export interface UserPublic {
   custom_status_emoji: string | null;
   created_at: string;
   encrypted_profile?: string | null; // base64 encrypted blob
+  is_instance_admin?: boolean;
 }
 
 export interface MutualFriendInfo {
@@ -212,6 +213,7 @@ export interface ChannelResponse {
   created_at: string;
   category_id: string | null;
   dm_status?: string; // "active", "pending", "declined" — only for DM channels
+  last_message_id?: string;
 }
 
 // ─── Channel Categories ───────────────────────────────
@@ -348,7 +350,9 @@ export type WsClientMessage =
   | { type: "SetStatus"; payload: { status: string } }
   | { type: "PinMessage"; payload: { channel_id: string; message_id: string } }
   | { type: "UnpinMessage"; payload: { channel_id: string; message_id: string } }
-  | { type: "Ping" };
+  | { type: "Ping" }
+  | { type: "MarkRead"; payload: { channel_id: string } }
+  | { type: "Resume"; payload: { session_id: string } };
 
 export type WsServerMessage =
   | { type: "NewMessage"; payload: MessageResponse }
@@ -372,13 +376,43 @@ export type WsServerMessage =
   | { type: "VoiceStateUpdate"; payload: { channel_id: string; user_id: string; username: string; joined: boolean } }
   | { type: "EmojiCreated"; payload: { server_id: string; emoji: CustomEmojiResponse } }
   | { type: "EmojiDeleted"; payload: { server_id: string; emoji_id: string } }
-  | { type: "VoiceMuteUpdate"; payload: { channel_id: string; user_id: string; server_muted: boolean; server_deafened: boolean } };
+  | { type: "VoiceMuteUpdate"; payload: { channel_id: string; user_id: string; server_muted: boolean; server_deafened: boolean } }
+  | { type: "BulkMessagesDeleted"; payload: { channel_id: string; message_ids: string[] } }
+  | { type: "MemberTimedOut"; payload: { server_id: string; user_id: string; timed_out_until: string | null } }
+  | { type: "ReadStateUpdated"; payload: { channel_id: string; last_read_at: string } }
+  | { type: "Hello"; payload: { session_id: string; heartbeat_interval_ms: number } }
+  | { type: "Resumed"; payload: { replayed_count: number } }
+  | { type: "InvalidSession" };
 
 // ─── Presence ─────────────────────────────────────────
 
 export interface PresenceEntry {
   user_id: string;
   status: string;
+}
+
+// ─── Admin Dashboard ─────────────────────────────────
+
+export interface AdminStats {
+  total_users: number;
+  total_servers: number;
+  total_channels: number;
+  total_messages: number;
+  active_connections: number;
+}
+
+export interface AdminUserResponse {
+  id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+  is_instance_admin: boolean;
+  server_count: number;
+}
+
+export interface SetAdminRequest {
+  is_admin: boolean;
 }
 
 // ─── Invites ──────────────────────────────────────────
@@ -408,6 +442,7 @@ export interface ServerMemberResponse {
   joined_at: string;
   nickname?: string | null;
   role_ids: string[];
+  timed_out_until?: string | null;
 }
 
 // ─── Roles & Permissions ─────────────────────────────
@@ -430,6 +465,16 @@ export const Permission = {
   READ_MESSAGE_HISTORY: BigInt(1) << BigInt(14),
   MANAGE_EMOJIS:        BigInt(1) << BigInt(15),
   MUTE_MEMBERS:         BigInt(1) << BigInt(16),
+  STREAM:               BigInt(1) << BigInt(17),
+  PRIORITY_SPEAKER:     BigInt(1) << BigInt(18),
+  USE_VOICE_ACTIVITY:   BigInt(1) << BigInt(19),
+  USE_EXTERNAL_EMOJIS:  BigInt(1) << BigInt(20),
+  MANAGE_WEBHOOKS:      BigInt(1) << BigInt(21),
+  VIEW_AUDIT_LOG:       BigInt(1) << BigInt(22),
+  MANAGE_EVENTS:        BigInt(1) << BigInt(23),
+  MANAGE_THREADS:       BigInt(1) << BigInt(24),
+  MODERATE_MEMBERS:     BigInt(1) << BigInt(25),
+  MANAGE_NICKNAMES:     BigInt(1) << BigInt(26),
 } as const;
 
 export interface RoleResponse {
@@ -570,6 +615,48 @@ export interface VoiceParticipant {
   avatar_url: string | null;
   server_muted: boolean;
   server_deafened: boolean;
+}
+
+// ─── Read States ──────────────────────────────────────
+
+export interface ReadStateResponse {
+  user_id: string;
+  channel_id: string;
+  last_read_at: string;
+}
+
+export interface ChannelUnreadInfo {
+  channel_id: string;
+  last_message_id: string | null;
+  last_message_at: string | null;
+  unread_count: number;
+}
+
+// ─── Audit Log ────────────────────────────────────────
+
+export interface AuditLogEntry {
+  id: string;
+  actor_id: string;
+  actor_username: string;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  changes: Record<string, unknown> | null;
+  reason: string | null;
+  created_at: string;
+}
+
+// ─── Timeout ──────────────────────────────────────────
+
+export interface TimeoutMemberRequest {
+  duration_seconds: number;
+  reason?: string;
+}
+
+// ─── Bulk Delete ──────────────────────────────────────
+
+export interface BulkDeleteRequest {
+  message_ids: string[];
 }
 
 // ─── API Error ─────────────────────────────────────────

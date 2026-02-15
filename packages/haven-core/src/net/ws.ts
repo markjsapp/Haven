@@ -36,6 +36,8 @@ export class HavenWs {
   private state: ConnectionState = "disconnected";
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private closed = false;
+  private sessionId: string | null = null;
+  private heartbeatIntervalMs = 30_000;
 
   constructor(options: HavenWsOptions) {
     this.options = {
@@ -71,6 +73,7 @@ export class HavenWs {
 
   disconnect(): void {
     this.closed = true;
+    this.sessionId = null;
     this.cleanup();
     this.state = "disconnected";
     this.emit("_disconnect", {} as any);
@@ -144,6 +147,10 @@ export class HavenWs {
     this.send({ type: "UnpinMessage", payload: { channel_id: channelId, message_id: messageId } });
   }
 
+  markRead(channelId: string): void {
+    this.send({ type: "MarkRead", payload: { channel_id: channelId } });
+  }
+
   // ─── Events ──────────────────────────────────────
 
   /**
@@ -174,6 +181,7 @@ export class HavenWs {
 
   private doConnect(): void {
     this.state = "connecting";
+    const previousSessionId = this.sessionId;
 
     const wsUrl = this.options.baseUrl
       .replace(/^http/, "ws")
@@ -186,8 +194,7 @@ export class HavenWs {
     this.ws.onopen = () => {
       this.state = "connected";
       this.reconnectAttempts = 0;
-      this.startPing();
-      this.emit("_connect", {} as any);
+      // Don't emit _connect yet — wait for Hello from server
     };
 
     this.ws.onmessage = (event) => {
@@ -195,6 +202,39 @@ export class HavenWs {
         const msg: WsServerMessage = JSON.parse(
           typeof event.data === "string" ? event.data : "",
         );
+
+        // Handle session protocol messages before general dispatch
+        if (msg.type === "Hello") {
+          const { session_id, heartbeat_interval_ms } = msg.payload;
+          this.sessionId = session_id;
+          this.heartbeatIntervalMs = heartbeat_interval_ms;
+          this.startPing();
+
+          // If we have a previous session, attempt resume
+          if (previousSessionId && previousSessionId !== session_id) {
+            this.send({ type: "Resume", payload: { session_id: previousSessionId } });
+            // Don't emit _connect yet — wait for Resumed or InvalidSession
+          } else {
+            // Fresh connection — ready
+            this.emit("_connect", {} as any);
+          }
+          return;
+        }
+
+        if (msg.type === "Resumed") {
+          // Resume succeeded — missed events were already replayed before this message
+          this.emit("_connect", {} as any);
+          this.emit(msg.type, msg);
+          return;
+        }
+
+        if (msg.type === "InvalidSession") {
+          // Resume failed — this is now a fresh connection with the new session from Hello
+          this.emit("_connect", {} as any);
+          this.emit(msg.type, msg);
+          return;
+        }
+
         this.emit(msg.type, msg);
       } catch {
         // Ignore malformed messages
@@ -234,7 +274,7 @@ export class HavenWs {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.send({ type: "Ping" });
       }
-    }, 30_000);
+    }, this.heartbeatIntervalMs);
   }
 
   private stopPing(): void {

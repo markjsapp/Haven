@@ -17,6 +17,8 @@
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@haven/core": "file:../haven-core",
+    "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-notification": "^2.2.0",
     "@livekit/components-react": "^2.9.19",
     "@tiptap/extension-bubble-menu": "^3.19.0",
     "@tiptap/extension-code-block-lowlight": "^3.19.0",

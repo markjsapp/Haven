@@ -95,6 +95,18 @@ pub async fn send_message(
         return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
+    // Check if member is timed out (server channels only)
+    if let Ok(Some(channel)) = queries::find_channel_by_id(state.db.read(), channel_id).await {
+        if let Some(server_id) = channel.server_id {
+            if queries::is_member_timed_out(state.db.read(), server_id, user_id)
+                .await
+                .unwrap_or(false)
+            {
+                return Err(AppError::Forbidden("You are timed out in this server".into()));
+            }
+        }
+    }
+
     let sender_token = base64::Engine::decode(
         &base64::engine::general_purpose::STANDARD,
         &req.sender_token,
@@ -133,7 +145,7 @@ pub async fn send_message(
     }
     // Also publish to Redis for cross-instance delivery
     let channel_msg = WsServerMessage::NewMessage(response.clone());
-    crate::pubsub::publish_channel_event(&mut state.redis.clone(), channel_id, &channel_msg).await;
+    crate::pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &channel_msg).await;
 
     Ok(Json(response))
 }
@@ -167,4 +179,66 @@ pub async fn get_pin_ids(
 
     let ids = queries::get_pinned_message_ids(state.db.read(), channel_id).await?;
     Ok(Json(ids))
+}
+
+/// POST /api/v1/channels/:channel_id/messages/bulk-delete
+/// Bulk delete messages. Requires MANAGE_MESSAGES permission.
+pub async fn bulk_delete_messages(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+    Json(req): Json<BulkDeleteRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    if req.message_ids.is_empty() || req.message_ids.len() > 100 {
+        return Err(AppError::Validation(
+            "Must provide 1-100 message IDs".into(),
+        ));
+    }
+
+    // Get channel and verify it's a server channel
+    let channel = queries::find_channel_by_id(state.db.read(), channel_id)
+        .await?
+        .ok_or(AppError::NotFound("Channel not found".into()))?;
+    let server_id = channel
+        .server_id
+        .ok_or(AppError::Forbidden("Bulk delete only available in server channels".into()))?;
+
+    // Check MANAGE_MESSAGES permission
+    queries::require_server_permission(
+        state.db.read(),
+        server_id,
+        user_id,
+        crate::permissions::MANAGE_MESSAGES,
+    )
+    .await?;
+
+    // Execute bulk delete
+    let deleted_ids =
+        queries::bulk_delete_messages(state.db.write(), channel_id, &req.message_ids).await?;
+
+    // Broadcast deletion
+    let del_msg = WsServerMessage::BulkMessagesDeleted {
+        channel_id,
+        message_ids: deleted_ids.clone(),
+    };
+    if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
+        let _ = broadcaster.send(del_msg.clone());
+    }
+    crate::pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &del_msg)
+        .await;
+
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(),
+        server_id,
+        user_id,
+        "message_bulk_delete",
+        Some("channel"),
+        Some(channel_id),
+        Some(&serde_json::json!({ "count": deleted_ids.len() })),
+        None,
+    )
+    .await;
+
+    Ok(Json(serde_json::json!({ "deleted": deleted_ids.len() })))
 }

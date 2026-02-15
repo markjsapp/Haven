@@ -1,18 +1,23 @@
 # Rust build artifacts
 /target/
+client/src-tauri/target/
 
-# Local attachment storage
+# Local attachment storage & TLS certs
 /data/
 
 # Environment files
 .env
 .env.*
+!.env.example
 
 # Node
 node_modules/
 
 # TypeScript build output
 packages/*/dist/
+
+# Coverage reports
+coverage/
 
 # Logs
 *.log
@@ -35,6 +40,9 @@ docker-compose.override.yml
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Tauri auto-generated schemas
+client/src-tauri/gen/
 
 # Design docs and mockups (not versioned)
 docs/

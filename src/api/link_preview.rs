@@ -1,13 +1,20 @@
-use axum::{extract::Query, Json};
+use std::net::IpAddr;
+
+use axum::extract::Query;
+use axum::Json;
 use regex::Regex;
 
 use crate::errors::AppError;
+use crate::middleware::auth::AuthUser;
 use crate::models::{LinkPreviewQuery, LinkPreviewResponse};
 
 /// Fetch Open Graph metadata from a URL for client-side link previews.
 /// The client calls this before encrypting the message, so the preview
 /// data is included in the E2EE payload. The server does NOT log URLs.
+///
+/// Requires authentication to prevent abuse by unauthenticated scrapers.
 pub async fn fetch_link_preview(
+    _user: AuthUser,
     Query(query): Query<LinkPreviewQuery>,
 ) -> Result<Json<LinkPreviewResponse>, AppError> {
     let url = query.url.trim().to_string();
@@ -15,6 +22,42 @@ pub async fn fetch_link_preview(
     // Basic URL validation
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(AppError::BadRequest("URL must start with http:// or https://".into()));
+    }
+
+    // ── SSRF protection: resolve hostname and block private/reserved IPs ──
+    let parsed = reqwest::Url::parse(&url)
+        .map_err(|_| AppError::BadRequest("Invalid URL".into()))?;
+
+    let host = parsed.host_str()
+        .ok_or_else(|| AppError::BadRequest("URL must have a host".into()))?;
+
+    // Block well-known metadata hostnames
+    let host_lower = host.to_lowercase();
+    if host_lower == "metadata.google.internal"
+        || host_lower == "metadata.google"
+        || host_lower.ends_with(".internal")
+    {
+        return Err(AppError::BadRequest("Blocked: internal hostname".into()));
+    }
+
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let addr_str = format!("{host}:{port}");
+
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host(&addr_str)
+        .await
+        .map_err(|_| AppError::BadRequest("Could not resolve hostname".into()))?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err(AppError::BadRequest("Could not resolve hostname".into()));
+    }
+
+    for addr in &addrs {
+        if is_private_ip(addr.ip()) {
+            return Err(AppError::BadRequest(
+                "Blocked: URL resolves to a private/reserved IP address".into(),
+            ));
+        }
     }
 
     // Try oEmbed for known providers (YouTube, etc.) before scraping
@@ -67,6 +110,33 @@ pub async fn fetch_link_preview(
 
     let preview = extract_og_metadata(html, &url);
     Ok(Json(preview))
+}
+
+/// Returns true if the IP address belongs to a private, loopback, link-local,
+/// or otherwise reserved range that should not be accessed via SSRF.
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()              // 127.0.0.0/8
+                || v4.is_private()         // 10/8, 172.16/12, 192.168/16
+                || v4.is_link_local()      // 169.254/16
+                || v4.is_broadcast()       // 255.255.255.255
+                || v4.is_unspecified()     // 0.0.0.0
+                || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64  // 100.64/10 (CGNAT)
+                || v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0  // 192.0.0/24
+                || v4.octets()[0] == 198 && (v4.octets()[1] & 0xFE) == 18  // 198.18/15 (benchmarking)
+                || v4.is_documentation()   // 192.0.2/24, 198.51.100/24, 203.0.113/24
+                || v4.octets()[0] >= 240   // 240/4 (reserved/future)
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()              // ::1
+                || v6.is_unspecified()     // ::
+                || v6.segments()[0] == 0xfe80  // link-local fe80::/10
+                || v6.segments()[0] == 0xfc00 || v6.segments()[0] == 0xfd00  // ULA fc00::/7
+                // IPv4-mapped IPv6 (::ffff:0:0/96) — check inner v4
+                || matches!(v6.to_ipv4_mapped(), Some(v4) if is_private_ip(IpAddr::V4(v4)))
+        }
+    }
 }
 
 /// Try to fetch preview via oEmbed for known providers.

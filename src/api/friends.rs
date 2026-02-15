@@ -227,6 +227,7 @@ pub async fn list_dm_requests(
             created_at: ch.created_at,
             category_id: ch.category_id,
             dm_status: ch.dm_status,
+            last_message_id: None,
         })
         .collect();
     Ok(Json(responses))
@@ -295,5 +296,5 @@ async fn send_to_user(state: &AppState, user_id: Uuid, msg: WsServerMessage) {
             let _ = tx.send(msg.clone());
         }
     }
-    crate::pubsub::publish_user_event(&mut state.redis.clone(), user_id, &msg).await;
+    crate::pubsub::publish_user_event(state.redis.clone().as_mut(), user_id, &msg).await;
 }

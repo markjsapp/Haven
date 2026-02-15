@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
@@ -10,6 +11,9 @@ import MessageInput from "../components/MessageInput.js";
 import FriendsList from "../components/FriendsList.js";
 import DmRequestBanner from "../components/DmRequestBanner.js";
 const UserSettings = lazy(() => import("../components/UserSettings.js"));
+const AdminPanel = lazy(() => import("../components/AdminPanel.js"));
+const CommandPalette = lazy(() => import("../components/CommandPalette.js"));
+const KeyboardShortcutsModal = lazy(() => import("../components/KeyboardShortcutsModal.js"));
 import DmMemberSidebar from "../components/DmMemberSidebar.js";
 import PinnedMessagesPanel from "../components/PinnedMessagesPanel.js";
 import SearchPanel from "../components/SearchPanel.js";
@@ -34,6 +38,8 @@ export default function Chat() {
   const selectedServerId = useUiStore((s) => s.selectedServerId);
   const memberSidebarOpen = useUiStore((s) => s.memberSidebarOpen);
   const showUserSettings = useUiStore((s) => s.showUserSettings);
+  const showAdminPanel = useUiStore((s) => s.showAdminPanel);
+  const setShowAdminPanel = useUiStore((s) => s.setShowAdminPanel);
   const toggleMemberSidebar = useUiStore((s) => s.toggleMemberSidebar);
   const pinnedPanelOpen = useUiStore((s) => s.pinnedPanelOpen);
   const searchPanelOpen = useUiStore((s) => s.searchPanelOpen);
@@ -41,9 +47,59 @@ export default function Chat() {
   const toggleSearchPanel = useUiStore((s) => s.toggleSearchPanel);
   const mentionPopup = useUiStore((s) => s.mentionPopup);
   const setMentionPopup = useUiStore((s) => s.setMentionPopup);
+  const mobileSidebarOpen = useUiStore((s) => s.mobileSidebarOpen);
+  const toggleMobileSidebar = useUiStore((s) => s.toggleMobileSidebar);
+  const setMobileSidebarOpen = useUiStore((s) => s.setMobileSidebarOpen);
+
+  // ─── Mobile detection ──────────────────────────────
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  // Auto-close mobile sidebar when a channel is selected
+  useEffect(() => {
+    if (isMobile && currentChannelId) setMobileSidebarOpen(false);
+  }, [currentChannelId, isMobile]);
+
+  // ─── Invite acceptance via /invite/:code URL ───────
+  const location = useLocation();
+  const navigate = useNavigate();
+  const inviteMatch = location.pathname.match(/^\/invite\/([A-Za-z0-9]+)$/);
+  const inviteCode = inviteMatch ? inviteMatch[1] : null;
+  const [inviteJoining, setInviteJoining] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [inviteSuccess, setInviteSuccess] = useState("");
+
+  async function handleAcceptInvite() {
+    if (!inviteCode || inviteJoining) return;
+    setInviteJoining(true);
+    setInviteError("");
+    try {
+      const api = useAuthStore.getState().api;
+      const server = await api.joinByInvite(inviteCode);
+      setInviteSuccess(`Joined server successfully!`);
+      // Reload channels to include the new server
+      await useChatStore.getState().loadChannels();
+      // Navigate to main view after a brief delay
+      setTimeout(() => {
+        useUiStore.getState().selectServer(server.id);
+        navigate("/", { replace: true });
+      }, 800);
+    } catch (err: any) {
+      setInviteError(err.message || "Failed to join server");
+      setInviteJoining(false);
+    }
+  }
 
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -89,6 +145,7 @@ export default function Chat() {
 
       // Escape — close open panels/modals (works even in inputs)
       if (e.key === "Escape") {
+        if (showCommandPalette) { setShowCommandPalette(false); return; }
         const ui = useUiStore.getState();
         if (ui.showUserSettings) { ui.setShowUserSettings(false); return; }
         if (ui.searchPanelOpen) { ui.toggleSearchPanel(); return; }
@@ -97,15 +154,21 @@ export default function Chat() {
 
       if (isEditable) return;
 
-      // Ctrl/Cmd+K — toggle search panel
+      // Ctrl/Cmd+K — toggle command palette
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
         e.preventDefault();
-        useUiStore.getState().toggleSearchPanel();
+        setShowCommandPalette((v) => !v);
+      }
+
+      // ? — keyboard shortcuts help
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setShowKeyboardHelp((v) => !v);
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [showCommandPalette]);
 
   // Start WS connection and HTTP data loading in parallel.
   // loadChannels() is pure HTTP — no reason to wait for WS handshake.
@@ -156,14 +219,28 @@ export default function Chat() {
     : "Type a message...";
 
   return (
-    <div className="chat-layout">
+    <div className={`chat-layout${isMobile ? " mobile" : ""}`}>
       <a href="#chat-body" className="skip-nav">Skip to chat</a>
-      <ServerBar />
-      <ChannelSidebar />
+
+      {/* Mobile sidebar overlay */}
+      {isMobile && mobileSidebarOpen && (
+        <div className="mobile-sidebar-overlay" onClick={() => setMobileSidebarOpen(false)} />
+      )}
+      <div className={`chat-sidebar-group${isMobile && mobileSidebarOpen ? " open" : ""}`}>
+        <ServerBar />
+        <ChannelSidebar />
+      </div>
 
       <div className="chat-main" role="main">
         <header className="chat-header">
           <div className="chat-header-left">
+            {isMobile && (
+              <button className="mobile-hamburger" onClick={toggleMobileSidebar} aria-label="Toggle sidebar">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+                </svg>
+              </button>
+            )}
             {showFriends && selectedServerId === null ? (
               <h2>Friends</h2>
             ) : channelDisplay ? (
@@ -286,6 +363,9 @@ export default function Chat() {
       {searchPanelOpen && <SearchPanel />}
 
       {showUserSettings && <Suspense fallback={null}><UserSettings /></Suspense>}
+      {showAdminPanel && <Suspense fallback={null}><AdminPanel onClose={() => setShowAdminPanel(false)} /></Suspense>}
+      {showCommandPalette && <Suspense fallback={null}><CommandPalette onClose={() => setShowCommandPalette(false)} /></Suspense>}
+      {showKeyboardHelp && <Suspense fallback={null}><KeyboardShortcutsModal onClose={() => setShowKeyboardHelp(false)} /></Suspense>}
 
       {backupPending && backupAvailable && <SecurityPhraseRestore />}
       {backupPending && !backupAvailable && <SecurityPhraseSetup />}
@@ -297,6 +377,40 @@ export default function Chat() {
           position={mentionPopup.position}
           onClose={() => setMentionPopup(null)}
         />
+      )}
+
+      {inviteCode && (
+        <div className="modal-overlay">
+          <div className="modal-dialog">
+            <div className="modal-dialog-header">
+              <h3 className="modal-title">Server Invite</h3>
+              <button className="modal-close-btn" onClick={() => navigate("/", { replace: true })} aria-label="Close">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" /></svg>
+              </button>
+            </div>
+            <p style={{ color: "var(--text-secondary)", margin: "8px 0 16px" }}>
+              You've been invited to join a server.
+            </p>
+            {inviteError && (
+              <p style={{ color: "var(--red)", fontSize: "0.875rem", margin: "0 0 8px" }}>{inviteError}</p>
+            )}
+            {inviteSuccess && (
+              <p style={{ color: "var(--green)", fontSize: "0.875rem", margin: "0 0 8px" }}>{inviteSuccess}</p>
+            )}
+            <div className="confirm-actions">
+              <button className="btn-ghost" onClick={() => navigate("/", { replace: true })}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleAcceptInvite}
+                disabled={inviteJoining || !!inviteSuccess}
+              >
+                {inviteJoining ? "Joining..." : inviteSuccess ? "Joined!" : "Accept Invite"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

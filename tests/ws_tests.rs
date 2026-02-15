@@ -3,7 +3,7 @@ mod common;
 use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use sqlx::PgPool;
+use haven_backend::db::Pool;
 use tokio::net::TcpListener;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -108,8 +108,9 @@ async fn ws_recv_matching(
 
 // ─── Ping / Pong ────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_ping_returns_pong(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_ping_returns_pong(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ws_ping").await;
     let addr = start_server(&app).await;
@@ -124,8 +125,9 @@ async fn ws_ping_returns_pong(pool: PgPool) {
 
 // ─── Subscribe / Subscribed ─────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_subscribe_returns_subscribed(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_subscribe_returns_subscribed(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ws_sub").await;
     let server_id = app.create_server(&token, "WS Sub Test").await;
@@ -146,8 +148,9 @@ async fn ws_subscribe_returns_subscribed(pool: PgPool) {
 
 // ─── Subscribe to unauthorized channel ──────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_subscribe_unauthorized_channel(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_subscribe_unauthorized_channel(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("ws_sub_own").await;
     let (token_other, _) = app.register_user("ws_sub_other").await;
@@ -173,8 +176,9 @@ async fn ws_subscribe_unauthorized_channel(pool: PgPool) {
 
 // ─── Send Message via WS ────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_send_message_returns_ack(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_send_message_returns_ack(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ws_msg").await;
     let server_id = app.create_server(&token, "WS Msg Test").await;
@@ -216,8 +220,9 @@ async fn ws_send_message_returns_ack(pool: PgPool) {
 
 // ─── Send Message to unauthorized channel ───────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_send_message_unauthorized(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_send_message_unauthorized(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_owner, _) = app.register_user("ws_unauth_own").await;
     let (token_other, _) = app.register_user("ws_unauth_oth").await;
@@ -252,8 +257,9 @@ async fn ws_send_message_unauthorized(pool: PgPool) {
 
 // ─── Invalid message format ─────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_invalid_message_returns_error(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_invalid_message_returns_error(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ws_invalid").await;
     let addr = start_server(&app).await;
@@ -274,8 +280,9 @@ async fn ws_invalid_message_returns_error(pool: PgPool) {
 
 // ─── SetStatus ──────────────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_set_status_invalid(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_set_status_invalid(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ws_status").await;
     let addr = start_server(&app).await;
@@ -297,8 +304,9 @@ async fn ws_set_status_invalid(pool: PgPool) {
 
 // ─── Typing indicator ───────────────────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_typing_broadcasts_to_subscribers(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_typing_broadcasts_to_subscribers(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("ws_type_a").await;
     let (token_b, _) = app.register_user("ws_type_b").await;
@@ -335,8 +343,9 @@ async fn ws_typing_broadcasts_to_subscribers(pool: PgPool) {
 
 // ─── Message broadcast to subscribers ───────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_message_broadcast_to_subscriber(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_message_broadcast_to_subscriber(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token_a, _) = app.register_user("ws_bc_a").await;
     let (token_b, _) = app.register_user("ws_bc_b").await;
@@ -389,8 +398,9 @@ async fn ws_message_broadcast_to_subscriber(pool: PgPool) {
 
 // ─── Invalid base64 in SendMessage ──────────────────────
 
-#[sqlx::test(migrations = "./migrations")]
-async fn ws_send_message_invalid_base64(pool: PgPool) {
+#[cfg_attr(feature = "postgres", sqlx::test(migrations = "./migrations"))]
+#[cfg_attr(feature = "sqlite", sqlx::test(migrations = "./migrations_sqlite"))]
+async fn ws_send_message_invalid_base64(pool: Pool) {
     let app = TestApp::new(pool).await;
     let (token, _) = app.register_user("ws_b64").await;
     let server_id = app.create_server(&token, "B64 Test").await;

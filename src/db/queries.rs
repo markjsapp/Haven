@@ -1,14 +1,14 @@
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::Pool;
 use crate::errors::{AppError, AppResult};
 use crate::models::*;
 
 // ─── Users ─────────────────────────────────────────────
 
 pub async fn create_user(
-    pool: &PgPool,
+    pool: &Pool,
     username: &str,
     display_name: Option<&str>,
     email_hash: Option<&str>,
@@ -22,7 +22,7 @@ pub async fn create_user(
         INSERT INTO users (id, username, display_name, email_hash, password_hash,
                           identity_key, signed_prekey, signed_prekey_sig,
                           created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
@@ -46,7 +46,7 @@ pub async fn create_user(
     Ok(user)
 }
 
-pub async fn find_user_by_username(pool: &PgPool, username: &str) -> AppResult<Option<User>> {
+pub async fn find_user_by_username(pool: &Pool, username: &str) -> AppResult<Option<User>> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
         .bind(username)
         .fetch_optional(pool)
@@ -54,7 +54,7 @@ pub async fn find_user_by_username(pool: &PgPool, username: &str) -> AppResult<O
     Ok(user)
 }
 
-pub async fn find_user_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<User>> {
+pub async fn find_user_by_id(pool: &Pool, id: Uuid) -> AppResult<Option<User>> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -62,32 +62,33 @@ pub async fn find_user_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<User>>
     Ok(user)
 }
 
-/// Cached variant — checks Redis first, falls back to DB, caches for 5 min.
+/// Cached variant — checks cache first, falls back to DB, caches for 5 min.
 pub async fn find_user_by_id_cached(
-    pool: &PgPool,
-    redis: &mut redis::aio::ConnectionManager,
+    pool: &Pool,
+    redis: &mut Option<redis::aio::ConnectionManager>,
+    memory: &crate::memory_store::MemoryStore,
     id: Uuid,
 ) -> AppResult<Option<User>> {
     let key = format!("haven:user:{}", id);
-    if let Some(user) = crate::cache::get_cached::<User>(redis, &key).await {
+    if let Some(user) = crate::cache::get_cached::<User>(redis.as_mut(), memory, &key).await {
         return Ok(Some(user));
     }
     let user = find_user_by_id(pool, id).await?;
     if let Some(ref u) = user {
-        crate::cache::set_cached(redis, &key, u, 300).await;
+        crate::cache::set_cached(redis.as_mut(), memory, &key, u, 300).await;
     }
     Ok(user)
 }
 
 pub async fn update_user_keys(
-    pool: &PgPool,
+    pool: &Pool,
     user_id: Uuid,
     identity_key: &[u8],
     signed_prekey: &[u8],
     signed_prekey_sig: &[u8],
 ) -> AppResult<()> {
     sqlx::query(
-        "UPDATE users SET identity_key = $1, signed_prekey = $2, signed_prekey_sig = $3, updated_at = NOW() WHERE id = $4",
+        "UPDATE users SET identity_key = $1, signed_prekey = $2, signed_prekey_sig = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4",
     )
     .bind(identity_key)
     .bind(signed_prekey)
@@ -98,8 +99,8 @@ pub async fn update_user_keys(
     Ok(())
 }
 
-pub async fn set_user_totp_secret(pool: &PgPool, user_id: Uuid, secret: &str) -> AppResult<()> {
-    sqlx::query("UPDATE users SET totp_secret = $1, updated_at = NOW() WHERE id = $2")
+pub async fn set_user_totp_secret(pool: &Pool, user_id: Uuid, secret: &str) -> AppResult<()> {
+    sqlx::query("UPDATE users SET totp_secret = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2")
         .bind(secret)
         .bind(user_id)
         .execute(pool)
@@ -108,8 +109,8 @@ pub async fn set_user_totp_secret(pool: &PgPool, user_id: Uuid, secret: &str) ->
 }
 
 /// Store TOTP secret in the pending column (not yet verified).
-pub async fn set_pending_totp_secret(pool: &PgPool, user_id: Uuid, secret: &str) -> AppResult<()> {
-    sqlx::query("UPDATE users SET pending_totp_secret = $1, updated_at = NOW() WHERE id = $2")
+pub async fn set_pending_totp_secret(pool: &Pool, user_id: Uuid, secret: &str) -> AppResult<()> {
+    sqlx::query("UPDATE users SET pending_totp_secret = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2")
         .bind(secret)
         .bind(user_id)
         .execute(pool)
@@ -118,9 +119,9 @@ pub async fn set_pending_totp_secret(pool: &PgPool, user_id: Uuid, secret: &str)
 }
 
 /// Promote pending TOTP secret to active after successful verification.
-pub async fn promote_pending_totp(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
+pub async fn promote_pending_totp(pool: &Pool, user_id: Uuid) -> AppResult<()> {
     sqlx::query(
-        "UPDATE users SET totp_secret = pending_totp_secret, pending_totp_secret = NULL, updated_at = NOW() WHERE id = $1"
+        "UPDATE users SET totp_secret = pending_totp_secret, pending_totp_secret = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1"
     )
         .bind(user_id)
         .execute(pool)
@@ -128,16 +129,16 @@ pub async fn promote_pending_totp(pool: &PgPool, user_id: Uuid) -> AppResult<()>
     Ok(())
 }
 
-pub async fn clear_user_totp_secret(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
-    sqlx::query("UPDATE users SET totp_secret = NULL, pending_totp_secret = NULL, updated_at = NOW() WHERE id = $1")
+pub async fn clear_user_totp_secret(pool: &Pool, user_id: Uuid) -> AppResult<()> {
+    sqlx::query("UPDATE users SET totp_secret = NULL, pending_totp_secret = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1")
         .bind(user_id)
         .execute(pool)
         .await?;
     Ok(())
 }
 
-pub async fn update_user_password(pool: &PgPool, user_id: Uuid, password_hash: &str) -> AppResult<()> {
-    sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
+pub async fn update_user_password(pool: &Pool, user_id: Uuid, password_hash: &str) -> AppResult<()> {
+    sqlx::query("UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2")
         .bind(password_hash)
         .bind(user_id)
         .execute(pool)
@@ -147,7 +148,7 @@ pub async fn update_user_password(pool: &PgPool, user_id: Uuid, password_hash: &
 
 // ─── Pre-Keys ──────────────────────────────────────────
 
-pub async fn insert_prekeys(pool: &PgPool, user_id: Uuid, keys: &[(i32, Vec<u8>)]) -> AppResult<()> {
+pub async fn insert_prekeys(pool: &Pool, user_id: Uuid, keys: &[(i32, Vec<u8>)]) -> AppResult<()> {
     // Batch insert using a transaction
     let mut tx = pool.begin().await?;
 
@@ -155,7 +156,7 @@ pub async fn insert_prekeys(pool: &PgPool, user_id: Uuid, keys: &[(i32, Vec<u8>)
         sqlx::query(
             r#"
             INSERT INTO prekeys (id, user_id, key_id, public_key, used, created_at)
-            VALUES ($1, $2, $3, $4, false, NOW())
+            VALUES ($1, $2, $3, $4, false, CURRENT_TIMESTAMP)
             "#,
         )
         .bind(Uuid::new_v4())
@@ -171,7 +172,7 @@ pub async fn insert_prekeys(pool: &PgPool, user_id: Uuid, keys: &[(i32, Vec<u8>)
 }
 
 /// Fetch and consume one unused one-time prekey (marks it as used atomically).
-pub async fn consume_prekey(pool: &PgPool, user_id: Uuid) -> AppResult<Option<PreKey>> {
+pub async fn consume_prekey(pool: &Pool, user_id: Uuid) -> AppResult<Option<PreKey>> {
     let prekey = sqlx::query_as::<_, PreKey>(
         r#"
         UPDATE prekeys SET used = true
@@ -192,7 +193,7 @@ pub async fn consume_prekey(pool: &PgPool, user_id: Uuid) -> AppResult<Option<Pr
     Ok(prekey)
 }
 
-pub async fn count_unused_prekeys(pool: &PgPool, user_id: Uuid) -> AppResult<i64> {
+pub async fn count_unused_prekeys(pool: &Pool, user_id: Uuid) -> AppResult<i64> {
     let row: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM prekeys WHERE user_id = $1 AND used = false")
             .bind(user_id)
@@ -201,10 +202,21 @@ pub async fn count_unused_prekeys(pool: &PgPool, user_id: Uuid) -> AppResult<i64
     Ok(row.0)
 }
 
+/// Delete all unused one-time prekeys for a user.
+/// Called on login before uploading fresh prekeys so the server only has
+/// OTPs whose private keys exist in the client's current MemoryStore.
+pub async fn delete_unused_prekeys(pool: &Pool, user_id: Uuid) -> AppResult<i64> {
+    let result = sqlx::query("DELETE FROM prekeys WHERE user_id = $1 AND used = false")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() as i64)
+}
+
 // ─── Refresh Tokens ────────────────────────────────────
 
 pub async fn store_refresh_token(
-    pool: &PgPool,
+    pool: &Pool,
     user_id: Uuid,
     token_hash: &str,
     expires_at: DateTime<Utc>,
@@ -213,7 +225,7 @@ pub async fn store_refresh_token(
 }
 
 pub async fn store_refresh_token_with_family(
-    pool: &PgPool,
+    pool: &Pool,
     user_id: Uuid,
     token_hash: &str,
     expires_at: DateTime<Utc>,
@@ -222,7 +234,7 @@ pub async fn store_refresh_token_with_family(
     sqlx::query(
         r#"
         INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at, family_id, revoked)
-        VALUES ($1, $2, $3, $4, NOW(), $5, false)
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, false)
         "#,
     )
     .bind(Uuid::new_v4())
@@ -236,9 +248,9 @@ pub async fn store_refresh_token_with_family(
 }
 
 /// Find a refresh token by hash, including revoked ones (for theft detection).
-pub async fn find_refresh_token(pool: &PgPool, token_hash: &str) -> AppResult<Option<RefreshToken>> {
+pub async fn find_refresh_token(pool: &Pool, token_hash: &str) -> AppResult<Option<RefreshToken>> {
     let token = sqlx::query_as::<_, RefreshToken>(
-        "SELECT * FROM refresh_tokens WHERE token_hash = $1 AND expires_at > NOW()",
+        "SELECT * FROM refresh_tokens WHERE token_hash = $1 AND expires_at > CURRENT_TIMESTAMP",
     )
     .bind(token_hash)
     .fetch_optional(pool)
@@ -247,7 +259,7 @@ pub async fn find_refresh_token(pool: &PgPool, token_hash: &str) -> AppResult<Op
 }
 
 /// Mark a refresh token as revoked (soft-delete for theft detection).
-pub async fn revoke_refresh_token(pool: &PgPool, token_hash: &str) -> AppResult<()> {
+pub async fn revoke_refresh_token(pool: &Pool, token_hash: &str) -> AppResult<()> {
     sqlx::query("UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1")
         .bind(token_hash)
         .execute(pool)
@@ -256,7 +268,7 @@ pub async fn revoke_refresh_token(pool: &PgPool, token_hash: &str) -> AppResult<
 }
 
 /// Revoke all tokens in a family (used when token theft is detected).
-pub async fn revoke_token_family(pool: &PgPool, family_id: Uuid) -> AppResult<u64> {
+pub async fn revoke_token_family(pool: &Pool, family_id: Uuid) -> AppResult<u64> {
     let result = sqlx::query("DELETE FROM refresh_tokens WHERE family_id = $1")
         .bind(family_id)
         .execute(pool)
@@ -264,7 +276,7 @@ pub async fn revoke_token_family(pool: &PgPool, family_id: Uuid) -> AppResult<u6
     Ok(result.rows_affected())
 }
 
-pub async fn revoke_all_user_refresh_tokens(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
+pub async fn revoke_all_user_refresh_tokens(pool: &Pool, user_id: Uuid) -> AppResult<()> {
     sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
         .bind(user_id)
         .execute(pool)
@@ -272,8 +284,8 @@ pub async fn revoke_all_user_refresh_tokens(pool: &PgPool, user_id: Uuid) -> App
     Ok(())
 }
 
-pub async fn purge_expired_refresh_tokens(pool: &PgPool) -> AppResult<u64> {
-    let result = sqlx::query("DELETE FROM refresh_tokens WHERE expires_at < NOW()")
+pub async fn purge_expired_refresh_tokens(pool: &Pool) -> AppResult<u64> {
+    let result = sqlx::query("DELETE FROM refresh_tokens WHERE expires_at < CURRENT_TIMESTAMP")
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
@@ -282,14 +294,14 @@ pub async fn purge_expired_refresh_tokens(pool: &PgPool) -> AppResult<u64> {
 // ─── Servers ───────────────────────────────────────────
 
 pub async fn create_server(
-    pool: &PgPool,
+    pool: &Pool,
     owner_id: Uuid,
     encrypted_meta: &[u8],
 ) -> AppResult<Server> {
     let server = sqlx::query_as::<_, Server>(
         r#"
         INSERT INTO servers (id, encrypted_meta, owner_id, created_at)
-        VALUES ($1, $2, $3, NOW())
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
@@ -301,7 +313,7 @@ pub async fn create_server(
     Ok(server)
 }
 
-pub async fn find_server_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Server>> {
+pub async fn find_server_by_id(pool: &Pool, id: Uuid) -> AppResult<Option<Server>> {
     let server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -309,24 +321,25 @@ pub async fn find_server_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Serv
     Ok(server)
 }
 
-/// Cached variant — checks Redis first, falls back to DB, caches for 5 min.
+/// Cached variant — checks cache first, falls back to DB, caches for 5 min.
 pub async fn find_server_by_id_cached(
-    pool: &PgPool,
-    redis: &mut redis::aio::ConnectionManager,
+    pool: &Pool,
+    redis: &mut Option<redis::aio::ConnectionManager>,
+    memory: &crate::memory_store::MemoryStore,
     id: Uuid,
 ) -> AppResult<Option<Server>> {
     let key = format!("haven:server:{}", id);
-    if let Some(server) = crate::cache::get_cached::<Server>(redis, &key).await {
+    if let Some(server) = crate::cache::get_cached::<Server>(redis.as_mut(), memory, &key).await {
         return Ok(Some(server));
     }
     let server = find_server_by_id(pool, id).await?;
     if let Some(ref s) = server {
-        crate::cache::set_cached(redis, &key, s, 300).await;
+        crate::cache::set_cached(redis.as_mut(), memory, &key, s, 300).await;
     }
     Ok(server)
 }
 
-pub async fn get_user_servers(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Server>> {
+pub async fn get_user_servers(pool: &Pool, user_id: Uuid) -> AppResult<Vec<Server>> {
     let servers = sqlx::query_as::<_, Server>(
         r#"
         SELECT s.* FROM servers s
@@ -342,7 +355,7 @@ pub async fn get_user_servers(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Ser
 }
 
 pub async fn update_system_channel(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     system_channel_id: Option<Uuid>,
 ) -> AppResult<()> {
@@ -355,7 +368,7 @@ pub async fn update_system_channel(
 }
 
 pub async fn update_server_icon(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     icon_url: Option<&str>,
 ) -> AppResult<()> {
@@ -370,7 +383,7 @@ pub async fn update_server_icon(
 // ─── Server Members ────────────────────────────────────
 
 pub async fn add_server_member(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
     encrypted_role: &[u8],
@@ -378,7 +391,7 @@ pub async fn add_server_member(
     let member = sqlx::query_as::<_, ServerMember>(
         r#"
         INSERT INTO server_members (id, server_id, user_id, encrypted_role, joined_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
         ON CONFLICT (server_id, user_id) DO UPDATE SET encrypted_role = EXCLUDED.encrypted_role
         RETURNING *
         "#,
@@ -392,7 +405,7 @@ pub async fn add_server_member(
     Ok(member)
 }
 
-pub async fn is_server_member(pool: &PgPool, server_id: Uuid, user_id: Uuid) -> AppResult<bool> {
+pub async fn is_server_member(pool: &Pool, server_id: Uuid, user_id: Uuid) -> AppResult<bool> {
     let row: (bool,) = sqlx::query_as(
         "SELECT EXISTS(SELECT 1 FROM server_members WHERE server_id = $1 AND user_id = $2)",
     )
@@ -406,7 +419,7 @@ pub async fn is_server_member(pool: &PgPool, server_id: Uuid, user_id: Uuid) -> 
 // ─── Channels ──────────────────────────────────────────
 
 /// Find an existing DM channel between exactly two users.
-pub async fn find_dm_channel(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> AppResult<Option<Channel>> {
+pub async fn find_dm_channel(pool: &Pool, user_a: Uuid, user_b: Uuid) -> AppResult<Option<Channel>> {
     let channel = sqlx::query_as::<_, Channel>(
         r#"
         SELECT c.* FROM channels c
@@ -425,7 +438,7 @@ pub async fn find_dm_channel(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> AppRe
 }
 
 pub async fn create_channel(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Option<Uuid>,
     encrypted_meta: &[u8],
     channel_type: &str,
@@ -435,7 +448,7 @@ pub async fn create_channel(
     let channel = sqlx::query_as::<_, Channel>(
         r#"
         INSERT INTO channels (id, server_id, encrypted_meta, channel_type, position, category_id, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
@@ -450,7 +463,7 @@ pub async fn create_channel(
     Ok(channel)
 }
 
-pub async fn get_server_channels(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<Channel>> {
+pub async fn get_server_channels(pool: &Pool, server_id: Uuid) -> AppResult<Vec<Channel>> {
     let channels = sqlx::query_as::<_, Channel>(
         "SELECT * FROM channels WHERE server_id = $1 ORDER BY position ASC",
     )
@@ -460,7 +473,7 @@ pub async fn get_server_channels(pool: &PgPool, server_id: Uuid) -> AppResult<Ve
     Ok(channels)
 }
 
-pub async fn get_user_dm_channels(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Channel>> {
+pub async fn get_user_dm_channels(pool: &Pool, user_id: Uuid) -> AppResult<Vec<Channel>> {
     let channels = sqlx::query_as::<_, Channel>(
         r#"
         SELECT c.* FROM channels c
@@ -475,7 +488,7 @@ pub async fn get_user_dm_channels(pool: &PgPool, user_id: Uuid) -> AppResult<Vec
     Ok(channels)
 }
 
-pub async fn find_channel_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Channel>> {
+pub async fn find_channel_by_id(pool: &Pool, id: Uuid) -> AppResult<Option<Channel>> {
     let ch = sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -484,7 +497,7 @@ pub async fn find_channel_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Cha
 }
 
 pub async fn update_channel_meta(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     encrypted_meta: &[u8],
 ) -> AppResult<Channel> {
@@ -498,7 +511,7 @@ pub async fn update_channel_meta(
     Ok(ch)
 }
 
-pub async fn delete_channel(pool: &PgPool, channel_id: Uuid) -> AppResult<()> {
+pub async fn delete_channel(pool: &Pool, channel_id: Uuid) -> AppResult<()> {
     // Delete members first, then message children, then messages, then the channel
     sqlx::query("DELETE FROM channel_members WHERE channel_id = $1")
         .bind(channel_id)
@@ -524,14 +537,14 @@ pub async fn delete_channel(pool: &PgPool, channel_id: Uuid) -> AppResult<()> {
 // ─── Channel Members ───────────────────────────────────
 
 pub async fn add_channel_member(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<ChannelMember> {
     let member = sqlx::query_as::<_, ChannelMember>(
         r#"
         INSERT INTO channel_members (id, channel_id, user_id, joined_at)
-        VALUES ($1, $2, $3, NOW())
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
         ON CONFLICT (channel_id, user_id) DO UPDATE SET joined_at = EXCLUDED.joined_at
         RETURNING *
         "#,
@@ -546,14 +559,14 @@ pub async fn add_channel_member(
 
 /// Bulk-insert a user into all channels belonging to a server (single query).
 pub async fn add_channel_members_bulk(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<u64> {
     let result = sqlx::query(
         r#"
         INSERT INTO channel_members (id, channel_id, user_id, joined_at)
-        SELECT gen_random_uuid(), c.id, $1, NOW()
+        SELECT gen_random_uuid(), c.id, $1, CURRENT_TIMESTAMP
         FROM channels c
         WHERE c.server_id = $2
         ON CONFLICT (channel_id, user_id) DO UPDATE SET joined_at = EXCLUDED.joined_at
@@ -566,7 +579,7 @@ pub async fn add_channel_members_bulk(
     Ok(result.rows_affected())
 }
 
-pub async fn is_channel_member(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -> AppResult<bool> {
+pub async fn is_channel_member(pool: &Pool, channel_id: Uuid, user_id: Uuid) -> AppResult<bool> {
     let row: (bool,) = sqlx::query_as(
         "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
     )
@@ -579,7 +592,7 @@ pub async fn is_channel_member(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -
 
 /// Check if a user can access a channel: either via channel_members (DM/group)
 /// or via server membership (server channels).
-pub async fn can_access_channel(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -> AppResult<bool> {
+pub async fn can_access_channel(pool: &Pool, channel_id: Uuid, user_id: Uuid) -> AppResult<bool> {
     let row: (bool,) = sqlx::query_as(
         r#"
         SELECT EXISTS(
@@ -598,7 +611,7 @@ pub async fn can_access_channel(pool: &PgPool, channel_id: Uuid, user_id: Uuid) 
     Ok(row.0)
 }
 
-pub async fn get_channel_member_ids(pool: &PgPool, channel_id: Uuid) -> AppResult<Vec<Uuid>> {
+pub async fn get_channel_member_ids(pool: &Pool, channel_id: Uuid) -> AppResult<Vec<Uuid>> {
     let rows: Vec<(Uuid,)> =
         sqlx::query_as("SELECT user_id FROM channel_members WHERE channel_id = $1")
             .bind(channel_id)
@@ -609,7 +622,7 @@ pub async fn get_channel_member_ids(pool: &PgPool, channel_id: Uuid) -> AppResul
 
 /// Remove a user from a channel.
 pub async fn remove_channel_member(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<()> {
@@ -623,7 +636,7 @@ pub async fn remove_channel_member(
 
 /// Get channel members with user info (for DM/group member sidebar).
 pub async fn get_channel_members_info(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
 ) -> AppResult<Vec<ChannelMemberInfo>> {
     let members = sqlx::query_as::<_, ChannelMemberInfo>(
@@ -643,7 +656,7 @@ pub async fn get_channel_members_info(
 
 /// Get all channel IDs a user belongs to (for presence broadcast).
 /// Includes DM/group channels (via channel_members) and server channels (via server membership).
-pub async fn get_user_channel_ids(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Uuid>> {
+pub async fn get_user_channel_ids(pool: &Pool, user_id: Uuid) -> AppResult<Vec<Uuid>> {
     let rows: Vec<(Uuid,)> = sqlx::query_as(
         r#"
         SELECT channel_id FROM channel_members WHERE user_id = $1
@@ -661,7 +674,7 @@ pub async fn get_user_channel_ids(pool: &PgPool, user_id: Uuid) -> AppResult<Vec
 
 // ─── Messages ──────────────────────────────────────────
 
-pub async fn find_message_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Message>> {
+pub async fn find_message_by_id(pool: &Pool, id: Uuid) -> AppResult<Option<Message>> {
     let msg = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -670,7 +683,7 @@ pub async fn find_message_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Mes
 }
 
 pub async fn insert_message(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     sender_token: &[u8],
     encrypted_body: &[u8],
@@ -683,7 +696,7 @@ pub async fn insert_message(
         r#"
         INSERT INTO messages (id, channel_id, sender_token, encrypted_body,
                              timestamp, expires_at, has_attachments, sender_id, reply_to_id)
-        VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7, $8)
         RETURNING *
         "#,
     )
@@ -702,7 +715,7 @@ pub async fn insert_message(
 
 /// Update encrypted_body of a message (for editing). Only the original sender can edit.
 pub async fn update_message_body(
-    pool: &PgPool,
+    pool: &Pool,
     message_id: Uuid,
     sender_id: Uuid,
     new_encrypted_body: &[u8],
@@ -710,7 +723,7 @@ pub async fn update_message_body(
     let msg = sqlx::query_as::<_, Message>(
         r#"
         UPDATE messages
-        SET encrypted_body = $1, edited_at = NOW()
+        SET encrypted_body = $1, edited_at = CURRENT_TIMESTAMP
         WHERE id = $2 AND sender_id = $3
         RETURNING *
         "#,
@@ -726,7 +739,7 @@ pub async fn update_message_body(
 
 /// Clean up child rows that previously relied on FK CASCADE from messages.
 /// Must be called before deleting messages (partitioned tables can't have FK refs).
-async fn cleanup_message_children(pool: &PgPool, message_id: Uuid) -> AppResult<()> {
+async fn cleanup_message_children(pool: &Pool, message_id: Uuid) -> AppResult<()> {
     sqlx::query("DELETE FROM attachments WHERE message_id = $1")
         .bind(message_id)
         .execute(pool)
@@ -748,7 +761,7 @@ async fn cleanup_message_children(pool: &PgPool, message_id: Uuid) -> AppResult<
 
 /// Clean up child rows for all messages in a channel.
 /// Used when deleting a channel (bulk message delete).
-async fn cleanup_channel_message_children(pool: &PgPool, channel_id: Uuid) -> AppResult<()> {
+async fn cleanup_channel_message_children(pool: &Pool, channel_id: Uuid) -> AppResult<()> {
     sqlx::query(
         "DELETE FROM attachments WHERE message_id IN (SELECT id FROM messages WHERE channel_id = $1)"
     )
@@ -779,7 +792,7 @@ async fn cleanup_channel_message_children(pool: &PgPool, channel_id: Uuid) -> Ap
 /// Delete a message. Only the original sender can delete.
 /// Returns the deleted message (for getting channel_id).
 pub async fn delete_message(
-    pool: &PgPool,
+    pool: &Pool,
     message_id: Uuid,
     sender_id: Uuid,
 ) -> AppResult<Message> {
@@ -803,7 +816,7 @@ pub async fn delete_message(
 
 /// Delete a message by ID (admin/owner — no sender check).
 pub async fn delete_message_admin(
-    pool: &PgPool,
+    pool: &Pool,
     message_id: Uuid,
 ) -> AppResult<Message> {
     // Clean up child rows (no FK cascade on partitioned table)
@@ -824,7 +837,7 @@ pub async fn delete_message_admin(
 }
 
 pub async fn get_channel_messages(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     before: Option<DateTime<Utc>>,
     limit: i64,
@@ -834,7 +847,7 @@ pub async fn get_channel_messages(
             r#"
             SELECT * FROM messages
             WHERE channel_id = $1 AND timestamp < $2
-              AND (expires_at IS NULL OR expires_at > NOW())
+              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
             ORDER BY timestamp DESC
             LIMIT $3
             "#,
@@ -849,7 +862,7 @@ pub async fn get_channel_messages(
             r#"
             SELECT * FROM messages
             WHERE channel_id = $1
-              AND (expires_at IS NULL OR expires_at > NOW())
+              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
             ORDER BY timestamp DESC
             LIMIT $2
             "#,
@@ -864,8 +877,8 @@ pub async fn get_channel_messages(
 
 /// Purge expired messages (called by background worker).
 /// Cleans up child rows first since FK cascades were removed for partitioning.
-pub async fn purge_expired_messages(pool: &PgPool) -> AppResult<u64> {
-    let expired_condition = "message_id IN (SELECT id FROM messages WHERE expires_at IS NOT NULL AND expires_at < NOW())";
+pub async fn purge_expired_messages(pool: &Pool) -> AppResult<u64> {
+    let expired_condition = "message_id IN (SELECT id FROM messages WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)";
     sqlx::query(&format!("DELETE FROM attachments WHERE {}", expired_condition))
         .execute(pool)
         .await?;
@@ -878,16 +891,16 @@ pub async fn purge_expired_messages(pool: &PgPool) -> AppResult<u64> {
     sqlx::query(&format!("DELETE FROM reports WHERE {}", expired_condition))
         .execute(pool)
         .await?;
-    let result = sqlx::query("DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < NOW()")
+    let result = sqlx::query("DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP")
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
 }
 
 /// Ensure monthly message partitions exist for the next 3 months.
-/// Called by a daily background worker. Uses CREATE TABLE IF NOT EXISTS
-/// so duplicate calls are safe.
-pub async fn ensure_future_partitions(pool: &PgPool) -> AppResult<()> {
+/// Called by a daily background worker. PostgreSQL only — SQLite doesn't support partitioning.
+#[cfg(feature = "postgres")]
+pub async fn ensure_future_partitions(pool: &Pool) -> AppResult<()> {
     use chrono::Datelike;
 
     let now = Utc::now();
@@ -914,11 +927,17 @@ pub async fn ensure_future_partitions(pool: &PgPool) -> AppResult<()> {
     Ok(())
 }
 
+/// No-op for SQLite — partitioning is not supported or needed.
+#[cfg(feature = "sqlite")]
+pub async fn ensure_future_partitions(_pool: &Pool) -> AppResult<()> {
+    Ok(())
+}
+
 // ─── Attachments ───────────────────────────────────────
 
 /// Link an attachment (uploaded via presigned URL) to a message.
 pub async fn link_attachment(
-    pool: &PgPool,
+    pool: &Pool,
     attachment_id: Uuid,
     message_id: Uuid,
     storage_key: &str,
@@ -926,7 +945,7 @@ pub async fn link_attachment(
     let att = sqlx::query_as::<_, Attachment>(
         r#"
         INSERT INTO attachments (id, message_id, storage_key, encrypted_meta, size_bucket, created_at)
-        VALUES ($1, $2, $3, $4, 0, NOW())
+        VALUES ($1, $2, $3, $4, 0, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
@@ -939,7 +958,7 @@ pub async fn link_attachment(
     Ok(att)
 }
 
-pub async fn find_attachment_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Attachment>> {
+pub async fn find_attachment_by_id(pool: &Pool, id: Uuid) -> AppResult<Option<Attachment>> {
     let att = sqlx::query_as::<_, Attachment>("SELECT * FROM attachments WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -948,7 +967,7 @@ pub async fn find_attachment_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<
 }
 
 pub async fn insert_attachment(
-    pool: &PgPool,
+    pool: &Pool,
     message_id: Uuid,
     storage_key: &str,
     encrypted_meta: &[u8],
@@ -957,7 +976,7 @@ pub async fn insert_attachment(
     let att = sqlx::query_as::<_, Attachment>(
         r#"
         INSERT INTO attachments (id, message_id, storage_key, encrypted_meta, size_bucket, created_at)
-        VALUES ($1, $2, $3, $4, $5, NOW())
+        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
@@ -974,7 +993,7 @@ pub async fn insert_attachment(
 // ─── Invites ──────────────────────────────────────────
 
 pub async fn create_invite(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     created_by: Uuid,
     code: &str,
@@ -984,7 +1003,7 @@ pub async fn create_invite(
     let invite = sqlx::query_as::<_, Invite>(
         r#"
         INSERT INTO invites (id, server_id, created_by, code, max_uses, use_count, expires_at, created_at)
-        VALUES ($1, $2, $3, $4, $5, 0, $6, NOW())
+        VALUES ($1, $2, $3, $4, $5, 0, $6, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
@@ -999,7 +1018,7 @@ pub async fn create_invite(
     Ok(invite)
 }
 
-pub async fn find_invite_by_code(pool: &PgPool, code: &str) -> AppResult<Option<Invite>> {
+pub async fn find_invite_by_code(pool: &Pool, code: &str) -> AppResult<Option<Invite>> {
     let invite = sqlx::query_as::<_, Invite>("SELECT * FROM invites WHERE code = $1")
         .bind(code)
         .fetch_optional(pool)
@@ -1007,7 +1026,7 @@ pub async fn find_invite_by_code(pool: &PgPool, code: &str) -> AppResult<Option<
     Ok(invite)
 }
 
-pub async fn get_server_invites(pool: &PgPool, server_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<Invite>> {
+pub async fn get_server_invites(pool: &Pool, server_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<Invite>> {
     let invites = sqlx::query_as::<_, Invite>(
         "SELECT * FROM invites WHERE server_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
     )
@@ -1019,7 +1038,7 @@ pub async fn get_server_invites(pool: &PgPool, server_id: Uuid, limit: i64, offs
     Ok(invites)
 }
 
-pub async fn increment_invite_uses(pool: &PgPool, invite_id: Uuid) -> AppResult<()> {
+pub async fn increment_invite_uses(pool: &Pool, invite_id: Uuid) -> AppResult<()> {
     sqlx::query("UPDATE invites SET use_count = use_count + 1 WHERE id = $1")
         .bind(invite_id)
         .execute(pool)
@@ -1027,7 +1046,7 @@ pub async fn increment_invite_uses(pool: &PgPool, invite_id: Uuid) -> AppResult<
     Ok(())
 }
 
-pub async fn delete_invite(pool: &PgPool, invite_id: Uuid) -> AppResult<()> {
+pub async fn delete_invite(pool: &Pool, invite_id: Uuid) -> AppResult<()> {
     sqlx::query("DELETE FROM invites WHERE id = $1")
         .bind(invite_id)
         .execute(pool)
@@ -1039,7 +1058,7 @@ pub async fn delete_invite(pool: &PgPool, invite_id: Uuid) -> AppResult<()> {
 
 /// Add a reaction. Returns the reaction (upsert — ignores if already exists).
 pub async fn add_reaction(
-    pool: &PgPool,
+    pool: &Pool,
     message_id: Uuid,
     user_id: Uuid,
     emoji: &str,
@@ -1062,7 +1081,7 @@ pub async fn add_reaction(
 
 /// Remove a reaction. Returns true if a row was deleted.
 pub async fn remove_reaction(
-    pool: &PgPool,
+    pool: &Pool,
     message_id: Uuid,
     user_id: Uuid,
     emoji: &str,
@@ -1080,18 +1099,36 @@ pub async fn remove_reaction(
 
 /// Get all reactions for a set of message IDs, grouped by emoji.
 pub async fn get_reactions_for_messages(
-    pool: &PgPool,
+    pool: &Pool,
     message_ids: &[Uuid],
 ) -> AppResult<Vec<Reaction>> {
     if message_ids.is_empty() {
         return Ok(Vec::new());
     }
+
+    // PostgreSQL supports ANY($1) with array binding; SQLite needs dynamic IN clause.
+    #[cfg(feature = "postgres")]
     let reactions = sqlx::query_as::<_, Reaction>(
         "SELECT * FROM reactions WHERE message_id = ANY($1) ORDER BY created_at ASC",
     )
     .bind(message_ids)
     .fetch_all(pool)
     .await?;
+
+    #[cfg(feature = "sqlite")]
+    let reactions = {
+        let placeholders: Vec<String> = (1..=message_ids.len()).map(|i| format!("${}", i)).collect();
+        let sql = format!(
+            "SELECT * FROM reactions WHERE message_id IN ({}) ORDER BY created_at ASC",
+            placeholders.join(", ")
+        );
+        let mut query = sqlx::query_as::<_, Reaction>(&sql);
+        for id in message_ids {
+            query = query.bind(id);
+        }
+        query.fetch_all(pool).await?
+    };
+
     Ok(reactions)
 }
 
@@ -1099,7 +1136,7 @@ pub async fn get_reactions_for_messages(
 
 /// Store a batch of encrypted SKDMs for a channel.
 pub async fn insert_sender_key_distributions(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     from_user_id: Uuid,
     distributions: &[(Uuid, Uuid, Vec<u8>)], // (to_user_id, distribution_id, encrypted_skdm)
@@ -1111,9 +1148,9 @@ pub async fn insert_sender_key_distributions(
             r#"
             INSERT INTO sender_key_distributions
                 (id, channel_id, from_user_id, to_user_id, distribution_id, encrypted_skdm, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
             ON CONFLICT (channel_id, from_user_id, to_user_id, distribution_id)
-            DO UPDATE SET encrypted_skdm = EXCLUDED.encrypted_skdm, created_at = NOW()
+            DO UPDATE SET encrypted_skdm = EXCLUDED.encrypted_skdm, created_at = CURRENT_TIMESTAMP
             "#,
         )
         .bind(Uuid::new_v4())
@@ -1132,7 +1169,7 @@ pub async fn insert_sender_key_distributions(
 
 /// Fetch all pending SKDMs for a user in a specific channel.
 pub async fn get_sender_key_distributions(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     to_user_id: Uuid,
 ) -> AppResult<Vec<SenderKeyDistribution>> {
@@ -1152,7 +1189,7 @@ pub async fn get_sender_key_distributions(
 
 /// Delete all SKDMs targeting a user (used when their identity key changes).
 pub async fn clear_sender_key_distributions_for_user(
-    pool: &PgPool,
+    pool: &Pool,
     user_id: Uuid,
 ) -> AppResult<()> {
     sqlx::query("DELETE FROM sender_key_distributions WHERE to_user_id = $1")
@@ -1164,16 +1201,35 @@ pub async fn clear_sender_key_distributions_for_user(
 
 /// Delete consumed SKDMs (after client has fetched them).
 pub async fn delete_sender_key_distributions(
-    pool: &PgPool,
+    pool: &Pool,
     ids: &[Uuid],
 ) -> AppResult<()> {
     if ids.is_empty() {
         return Ok(());
     }
-    sqlx::query("DELETE FROM sender_key_distributions WHERE id = ANY($1)")
-        .bind(ids)
-        .execute(pool)
-        .await?;
+
+    #[cfg(feature = "postgres")]
+    {
+        sqlx::query("DELETE FROM sender_key_distributions WHERE id = ANY($1)")
+            .bind(ids)
+            .execute(pool)
+            .await?;
+    }
+
+    #[cfg(feature = "sqlite")]
+    {
+        let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${}", i)).collect();
+        let sql = format!(
+            "DELETE FROM sender_key_distributions WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut query = sqlx::query(&sql);
+        for id in ids {
+            query = query.bind(id);
+        }
+        query.execute(pool).await?;
+    }
+
     Ok(())
 }
 
@@ -1181,7 +1237,7 @@ pub async fn delete_sender_key_distributions(
 /// Returns (user_id, identity_key) pairs for all members except the requester.
 /// For server channels, includes all server members (not just channel_members).
 pub async fn get_channel_member_identity_keys(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     exclude_user_id: Uuid,
 ) -> AppResult<Vec<(Uuid, Vec<u8>)>> {
@@ -1208,16 +1264,16 @@ pub async fn get_channel_member_identity_keys(
 // ─── Server Members (extended) ────────────────────────
 
 pub async fn get_server_members(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     limit: i64,
     offset: i64,
 ) -> AppResult<Vec<ServerMemberResponse>> {
     // Step 1: Get members (paginated)
-    let rows: Vec<(Uuid, String, Option<String>, Option<String>, DateTime<Utc>, Option<String>)> =
+    let rows: Vec<(Uuid, String, Option<String>, Option<String>, DateTime<Utc>, Option<String>, Option<DateTime<Utc>>)> =
         sqlx::query_as(
             r#"
-            SELECT sm.user_id, u.username, u.display_name, u.avatar_url, sm.joined_at, sm.nickname
+            SELECT sm.user_id, u.username, u.display_name, u.avatar_url, sm.joined_at, sm.nickname, sm.timed_out_until
             FROM server_members sm
             INNER JOIN users u ON u.id = sm.user_id
             WHERE sm.server_id = $1
@@ -1249,7 +1305,9 @@ pub async fn get_server_members(
     Ok(rows
         .into_iter()
         .map(
-            |(user_id, username, display_name, avatar_url, joined_at, nickname)| {
+            |(user_id, username, display_name, avatar_url, joined_at, nickname, timed_out_until)| {
+                // Only include timed_out_until if it's still in the future
+                let active_timeout = timed_out_until.filter(|t| *t > Utc::now());
                 ServerMemberResponse {
                     user_id,
                     username,
@@ -1258,14 +1316,24 @@ pub async fn get_server_members(
                     joined_at,
                     nickname,
                     role_ids: role_map.remove(&user_id).unwrap_or_default(),
+                    timed_out_until: active_timeout,
                 }
             },
         )
         .collect())
 }
 
+pub async fn get_server_member_ids(pool: &Pool, server_id: Uuid) -> AppResult<Vec<Uuid>> {
+    let rows: Vec<(Uuid,)> =
+        sqlx::query_as("SELECT user_id FROM server_members WHERE server_id = $1")
+            .bind(server_id)
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}
+
 pub async fn remove_server_member(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<()> {
@@ -1292,7 +1360,7 @@ pub async fn remove_server_member(
     Ok(())
 }
 
-pub async fn count_server_members(pool: &PgPool, server_id: Uuid) -> AppResult<i64> {
+pub async fn count_server_members(pool: &Pool, server_id: Uuid) -> AppResult<i64> {
     let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM server_members WHERE server_id = $1")
         .bind(server_id)
         .fetch_one(pool)
@@ -1300,7 +1368,7 @@ pub async fn count_server_members(pool: &PgPool, server_id: Uuid) -> AppResult<i
     Ok(row.0)
 }
 
-pub async fn delete_server(pool: &PgPool, server_id: Uuid) -> AppResult<()> {
+pub async fn delete_server(pool: &Pool, server_id: Uuid) -> AppResult<()> {
     // All child tables use ON DELETE CASCADE, so this single delete
     // removes server_members, channels (→ messages, channel_members, etc.),
     // roles, member_roles, invites, bans, categories, etc.
@@ -1314,7 +1382,7 @@ pub async fn delete_server(pool: &PgPool, server_id: Uuid) -> AppResult<()> {
 // ─── Key Backups ─────────────────────────────────────
 
 pub async fn upsert_key_backup(
-    pool: &PgPool,
+    pool: &Pool,
     user_id: Uuid,
     encrypted_data: &[u8],
     nonce: &[u8],
@@ -1324,13 +1392,13 @@ pub async fn upsert_key_backup(
     let backup = sqlx::query_as::<_, KeyBackup>(
         r#"
         INSERT INTO key_backups (id, user_id, encrypted_data, nonce, salt, version, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id) DO UPDATE SET
             encrypted_data = EXCLUDED.encrypted_data,
             nonce = EXCLUDED.nonce,
             salt = EXCLUDED.salt,
             version = EXCLUDED.version,
-            updated_at = NOW()
+            updated_at = CURRENT_TIMESTAMP
         RETURNING *
         "#,
     )
@@ -1345,7 +1413,7 @@ pub async fn upsert_key_backup(
     Ok(backup)
 }
 
-pub async fn get_key_backup(pool: &PgPool, user_id: Uuid) -> AppResult<Option<KeyBackup>> {
+pub async fn get_key_backup(pool: &Pool, user_id: Uuid) -> AppResult<Option<KeyBackup>> {
     let backup = sqlx::query_as::<_, KeyBackup>(
         "SELECT * FROM key_backups WHERE user_id = $1",
     )
@@ -1355,7 +1423,7 @@ pub async fn get_key_backup(pool: &PgPool, user_id: Uuid) -> AppResult<Option<Ke
     Ok(backup)
 }
 
-pub async fn delete_key_backup(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
+pub async fn delete_key_backup(pool: &Pool, user_id: Uuid) -> AppResult<()> {
     sqlx::query("DELETE FROM key_backups WHERE user_id = $1")
         .bind(user_id)
         .execute(pool)
@@ -1366,7 +1434,7 @@ pub async fn delete_key_backup(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
 // ─── User Profiles ───────────────────────────────────
 
 pub async fn update_user_profile(
-    pool: &PgPool,
+    pool: &Pool,
     user_id: Uuid,
     display_name: Option<&str>,
     about_me: Option<&str>,
@@ -1382,7 +1450,7 @@ pub async fn update_user_profile(
             custom_status = $4,
             custom_status_emoji = $5,
             encrypted_profile = COALESCE($6, encrypted_profile),
-            updated_at = NOW()
+            updated_at = CURRENT_TIMESTAMP
         WHERE id = $1
         RETURNING *
         "#,
@@ -1398,9 +1466,9 @@ pub async fn update_user_profile(
     Ok(user)
 }
 
-pub async fn update_user_avatar(pool: &PgPool, user_id: Uuid, avatar_url: &str) -> AppResult<User> {
+pub async fn update_user_avatar(pool: &Pool, user_id: Uuid, avatar_url: &str) -> AppResult<User> {
     let user = sqlx::query_as::<_, User>(
-        "UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1 RETURNING *",
+        "UPDATE users SET avatar_url = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *",
     )
     .bind(user_id)
     .bind(avatar_url)
@@ -1409,9 +1477,9 @@ pub async fn update_user_avatar(pool: &PgPool, user_id: Uuid, avatar_url: &str) 
     Ok(user)
 }
 
-pub async fn update_user_banner(pool: &PgPool, user_id: Uuid, banner_url: &str) -> AppResult<User> {
+pub async fn update_user_banner(pool: &Pool, user_id: Uuid, banner_url: &str) -> AppResult<User> {
     let user = sqlx::query_as::<_, User>(
-        "UPDATE users SET banner_url = $2, updated_at = NOW() WHERE id = $1 RETURNING *",
+        "UPDATE users SET banner_url = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *",
     )
     .bind(user_id)
     .bind(banner_url)
@@ -1422,7 +1490,7 @@ pub async fn update_user_banner(pool: &PgPool, user_id: Uuid, banner_url: &str) 
 
 // ─── Blocked Users ───────────────────────────────────
 
-pub async fn block_user(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> AppResult<()> {
+pub async fn block_user(pool: &Pool, blocker_id: Uuid, blocked_id: Uuid) -> AppResult<()> {
     sqlx::query(
         r#"
         INSERT INTO blocked_users (blocker_id, blocked_id)
@@ -1437,7 +1505,7 @@ pub async fn block_user(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> Ap
     Ok(())
 }
 
-pub async fn unblock_user(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> AppResult<bool> {
+pub async fn unblock_user(pool: &Pool, blocker_id: Uuid, blocked_id: Uuid) -> AppResult<bool> {
     let result = sqlx::query("DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2")
         .bind(blocker_id)
         .bind(blocked_id)
@@ -1446,7 +1514,7 @@ pub async fn unblock_user(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> 
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn is_blocked(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> AppResult<bool> {
+pub async fn is_blocked(pool: &Pool, blocker_id: Uuid, blocked_id: Uuid) -> AppResult<bool> {
     let row: (bool,) = sqlx::query_as(
         "SELECT EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2)",
     )
@@ -1457,7 +1525,7 @@ pub async fn is_blocked(pool: &PgPool, blocker_id: Uuid, blocked_id: Uuid) -> Ap
     Ok(row.0)
 }
 
-pub async fn get_blocked_users(pool: &PgPool, blocker_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<BlockedUserResponse>> {
+pub async fn get_blocked_users(pool: &Pool, blocker_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<BlockedUserResponse>> {
     let rows = sqlx::query_as::<_, BlockedUserResponse>(
         r#"
         SELECT bu.blocked_id AS user_id, u.username, u.display_name, u.avatar_url, bu.created_at AS blocked_at
@@ -1476,7 +1544,7 @@ pub async fn get_blocked_users(pool: &PgPool, blocker_id: Uuid, limit: i64, offs
     Ok(rows)
 }
 
-pub async fn get_blocked_user_ids(pool: &PgPool, blocker_id: Uuid) -> AppResult<Vec<Uuid>> {
+pub async fn get_blocked_user_ids(pool: &Pool, blocker_id: Uuid) -> AppResult<Vec<Uuid>> {
     let rows: Vec<(Uuid,)> =
         sqlx::query_as("SELECT blocked_id FROM blocked_users WHERE blocker_id = $1")
             .bind(blocker_id)
@@ -1488,7 +1556,7 @@ pub async fn get_blocked_user_ids(pool: &PgPool, blocker_id: Uuid) -> AppResult<
 // ─── Channel Categories ─────────────────────────────────
 
 pub async fn create_category(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     name: &str,
     position: i32,
@@ -1508,7 +1576,7 @@ pub async fn create_category(
     Ok(cat)
 }
 
-pub async fn get_server_categories(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<ChannelCategory>> {
+pub async fn get_server_categories(pool: &Pool, server_id: Uuid) -> AppResult<Vec<ChannelCategory>> {
     let cats = sqlx::query_as::<_, ChannelCategory>(
         "SELECT * FROM channel_categories WHERE server_id = $1 ORDER BY position ASC",
     )
@@ -1518,7 +1586,7 @@ pub async fn get_server_categories(pool: &PgPool, server_id: Uuid) -> AppResult<
     Ok(cats)
 }
 
-pub async fn find_category_by_id(pool: &PgPool, category_id: Uuid) -> AppResult<Option<ChannelCategory>> {
+pub async fn find_category_by_id(pool: &Pool, category_id: Uuid) -> AppResult<Option<ChannelCategory>> {
     let cat = sqlx::query_as::<_, ChannelCategory>(
         "SELECT * FROM channel_categories WHERE id = $1",
     )
@@ -1529,7 +1597,7 @@ pub async fn find_category_by_id(pool: &PgPool, category_id: Uuid) -> AppResult<
 }
 
 pub async fn update_category(
-    pool: &PgPool,
+    pool: &Pool,
     category_id: Uuid,
     name: Option<&str>,
     position: Option<i32>,
@@ -1551,7 +1619,7 @@ pub async fn update_category(
     Ok(cat)
 }
 
-pub async fn delete_category(pool: &PgPool, category_id: Uuid) -> AppResult<()> {
+pub async fn delete_category(pool: &Pool, category_id: Uuid) -> AppResult<()> {
     sqlx::query("DELETE FROM channel_categories WHERE id = $1")
         .bind(category_id)
         .execute(pool)
@@ -1560,7 +1628,7 @@ pub async fn delete_category(pool: &PgPool, category_id: Uuid) -> AppResult<()> 
 }
 
 pub async fn reorder_categories(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     order: &[(Uuid, i32)],
 ) -> AppResult<()> {
@@ -1580,7 +1648,7 @@ pub async fn reorder_categories(
 }
 
 pub async fn reorder_channels(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     order: &[(Uuid, i32, Option<Uuid>)],
 ) -> AppResult<()> {
@@ -1601,7 +1669,7 @@ pub async fn reorder_channels(
 }
 
 pub async fn set_channel_category(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     category_id: Option<Uuid>,
 ) -> AppResult<Channel> {
@@ -1620,7 +1688,7 @@ pub async fn set_channel_category(
 // ─── Roles ──────────────────────────────────────────────
 
 pub async fn create_role(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     name: &str,
     color: Option<&str>,
@@ -1646,7 +1714,7 @@ pub async fn create_role(
     Ok(role)
 }
 
-pub async fn get_server_roles(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<Role>> {
+pub async fn get_server_roles(pool: &Pool, server_id: Uuid) -> AppResult<Vec<Role>> {
     let roles = sqlx::query_as::<_, Role>(
         "SELECT * FROM roles WHERE server_id = $1 ORDER BY position ASC",
     )
@@ -1656,7 +1724,7 @@ pub async fn get_server_roles(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<R
     Ok(roles)
 }
 
-pub async fn find_role_by_id(pool: &PgPool, role_id: Uuid) -> AppResult<Option<Role>> {
+pub async fn find_role_by_id(pool: &Pool, role_id: Uuid) -> AppResult<Option<Role>> {
     let role = sqlx::query_as::<_, Role>("SELECT * FROM roles WHERE id = $1")
         .bind(role_id)
         .fetch_optional(pool)
@@ -1664,7 +1732,7 @@ pub async fn find_role_by_id(pool: &PgPool, role_id: Uuid) -> AppResult<Option<R
     Ok(role)
 }
 
-pub async fn find_default_role(pool: &PgPool, server_id: Uuid) -> AppResult<Option<Role>> {
+pub async fn find_default_role(pool: &Pool, server_id: Uuid) -> AppResult<Option<Role>> {
     let role = sqlx::query_as::<_, Role>(
         "SELECT * FROM roles WHERE server_id = $1 AND is_default = TRUE LIMIT 1",
     )
@@ -1675,7 +1743,7 @@ pub async fn find_default_role(pool: &PgPool, server_id: Uuid) -> AppResult<Opti
 }
 
 pub async fn update_role(
-    pool: &PgPool,
+    pool: &Pool,
     role_id: Uuid,
     name: Option<&str>,
     color: Option<Option<&str>>,
@@ -1704,7 +1772,7 @@ pub async fn update_role(
     Ok(role)
 }
 
-pub async fn delete_role(pool: &PgPool, role_id: Uuid) -> AppResult<()> {
+pub async fn delete_role(pool: &Pool, role_id: Uuid) -> AppResult<()> {
     sqlx::query("DELETE FROM roles WHERE id = $1")
         .bind(role_id)
         .execute(pool)
@@ -1715,7 +1783,7 @@ pub async fn delete_role(pool: &PgPool, role_id: Uuid) -> AppResult<()> {
 // ─── Member Roles ────────────────────────────────────────
 
 pub async fn assign_role(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
     role_id: Uuid,
@@ -1736,7 +1804,7 @@ pub async fn assign_role(
 }
 
 pub async fn remove_role(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
     role_id: Uuid,
@@ -1753,7 +1821,7 @@ pub async fn remove_role(
 }
 
 pub async fn get_member_role_ids(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<Vec<Uuid>> {
@@ -1768,7 +1836,7 @@ pub async fn get_member_role_ids(
 }
 
 pub async fn get_member_roles(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<Vec<Role>> {
@@ -1792,7 +1860,7 @@ pub async fn get_member_roles(
 /// Get a member's effective server-level permissions.
 /// Returns (is_owner, effective_permissions).
 pub async fn get_member_permissions(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<(bool, i64)> {
@@ -1816,25 +1884,26 @@ pub async fn get_member_permissions(
     Ok((is_owner, effective))
 }
 
-/// Cached variant — checks Redis first, falls back to DB, caches for 2 min.
+/// Cached variant — checks cache first, falls back to DB, caches for 2 min.
 pub async fn get_member_permissions_cached(
-    pool: &PgPool,
-    redis: &mut redis::aio::ConnectionManager,
+    pool: &Pool,
+    redis: &mut Option<redis::aio::ConnectionManager>,
+    memory: &crate::memory_store::MemoryStore,
     server_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<(bool, i64)> {
     let key = format!("haven:perms:{}:{}", server_id, user_id);
-    if let Some((is_owner, perms)) = crate::cache::get_cached::<(bool, i64)>(redis, &key).await {
+    if let Some((is_owner, perms)) = crate::cache::get_cached::<(bool, i64)>(redis.as_mut(), memory, &key).await {
         return Ok((is_owner, perms));
     }
     let result = get_member_permissions(pool, server_id, user_id).await?;
-    crate::cache::set_cached(redis, &key, &result, 120).await;
+    crate::cache::set_cached(redis.as_mut(), memory, &key, &result, 120).await;
     Ok(result)
 }
 
 /// Check if a user has a required permission on a server. Returns error if not.
 pub async fn require_server_permission(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
     required: i64,
@@ -1851,7 +1920,7 @@ pub async fn require_server_permission(
 // ─── Channel Permission Overwrites ──────────────────────
 
 pub async fn get_channel_overwrites(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
 ) -> AppResult<Vec<ChannelPermissionOverwrite>> {
     let rows = sqlx::query_as::<_, ChannelPermissionOverwrite>(
@@ -1864,7 +1933,7 @@ pub async fn get_channel_overwrites(
 }
 
 pub async fn set_channel_overwrite(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     target_type: &str,
     target_id: Uuid,
@@ -1891,7 +1960,7 @@ pub async fn set_channel_overwrite(
 }
 
 pub async fn delete_channel_overwrite(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     target_type: &str,
     target_id: Uuid,
@@ -1910,7 +1979,7 @@ pub async fn delete_channel_overwrite(
 // ─── Friends ──────────────────────────────────────────────
 
 pub async fn send_friend_request(
-    pool: &PgPool,
+    pool: &Pool,
     requester_id: Uuid,
     addressee_id: Uuid,
 ) -> AppResult<Friendship> {
@@ -1934,7 +2003,7 @@ pub async fn send_friend_request(
     Ok(friendship)
 }
 
-pub async fn find_friendship_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Friendship>> {
+pub async fn find_friendship_by_id(pool: &Pool, id: Uuid) -> AppResult<Option<Friendship>> {
     let f = sqlx::query_as::<_, Friendship>("SELECT * FROM friendships WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -1943,7 +2012,7 @@ pub async fn find_friendship_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<
 }
 
 /// Find a friendship between two users (in either direction).
-pub async fn find_friendship(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> AppResult<Option<Friendship>> {
+pub async fn find_friendship(pool: &Pool, user_a: Uuid, user_b: Uuid) -> AppResult<Option<Friendship>> {
     let f = sqlx::query_as::<_, Friendship>(
         r#"
         SELECT * FROM friendships
@@ -1959,10 +2028,10 @@ pub async fn find_friendship(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> AppRe
     Ok(f)
 }
 
-pub async fn accept_friend_request(pool: &PgPool, friendship_id: Uuid) -> AppResult<Friendship> {
+pub async fn accept_friend_request(pool: &Pool, friendship_id: Uuid) -> AppResult<Friendship> {
     let f = sqlx::query_as::<_, Friendship>(
         r#"
-        UPDATE friendships SET status = 'accepted', updated_at = NOW()
+        UPDATE friendships SET status = 'accepted', updated_at = CURRENT_TIMESTAMP
         WHERE id = $1
         RETURNING *
         "#,
@@ -1973,7 +2042,7 @@ pub async fn accept_friend_request(pool: &PgPool, friendship_id: Uuid) -> AppRes
     Ok(f)
 }
 
-pub async fn delete_friendship(pool: &PgPool, friendship_id: Uuid) -> AppResult<()> {
+pub async fn delete_friendship(pool: &Pool, friendship_id: Uuid) -> AppResult<()> {
     sqlx::query("DELETE FROM friendships WHERE id = $1")
         .bind(friendship_id)
         .execute(pool)
@@ -1981,7 +2050,7 @@ pub async fn delete_friendship(pool: &PgPool, friendship_id: Uuid) -> AppResult<
     Ok(())
 }
 
-pub async fn are_friends(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> AppResult<bool> {
+pub async fn are_friends(pool: &Pool, user_a: Uuid, user_b: Uuid) -> AppResult<bool> {
     let row: (bool,) = sqlx::query_as(
         r#"
         SELECT EXISTS(
@@ -1999,7 +2068,7 @@ pub async fn are_friends(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> AppResult
 }
 
 /// Check if two users share any server.
-pub async fn share_server(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> AppResult<bool> {
+pub async fn share_server(pool: &Pool, user_a: Uuid, user_b: Uuid) -> AppResult<bool> {
     let row: (bool,) = sqlx::query_as(
         r#"
         SELECT EXISTS(
@@ -2016,7 +2085,7 @@ pub async fn share_server(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> AppResul
     Ok(row.0)
 }
 
-pub async fn get_friends_list(pool: &PgPool, user_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<FriendResponse>> {
+pub async fn get_friends_list(pool: &Pool, user_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<FriendResponse>> {
     let friends: Vec<FriendResponse> = sqlx::query_as::<_, FriendResponse>(
         r#"
         SELECT * FROM (
@@ -2045,7 +2114,7 @@ pub async fn get_friends_list(pool: &PgPool, user_id: Uuid, limit: i64, offset: 
     Ok(friends)
 }
 
-pub async fn set_dm_status(pool: &PgPool, channel_id: Uuid, status: &str) -> AppResult<()> {
+pub async fn set_dm_status(pool: &Pool, channel_id: Uuid, status: &str) -> AppResult<()> {
     sqlx::query("UPDATE channels SET dm_status = $2 WHERE id = $1")
         .bind(channel_id)
         .bind(status)
@@ -2054,7 +2123,7 @@ pub async fn set_dm_status(pool: &PgPool, channel_id: Uuid, status: &str) -> App
     Ok(())
 }
 
-pub async fn get_pending_dm_channels(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Channel>> {
+pub async fn get_pending_dm_channels(pool: &Pool, user_id: Uuid) -> AppResult<Vec<Channel>> {
     let channels = sqlx::query_as::<_, Channel>(
         r#"
         SELECT c.* FROM channels c
@@ -2072,7 +2141,7 @@ pub async fn get_pending_dm_channels(pool: &PgPool, user_id: Uuid) -> AppResult<
 // ─── Mutual Friends / Servers ───────────────────────────
 
 pub async fn get_mutual_friends(
-    pool: &PgPool,
+    pool: &Pool,
     viewer_id: Uuid,
     target_id: Uuid,
 ) -> AppResult<Vec<MutualFriendInfo>> {
@@ -2102,7 +2171,7 @@ pub async fn get_mutual_friends(
 }
 
 pub async fn get_mutual_server_count(
-    pool: &PgPool,
+    pool: &Pool,
     viewer_id: Uuid,
     target_id: Uuid,
 ) -> AppResult<i64> {
@@ -2121,8 +2190,8 @@ pub async fn get_mutual_server_count(
     Ok(row.0)
 }
 
-pub async fn update_dm_privacy(pool: &PgPool, user_id: Uuid, dm_privacy: &str) -> AppResult<()> {
-    sqlx::query("UPDATE users SET dm_privacy = $2, updated_at = NOW() WHERE id = $1")
+pub async fn update_dm_privacy(pool: &Pool, user_id: Uuid, dm_privacy: &str) -> AppResult<()> {
+    sqlx::query("UPDATE users SET dm_privacy = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1")
         .bind(user_id)
         .bind(dm_privacy)
         .execute(pool)
@@ -2133,7 +2202,7 @@ pub async fn update_dm_privacy(pool: &PgPool, user_id: Uuid, dm_privacy: &str) -
 // ─── Bans ──────────────────────────────────────────────
 
 pub async fn create_ban(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
     reason: Option<&str>,
@@ -2151,7 +2220,7 @@ pub async fn create_ban(
     Ok(ban)
 }
 
-pub async fn remove_ban(pool: &PgPool, server_id: Uuid, user_id: Uuid) -> AppResult<()> {
+pub async fn remove_ban(pool: &Pool, server_id: Uuid, user_id: Uuid) -> AppResult<()> {
     sqlx::query("DELETE FROM bans WHERE server_id = $1 AND user_id = $2")
         .bind(server_id)
         .bind(user_id)
@@ -2160,7 +2229,7 @@ pub async fn remove_ban(pool: &PgPool, server_id: Uuid, user_id: Uuid) -> AppRes
     Ok(())
 }
 
-pub async fn list_bans(pool: &PgPool, server_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<crate::models::BanResponse>> {
+pub async fn list_bans(pool: &Pool, server_id: Uuid, limit: i64, offset: i64) -> AppResult<Vec<crate::models::BanResponse>> {
     let rows = sqlx::query_as::<_, (Uuid, Uuid, Option<String>, Uuid, chrono::DateTime<chrono::Utc>, String)>(
         "SELECT b.id, b.user_id, b.reason, b.banned_by, b.created_at, u.username \
          FROM bans b JOIN users u ON u.id = b.user_id \
@@ -2184,7 +2253,7 @@ pub async fn list_bans(pool: &PgPool, server_id: Uuid, limit: i64, offset: i64) 
     }).collect())
 }
 
-pub async fn is_banned(pool: &PgPool, server_id: Uuid, user_id: Uuid) -> AppResult<bool> {
+pub async fn is_banned(pool: &Pool, server_id: Uuid, user_id: Uuid) -> AppResult<bool> {
     let row: (bool,) = sqlx::query_as(
         "SELECT EXISTS(SELECT 1 FROM bans WHERE server_id = $1 AND user_id = $2)"
     )
@@ -2198,7 +2267,7 @@ pub async fn is_banned(pool: &PgPool, server_id: Uuid, user_id: Uuid) -> AppResu
 // ─── Pinned Messages ────────────────────────────────
 
 pub async fn pin_message(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     message_id: Uuid,
     pinned_by: Uuid,
@@ -2232,7 +2301,7 @@ pub async fn pin_message(
 }
 
 pub async fn unpin_message(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     message_id: Uuid,
 ) -> AppResult<bool> {
@@ -2247,7 +2316,7 @@ pub async fn unpin_message(
 }
 
 pub async fn get_pinned_messages(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
 ) -> AppResult<Vec<Message>> {
     let rows = sqlx::query_as::<_, Message>(
@@ -2266,7 +2335,7 @@ pub async fn get_pinned_messages(
 }
 
 pub async fn get_pinned_message_ids(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
 ) -> AppResult<Vec<Uuid>> {
     let rows: Vec<(Uuid,)> = sqlx::query_as(
@@ -2281,19 +2350,22 @@ pub async fn get_pinned_message_ids(
 // ─── Reports ────────────────────────────────────────
 
 pub async fn create_report(
-    pool: &PgPool,
+    pool: &Pool,
     reporter_id: Uuid,
     message_id: Uuid,
     channel_id: Uuid,
     reason: &str,
 ) -> AppResult<Report> {
     // Rate limit: max 5 reports per user per hour
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM reports WHERE reporter_id = $1 AND created_at > NOW() - INTERVAL '1 hour'"
-    )
-    .bind(reporter_id)
-    .fetch_one(pool)
-    .await?;
+    #[cfg(feature = "postgres")]
+    let count_sql = "SELECT COUNT(*) FROM reports WHERE reporter_id = $1 AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 hour'";
+    #[cfg(feature = "sqlite")]
+    let count_sql = "SELECT COUNT(*) FROM reports WHERE reporter_id = $1 AND created_at > datetime('now', '-1 hour')";
+
+    let count: (i64,) = sqlx::query_as(count_sql)
+        .bind(reporter_id)
+        .fetch_one(pool)
+        .await?;
     if count.0 >= 5 {
         return Err(AppError::Validation("You can only submit 5 reports per hour".into()));
     }
@@ -2318,7 +2390,7 @@ pub async fn create_report(
 
 /// Insert a system message (plaintext, not encrypted).
 pub async fn insert_system_message(
-    pool: &PgPool,
+    pool: &Pool,
     channel_id: Uuid,
     body: &str,
 ) -> AppResult<Message> {
@@ -2326,7 +2398,7 @@ pub async fn insert_system_message(
         r#"
         INSERT INTO messages (id, channel_id, sender_token, encrypted_body,
                              timestamp, has_attachments, message_type)
-        VALUES ($1, $2, $3, $4, NOW(), false, 'system')
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, false, 'system')
         RETURNING *
         "#,
     )
@@ -2342,7 +2414,7 @@ pub async fn insert_system_message(
 // ─── Server Nicknames ────────────────────────────────
 
 pub async fn update_member_nickname(
-    pool: &PgPool,
+    pool: &Pool,
     server_id: Uuid,
     user_id: Uuid,
     nickname: Option<&str>,
@@ -2361,7 +2433,7 @@ pub async fn update_member_nickname(
 // ─── Profile Key Distribution ───────────────────────
 
 pub async fn distribute_profile_keys_bulk(
-    pool: &PgPool,
+    pool: &Pool,
     from_user_id: Uuid,
     distributions: &[(Uuid, Vec<u8>)],
 ) -> AppResult<()> {
@@ -2372,7 +2444,7 @@ pub async fn distribute_profile_keys_bulk(
             VALUES ($1, $2, $3)
             ON CONFLICT (from_user_id, to_user_id)
             DO UPDATE SET encrypted_profile_key = EXCLUDED.encrypted_profile_key,
-                          created_at = NOW()
+                          created_at = CURRENT_TIMESTAMP
             "#,
         )
         .bind(from_user_id)
@@ -2385,7 +2457,7 @@ pub async fn distribute_profile_keys_bulk(
 }
 
 pub async fn get_profile_key(
-    pool: &PgPool,
+    pool: &Pool,
     from_user_id: Uuid,
     to_user_id: Uuid,
 ) -> AppResult<Option<ProfileKeyDistribution>> {
@@ -2405,7 +2477,7 @@ pub async fn get_profile_key(
 
 // ─── Custom Emojis ───────────────────────────────────
 
-pub async fn list_server_emojis(pool: &PgPool, server_id: Uuid) -> AppResult<Vec<CustomEmoji>> {
+pub async fn list_server_emojis(pool: &Pool, server_id: Uuid) -> AppResult<Vec<CustomEmoji>> {
     let emojis = sqlx::query_as::<_, CustomEmoji>(
         "SELECT * FROM custom_emojis WHERE server_id = $1 ORDER BY created_at",
     )
@@ -2415,7 +2487,7 @@ pub async fn list_server_emojis(pool: &PgPool, server_id: Uuid) -> AppResult<Vec
     Ok(emojis)
 }
 
-pub async fn get_emoji_by_id(pool: &PgPool, emoji_id: Uuid) -> AppResult<Option<CustomEmoji>> {
+pub async fn get_emoji_by_id(pool: &Pool, emoji_id: Uuid) -> AppResult<Option<CustomEmoji>> {
     let emoji = sqlx::query_as::<_, CustomEmoji>("SELECT * FROM custom_emojis WHERE id = $1")
         .bind(emoji_id)
         .fetch_optional(pool)
@@ -2424,7 +2496,7 @@ pub async fn get_emoji_by_id(pool: &PgPool, emoji_id: Uuid) -> AppResult<Option<
 }
 
 /// Returns (static_count, animated_count) for a server's custom emojis.
-pub async fn count_server_emojis(pool: &PgPool, server_id: Uuid) -> AppResult<(i64, i64)> {
+pub async fn count_server_emojis(pool: &Pool, server_id: Uuid) -> AppResult<(i64, i64)> {
     let row: (i64, i64) = sqlx::query_as(
         r#"
         SELECT
@@ -2441,7 +2513,7 @@ pub async fn count_server_emojis(pool: &PgPool, server_id: Uuid) -> AppResult<(i
 }
 
 pub async fn create_emoji(
-    pool: &PgPool,
+    pool: &Pool,
     id: Uuid,
     server_id: Uuid,
     name: &str,
@@ -2474,7 +2546,7 @@ pub async fn create_emoji(
 }
 
 /// Delete an emoji and return it (for storage cleanup).
-pub async fn delete_emoji(pool: &PgPool, emoji_id: Uuid) -> AppResult<Option<CustomEmoji>> {
+pub async fn delete_emoji(pool: &Pool, emoji_id: Uuid) -> AppResult<Option<CustomEmoji>> {
     let emoji = sqlx::query_as::<_, CustomEmoji>(
         "DELETE FROM custom_emojis WHERE id = $1 RETURNING *",
     )
@@ -2484,7 +2556,7 @@ pub async fn delete_emoji(pool: &PgPool, emoji_id: Uuid) -> AppResult<Option<Cus
     Ok(emoji)
 }
 
-pub async fn rename_emoji(pool: &PgPool, emoji_id: Uuid, new_name: &str) -> AppResult<CustomEmoji> {
+pub async fn rename_emoji(pool: &Pool, emoji_id: Uuid, new_name: &str) -> AppResult<CustomEmoji> {
     let emoji = sqlx::query_as::<_, CustomEmoji>(
         r#"
         UPDATE custom_emojis SET name = $2 WHERE id = $1 RETURNING *
@@ -2500,7 +2572,7 @@ pub async fn rename_emoji(pool: &PgPool, emoji_id: Uuid, new_name: &str) -> AppR
 
 // ─── Servers (ownership) ────────────────────────────
 
-pub async fn get_servers_owned_by(pool: &PgPool, user_id: Uuid) -> AppResult<Vec<Server>> {
+pub async fn get_servers_owned_by(pool: &Pool, user_id: Uuid) -> AppResult<Vec<Server>> {
     let servers = sqlx::query_as::<_, Server>(
         "SELECT * FROM servers WHERE owner_id = $1",
     )
@@ -2508,4 +2580,340 @@ pub async fn get_servers_owned_by(pool: &PgPool, user_id: Uuid) -> AppResult<Vec
     .fetch_all(pool)
     .await?;
     Ok(servers)
+}
+
+// ─── Member Timeouts ─────────────────────────────────
+
+pub async fn set_member_timeout(
+    pool: &Pool,
+    server_id: Uuid,
+    user_id: Uuid,
+    timed_out_until: Option<DateTime<Utc>>,
+) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE server_members SET timed_out_until = $1 WHERE server_id = $2 AND user_id = $3",
+    )
+    .bind(timed_out_until)
+    .bind(server_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn is_member_timed_out(
+    pool: &Pool,
+    server_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<bool> {
+    let row: (bool,) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM server_members WHERE server_id = $1 AND user_id = $2 AND timed_out_until > NOW())",
+    )
+    .bind(server_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.0)
+}
+
+// ─── Audit Log ───────────────────────────────────────
+
+pub async fn insert_audit_log(
+    pool: &Pool,
+    server_id: Uuid,
+    actor_id: Uuid,
+    action: &str,
+    target_type: Option<&str>,
+    target_id: Option<Uuid>,
+    changes: Option<&serde_json::Value>,
+    reason: Option<&str>,
+) -> AppResult<AuditLogEntry> {
+    let entry = sqlx::query_as::<_, AuditLogEntry>(
+        r#"
+        INSERT INTO audit_log (server_id, actor_id, action, target_type, target_id, changes, reason)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING *
+        "#,
+    )
+    .bind(server_id)
+    .bind(actor_id)
+    .bind(action)
+    .bind(target_type)
+    .bind(target_id)
+    .bind(changes)
+    .bind(reason)
+    .fetch_one(pool)
+    .await?;
+    Ok(entry)
+}
+
+pub async fn get_audit_log(
+    pool: &Pool,
+    server_id: Uuid,
+    limit: i64,
+    before: Option<DateTime<Utc>>,
+) -> AppResult<Vec<AuditLogResponse>> {
+    let rows: Vec<(Uuid, Uuid, String, String, Option<String>, Option<Uuid>, Option<serde_json::Value>, Option<String>, DateTime<Utc>)> = if let Some(before_ts) = before {
+        sqlx::query_as(
+            r#"
+            SELECT al.id, al.actor_id, u.username, al.action, al.target_type, al.target_id, al.changes, al.reason, al.created_at
+            FROM audit_log al
+            INNER JOIN users u ON u.id = al.actor_id
+            WHERE al.server_id = $1 AND al.created_at < $2
+            ORDER BY al.created_at DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(server_id)
+        .bind(before_ts)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query_as(
+            r#"
+            SELECT al.id, al.actor_id, u.username, al.action, al.target_type, al.target_id, al.changes, al.reason, al.created_at
+            FROM audit_log al
+            INNER JOIN users u ON u.id = al.actor_id
+            WHERE al.server_id = $1
+            ORDER BY al.created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(server_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, actor_id, actor_username, action, target_type, target_id, changes, reason, created_at)| {
+            AuditLogResponse {
+                id,
+                actor_id,
+                actor_username,
+                action,
+                target_type,
+                target_id,
+                changes,
+                reason,
+                created_at,
+            }
+        })
+        .collect())
+}
+
+// ─── Bulk Message Delete ─────────────────────────────
+
+pub async fn bulk_delete_messages(
+    pool: &Pool,
+    channel_id: Uuid,
+    message_ids: &[Uuid],
+) -> AppResult<Vec<Uuid>> {
+    // Delete child rows first (no FK cascades on partitioned messages table)
+    sqlx::query("DELETE FROM attachments WHERE message_id = ANY($1)")
+        .bind(message_ids)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM reactions WHERE message_id = ANY($1)")
+        .bind(message_ids)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM pinned_messages WHERE message_id = ANY($1)")
+        .bind(message_ids)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM reports WHERE message_id = ANY($1)")
+        .bind(message_ids)
+        .execute(pool)
+        .await?;
+
+    // Delete messages and return IDs that were actually deleted
+    let deleted: Vec<(Uuid,)> = sqlx::query_as(
+        "DELETE FROM messages WHERE id = ANY($1) AND channel_id = $2 RETURNING id",
+    )
+    .bind(message_ids)
+    .bind(channel_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(deleted.into_iter().map(|(id,)| id).collect())
+}
+
+// ─── Read States ─────────────────────────────────────
+
+/// Upsert the user's read position in a channel (sets last_read_at = NOW()).
+pub async fn upsert_read_state(
+    pool: &Pool,
+    user_id: Uuid,
+    channel_id: Uuid,
+) -> AppResult<ReadState> {
+    let state = sqlx::query_as::<_, ReadState>(
+        r#"
+        INSERT INTO read_states (user_id, channel_id, last_read_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id, channel_id) DO UPDATE
+        SET last_read_at = CURRENT_TIMESTAMP
+        RETURNING *
+        "#,
+    )
+    .bind(user_id)
+    .bind(channel_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(state)
+}
+
+/// Bulk fetch read states for a user across multiple channels.
+pub async fn get_user_read_states(
+    pool: &Pool,
+    user_id: Uuid,
+    channel_ids: &[Uuid],
+) -> AppResult<Vec<ReadState>> {
+    if channel_ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let states = sqlx::query_as::<_, ReadState>(
+        "SELECT * FROM read_states WHERE user_id = $1 AND channel_id = ANY($2)",
+    )
+    .bind(user_id)
+    .bind(channel_ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(states)
+}
+
+/// Get the last message ID + timestamp for each of the given channels.
+pub async fn get_channel_last_message_ids(
+    pool: &Pool,
+    channel_ids: &[Uuid],
+) -> AppResult<Vec<(Uuid, Uuid, DateTime<Utc>)>> {
+    if channel_ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let rows: Vec<(Uuid, Uuid, DateTime<Utc>)> = sqlx::query_as(
+        r#"
+        SELECT DISTINCT ON (channel_id) channel_id, id, timestamp
+        FROM messages
+        WHERE channel_id = ANY($1)
+          AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+        ORDER BY channel_id, timestamp DESC
+        "#,
+    )
+    .bind(channel_ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Get unread message counts for a user across multiple channels.
+pub async fn get_user_unread_counts(
+    pool: &Pool,
+    user_id: Uuid,
+    channel_ids: &[Uuid],
+) -> AppResult<Vec<(Uuid, i64)>> {
+    if channel_ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let rows: Vec<(Uuid, i64)> = sqlx::query_as(
+        r#"
+        SELECT m.channel_id, COUNT(*)
+        FROM messages m
+        LEFT JOIN read_states rs ON rs.user_id = $1 AND rs.channel_id = m.channel_id
+        WHERE m.channel_id = ANY($2)
+          AND (rs.last_read_at IS NULL OR m.timestamp > rs.last_read_at)
+          AND (m.expires_at IS NULL OR m.expires_at > CURRENT_TIMESTAMP)
+        GROUP BY m.channel_id
+        "#,
+    )
+    .bind(user_id)
+    .bind(channel_ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+// ─── Admin Dashboard ────────────────────────────────────
+
+pub async fn count_all_users(pool: &Pool) -> AppResult<i64> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
+}
+
+pub async fn count_all_servers(pool: &Pool) -> AppResult<i64> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM servers")
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
+}
+
+pub async fn count_all_channels(pool: &Pool) -> AppResult<i64> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM channels")
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
+}
+
+pub async fn count_all_messages(pool: &Pool) -> AppResult<i64> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM messages")
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
+}
+
+pub async fn search_users_admin(
+    pool: &Pool,
+    search: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> AppResult<Vec<AdminUserResponse>> {
+    let rows = sqlx::query_as::<_, AdminUserResponse>(
+        r#"
+        SELECT u.id, u.username, u.display_name, u.avatar_url,
+               u.created_at, u.is_instance_admin,
+               COALESCE(sc.cnt, 0) AS server_count
+        FROM users u
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) AS cnt FROM server_members GROUP BY user_id
+        ) sc ON sc.user_id = u.id
+        WHERE ($1::TEXT IS NULL OR u.username ILIKE '%' || $1 || '%'
+               OR u.display_name ILIKE '%' || $1 || '%')
+        ORDER BY u.created_at DESC
+        LIMIT $2 OFFSET $3
+        "#,
+    )
+    .bind(search)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn set_instance_admin(pool: &Pool, user_id: Uuid, is_admin: bool) -> AppResult<()> {
+    sqlx::query("UPDATE users SET is_instance_admin = $1 WHERE id = $2")
+        .bind(is_admin)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_user_account(pool: &Pool, user_id: Uuid) -> AppResult<()> {
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn is_first_user(pool: &Pool) -> AppResult<bool> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+        .fetch_one(pool)
+        .await?;
+    // Count is 1 when the user just created is the only one
+    Ok(row.0 <= 1)
 }

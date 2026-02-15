@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFriendsStore } from "../store/friends.js";
 import { usePresenceStore } from "../store/presence.js";
 import { useChatStore } from "../store/chat.js";
 import ConfirmDialog from "./ConfirmDialog.js";
+import Avatar from "./Avatar.js";
+import InviteToServerModal from "./InviteToServerModal.js";
+import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
 import type { FriendResponse } from "@haven/core";
 
 type Tab = "online" | "all" | "pending" | "blocked";
@@ -19,15 +22,27 @@ export default function FriendsList() {
   const fetchPresence = usePresenceStore((s) => s.fetchPresence);
   const blockedUserIds = useChatStore((s) => s.blockedUserIds);
 
+  const servers = useChatStore((s) => s.servers);
+
   const [tab, setTab] = useState<Tab>("online");
   const [addInput, setAddInput] = useState("");
   const [addError, setAddError] = useState("");
   const [addSuccess, setAddSuccess] = useState("");
   const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ friend: FriendResponse; x: number; y: number } | null>(null);
+  const [inviteTarget, setInviteTarget] = useState<string | null>(null);
 
   useEffect(() => {
     loadFriends();
   }, []);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [contextMenu]);
 
   // Fetch presence for all accepted friends
   useEffect(() => {
@@ -157,12 +172,18 @@ export default function FriendsList() {
                 key={friend.id}
                 friend={friend}
                 isOnline={friendOnline}
+                hasServers={servers.length > 0}
                 onAccept={() => acceptRequest(friend.id)}
                 onDecline={() => declineRequest(friend.id)}
                 onRemove={() => setConfirmRemove({
                   id: friend.id,
                   name: friend.display_name || friend.username,
                 })}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setContextMenu({ friend, x: e.clientX, y: e.clientY });
+                }}
+                onInviteToServer={() => setInviteTarget(friend.username)}
               />
             );
           })}
@@ -182,6 +203,38 @@ export default function FriendsList() {
           onCancel={() => setConfirmRemove(null)}
         />
       )}
+
+      {contextMenu && (
+        <FriendContextMenu
+          friend={contextMenu.friend}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          hasServers={servers.length > 0}
+          onMessage={() => {
+            useChatStore.getState().startDm(contextMenu.friend.username).catch(() => {});
+            setContextMenu(null);
+          }}
+          onInviteToServer={() => {
+            setInviteTarget(contextMenu.friend.username);
+            setContextMenu(null);
+          }}
+          onRemove={() => {
+            setConfirmRemove({
+              id: contextMenu.friend.id,
+              name: contextMenu.friend.display_name || contextMenu.friend.username,
+            });
+            setContextMenu(null);
+          }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {inviteTarget && (
+        <InviteToServerModal
+          targetUsername={inviteTarget}
+          onClose={() => setInviteTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -189,24 +242,30 @@ export default function FriendsList() {
 function FriendRow({
   friend,
   isOnline,
+  hasServers,
   onAccept,
   onDecline,
   onRemove,
+  onContextMenu,
+  onInviteToServer,
 }: {
   friend: FriendResponse;
   isOnline: boolean;
+  hasServers: boolean;
   onAccept: () => void;
   onDecline: () => void;
   onRemove: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  onInviteToServer: () => void;
 }) {
   const startDm = useChatStore((s) => s.startDm);
   const displayName = friend.display_name || friend.username;
 
   return (
-    <div className="friend-row">
+    <div className="friend-row" onContextMenu={onContextMenu}>
       <div className="friend-row-left">
         <div className="friend-avatar">
-          {displayName.charAt(0).toUpperCase()}
+          <Avatar avatarUrl={friend.avatar_url} name={displayName} size={32} />
           <span className={`friend-avatar-status ${isOnline ? "online" : "offline"}`} />
         </div>
         <div className="friend-info">
@@ -245,7 +304,7 @@ function FriendRow({
               title="Message"
               aria-label="Send message"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" />
               </svg>
             </button>
@@ -264,6 +323,80 @@ function FriendRow({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function FriendContextMenu({
+  friend,
+  x,
+  y,
+  hasServers,
+  onMessage,
+  onInviteToServer,
+  onRemove,
+  onClose,
+}: {
+  friend: FriendResponse;
+  x: number;
+  y: number;
+  hasServers: boolean;
+  onMessage: () => void;
+  onInviteToServer: () => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { handleKeyDown } = useMenuKeyboard(menuRef);
+
+  useEffect(() => {
+    menuRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const isAccepted = friend.status === "accepted";
+
+  return (
+    <div
+      ref={menuRef}
+      className="channel-context-menu"
+      style={{ top: Math.min(y, window.innerHeight - 200), left: Math.min(x, window.innerWidth - 200) }}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={handleKeyDown}
+      role="menu"
+      aria-label="Friend options"
+      tabIndex={-1}
+    >
+      {isAccepted && (
+        <button role="menuitem" tabIndex={-1} onClick={onMessage}>
+          Message
+        </button>
+      )}
+      {isAccepted && hasServers && (
+        <button role="menuitem" tabIndex={-1} onClick={onInviteToServer}>
+          Invite to Server
+        </button>
+      )}
+      {isAccepted && (
+        <>
+          <div className="context-divider" role="separator" />
+          <button role="menuitem" tabIndex={-1} className="danger" onClick={onRemove}>
+            Remove Friend
+          </button>
+        </>
+      )}
+      {friend.status === "pending" && (
+        <button role="menuitem" tabIndex={-1} className="danger" onClick={onRemove}>
+          {friend.is_incoming ? "Decline Request" : "Cancel Request"}
+        </button>
+      )}
     </div>
   );
 }

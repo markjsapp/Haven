@@ -49,6 +49,14 @@ pub async fn ban_member(
         .await?
         .ok_or(AppError::NotFound("User not found".into()))?;
 
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "member_ban",
+        Some("member"), Some(target_user_id),
+        Some(&serde_json::json!({ "username": &target.username })),
+        body.reason.as_deref(),
+    ).await;
+
     Ok(Json(BanResponse {
         id: ban.id,
         user_id: ban.user_id,
@@ -75,6 +83,12 @@ pub async fn revoke_ban(
     .await?;
 
     queries::remove_ban(state.db.write(), server_id, target_user_id).await?;
+
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "member_unban",
+        Some("member"), Some(target_user_id), None, None,
+    ).await;
 
     Ok(Json(serde_json::json!({ "unbanned": true })))
 }

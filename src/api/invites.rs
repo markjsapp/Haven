@@ -250,6 +250,13 @@ pub async fn kick_member(
         }
     }
 
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "member_kick",
+        Some("member"), Some(target_user_id),
+        Some(&serde_json::json!({ "username": target_name })), None,
+    ).await;
+
     Ok(Json(serde_json::json!({ "kicked": true })))
 }
 

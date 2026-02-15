@@ -1194,28 +1194,57 @@ function AppearanceTab() {
     },
   ];
 
+  const customCss = useUiStore((s) => s.customCss);
+  const setCustomCss = useUiStore((s) => s.setCustomCss);
+
   return (
-    <div className="settings-section">
-      <div className="settings-section-title">Theme</div>
-      <p className="settings-description">Choose how Haven looks for you.</p>
-      <div className="theme-picker">
-        {themes.map((t) => (
-          <button
-            key={t.value}
-            className={`theme-card ${theme === t.value ? "selected" : ""}`}
-            onClick={() => setTheme(t.value)}
-            aria-pressed={theme === t.value}
-          >
-            <div className="theme-preview">
-              {t.colors.map((c, i) => (
-                <div key={i} className="theme-swatch" style={{ background: c }} />
-              ))}
-            </div>
-            <span className="theme-label">{t.label}</span>
-          </button>
-        ))}
+    <>
+      <div className="settings-section">
+        <div className="settings-section-title">Theme</div>
+        <p className="settings-description">Choose how Haven looks for you.</p>
+        <div className="theme-picker">
+          {themes.map((t) => (
+            <button
+              key={t.value}
+              className={`theme-card ${theme === t.value ? "selected" : ""}`}
+              onClick={() => setTheme(t.value)}
+              aria-pressed={theme === t.value}
+            >
+              <div className="theme-preview">
+                {t.colors.map((c, i) => (
+                  <div key={i} className="theme-swatch" style={{ background: c }} />
+                ))}
+              </div>
+              <span className="theme-label">{t.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
-    </div>
+      <div className="settings-section">
+        <div className="settings-section-title">Custom CSS</div>
+        <p className="settings-description">
+          Advanced: paste your own CSS to customize Haven's appearance. Changes apply immediately.
+          For security, <code>@import</code>, <code>url()</code>, and <code>expression()</code> are stripped.
+        </p>
+        <textarea
+          className="settings-input custom-css-textarea"
+          value={customCss}
+          onChange={(e) => setCustomCss(e.target.value)}
+          placeholder={`/* Example: change the brand color */\n:root {\n  --brand: #ff6b6b;\n}`}
+          spellCheck={false}
+          rows={8}
+        />
+        {customCss && (
+          <button
+            className="btn-ghost"
+            style={{ marginTop: 8 }}
+            onClick={() => setCustomCss("")}
+          >
+            Clear Custom CSS
+          </button>
+        )}
+      </div>
+    </>
   );
 }
 

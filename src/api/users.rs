@@ -46,7 +46,7 @@ pub async fn get_profile(
     Path(user_id): Path<Uuid>,
     Query(query): Query<ProfileQuery>,
 ) -> AppResult<Json<UserProfileResponse>> {
-    let user = queries::find_user_by_id_cached(state.db.read(), &mut state.redis.clone(), user_id)
+    let user = queries::find_user_by_id_cached(state.db.read(), &mut state.redis.clone(), &state.memory, user_id)
         .await?
         .ok_or(AppError::UserNotFound)?;
 
@@ -145,7 +145,7 @@ pub async fn update_profile(
     .await?;
 
     // Invalidate user cache
-    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:user:{}", user_id)).await;
+    crate::cache::invalidate(state.redis.clone().as_mut(), &state.memory, &format!("haven:user:{}", user_id)).await;
 
     Ok(Json(UserPublic::from(user)))
 }
@@ -187,7 +187,7 @@ pub async fn upload_avatar(
     let user = queries::update_user_avatar(state.db.write(), user_id, &avatar_url).await?;
 
     // Invalidate user cache
-    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:user:{}", user_id)).await;
+    crate::cache::invalidate(state.redis.clone().as_mut(), &state.memory, &format!("haven:user:{}", user_id)).await;
 
     Ok(Json(UserPublic::from(user)))
 }
@@ -294,7 +294,7 @@ pub async fn upload_banner(
     let banner_url = format!("/api/v1/users/{}/banner", user_id);
     let user = queries::update_user_banner(state.db.write(), user_id, &banner_url).await?;
 
-    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:user:{}", user_id)).await;
+    crate::cache::invalidate(state.redis.clone().as_mut(), &state.memory, &format!("haven:user:{}", user_id)).await;
 
     Ok(Json(UserPublic::from(user)))
 }

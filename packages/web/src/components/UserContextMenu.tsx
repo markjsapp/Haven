@@ -6,6 +6,7 @@ import { useUiStore } from "../store/ui.js";
 import { Permission, type UserProfileResponse } from "@haven/core";
 import { usePermissions } from "../hooks/usePermissions.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
+import InviteToServerModal from "./InviteToServerModal.js";
 
 interface Props {
   userId: string;
@@ -31,12 +32,20 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
   const canBan = can(Permission.BAN_MEMBERS);
   const canManageRoles = can(Permission.MANAGE_ROLES);
   const canManageServer = can(Permission.MANAGE_SERVER);
+  const canModerate = can(Permission.MODERATE_MEMBERS);
 
   // Note state
   const existingNote = useUiStore((s) => s.userNotes[userId] ?? "");
   const setUserNote = useUiStore((s) => s.setUserNote);
   const [noteText, setNoteText] = useState(existingNote);
   const [noteOpen, setNoteOpen] = useState(false);
+
+  // Invite to server state
+  const servers = useChatStore((s) => s.servers);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+
+  // Timeout state
+  const [timeoutOpen, setTimeoutOpen] = useState(false);
 
   useEffect(() => {
     api.getUserProfile(userId, serverId).then(setProfile).catch(() => {});
@@ -127,6 +136,22 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
     } catch {}
   }
 
+  async function handleTimeout(seconds: number) {
+    if (!serverId) return;
+    try {
+      await api.timeoutMember(serverId, userId, seconds);
+      onClose();
+    } catch {}
+  }
+
+  async function handleRemoveTimeout() {
+    if (!serverId) return;
+    try {
+      await api.removeTimeout(serverId, userId);
+      onClose();
+    } catch {}
+  }
+
   return (
     <div className="user-context-menu" ref={ref} style={style} role="menu" aria-label="User options" tabIndex={-1} onKeyDown={handleKeyDown}>
       <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => { onOpenProfile(); onClose(); }}>
@@ -136,6 +161,12 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
       {!isSelf && (
         <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={handleMessage}>
           Message
+        </button>
+      )}
+
+      {!isSelf && servers.length > 0 && (
+        <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => setShowInviteModal(true)}>
+          Invite to Server
         </button>
       )}
 
@@ -215,9 +246,32 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
             </button>
           )}
 
-          {serverId && (canKick || canBan) && (
+          {serverId && (canKick || canBan || canModerate) && (
             <>
               <div className="user-context-divider" role="separator" />
+              {canModerate && (
+                <>
+                  <button
+                    className="user-context-item user-context-danger"
+                    role="menuitem"
+                    tabIndex={-1}
+                    onClick={() => setTimeoutOpen(!timeoutOpen)}
+                  >
+                    Timeout
+                  </button>
+                  {timeoutOpen && (
+                    <div className="context-timeout-options">
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(60)}>60 seconds</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(300)}>5 minutes</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(600)}>10 minutes</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(3600)}>1 hour</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(86400)}>1 day</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(604800)}>1 week</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={handleRemoveTimeout}>Remove Timeout</button>
+                    </div>
+                  )}
+                </>
+              )}
               {canKick && (
                 <button className="user-context-item user-context-danger" role="menuitem" tabIndex={-1} onClick={handleKick}>
                   Kick
@@ -236,6 +290,13 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
             {profile?.is_blocked ? "Unblock" : "Block"}
           </button>
         </>
+      )}
+
+      {showInviteModal && profile && (
+        <InviteToServerModal
+          targetUsername={profile.username}
+          onClose={() => { setShowInviteModal(false); onClose(); }}
+        />
       )}
     </div>
   );

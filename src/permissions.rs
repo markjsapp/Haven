@@ -18,10 +18,21 @@ pub const ATTACH_FILES: i64          = 1 << 13;
 pub const READ_MESSAGE_HISTORY: i64  = 1 << 14;
 pub const MANAGE_EMOJIS: i64         = 1 << 15;
 pub const MUTE_MEMBERS: i64         = 1 << 16;
+pub const STREAM: i64               = 1 << 17;
+pub const PRIORITY_SPEAKER: i64     = 1 << 18;
+pub const USE_VOICE_ACTIVITY: i64   = 1 << 19;
+pub const USE_EXTERNAL_EMOJIS: i64  = 1 << 20;
+pub const MANAGE_WEBHOOKS: i64      = 1 << 21;
+pub const VIEW_AUDIT_LOG: i64       = 1 << 22;
+pub const MANAGE_EVENTS: i64        = 1 << 23;
+pub const MANAGE_THREADS: i64       = 1 << 24;
+pub const MODERATE_MEMBERS: i64     = 1 << 25;
+pub const MANAGE_NICKNAMES: i64     = 1 << 26;
 
 /// Default permissions for the @everyone role.
 pub const DEFAULT_PERMISSIONS: i64 =
-    VIEW_CHANNELS | SEND_MESSAGES | ADD_REACTIONS | READ_MESSAGE_HISTORY | CREATE_INVITES | ATTACH_FILES;
+    VIEW_CHANNELS | SEND_MESSAGES | ADD_REACTIONS | READ_MESSAGE_HISTORY
+    | CREATE_INVITES | ATTACH_FILES | STREAM | USE_VOICE_ACTIVITY | USE_EXTERNAL_EMOJIS;
 
 /// Check if a permission bitfield has a specific permission.
 #[inline]

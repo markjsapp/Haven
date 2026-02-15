@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getServerUrl } from "../lib/serverUrl";
 import {
   HavenApi,
   initSodium,
@@ -16,6 +17,7 @@ import {
 } from "@haven/core";
 import { clearCryptoState } from "../lib/crypto.js";
 import { checkBackupStatus, clearCachedPhrase } from "../lib/backup.js";
+import { initNotifications } from "../lib/notifications.js";
 
 const PREKEY_BATCH_SIZE = 20;
 
@@ -51,6 +53,39 @@ function clearPersistedIdentityKey(userId: string): void {
   localStorage.removeItem(IDENTITY_KEY_PREFIX + userId);
 }
 
+// ─── Persistent Signed PreKey Storage ────────────────
+// Signed prekeys MUST survive page reloads. If regenerated on every login,
+// pending X3DH messages encrypted with the old signed prekey can't be decrypted
+// (the responder would use a different DH key, producing a different shared secret).
+
+const SIGNED_PREKEY_PREFIX = "haven:signedPreKey:";
+
+export function persistSignedPreKey(userId: string, spk: SignedPreKey): void {
+  const data = JSON.stringify({
+    publicKey: toBase64(spk.keyPair.publicKey),
+    privateKey: toBase64(spk.keyPair.privateKey),
+    signature: toBase64(spk.signature),
+  });
+  localStorage.setItem(SIGNED_PREKEY_PREFIX + userId, data);
+}
+
+function loadPersistedSignedPreKey(userId: string): SignedPreKey | null {
+  const raw = localStorage.getItem(SIGNED_PREKEY_PREFIX + userId);
+  if (!raw) return null;
+  try {
+    const { publicKey, privateKey, signature } = JSON.parse(raw);
+    return {
+      keyPair: {
+        publicKey: fromBase64(publicKey),
+        privateKey: fromBase64(privateKey),
+      },
+      signature: fromBase64(signature),
+    };
+  } catch {
+    return null;
+  }
+}
+
 interface AuthState {
   user: UserPublic | null;
   api: HavenApi;
@@ -70,7 +105,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  api: new HavenApi({ baseUrl: window.location.origin }),
+  api: new HavenApi({ baseUrl: getServerUrl() }),
   store: new MemoryStore(),
   identityKeyPair: null,
   signedPreKey: null,
@@ -81,6 +116,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   async init() {
     if (get().initialized) return;
     await initSodium();
+    await initNotifications();
     set({ initialized: true });
   },
 
@@ -107,8 +143,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       one_time_prekeys: keys.one_time_prekeys,
     });
 
-    // Persist identity key to localStorage so it survives page reloads
+    // Persist keys to localStorage so they survive page reloads
     persistIdentityKey(res.user.id, identity);
+    persistSignedPreKey(res.user.id, signedPre);
 
     await store.saveIdentityKeyPair(identity);
     await store.saveSignedPreKey(signedPre);
@@ -160,8 +197,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       identityChanged = true;
     }
 
-    // Always generate fresh prekeys (they're meant to be rotated)
-    const signedPre = generateSignedPreKey(identity);
+    // Reuse persisted signed prekey if identity key hasn't changed.
+    // Generating a new signed prekey on every login breaks pending X3DH
+    // messages — the responder would use a different DH key, producing a
+    // different shared secret and causing decryption failure.
+    let signedPre = identityChanged ? null : loadPersistedSignedPreKey(res.user.id);
+    if (!signedPre) {
+      signedPre = generateSignedPreKey(identity);
+      persistSignedPreKey(res.user.id, signedPre);
+    }
+
+    // Always generate fresh one-time prekeys (they're consumed on use).
     const oneTimeKeys = generateOneTimePreKeys(PREKEY_BATCH_SIZE);
 
     const { store } = get();
@@ -172,8 +218,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const keys = prepareRegistrationKeys(identity, signedPre, oneTimeKeys);
 
     if (identityChanged) {
-      // New identity key — must update everything including identity key,
-      // and clear stale crypto state
+      // New identity key — must update everything and clear stale crypto state
       clearCryptoState();
       await Promise.all([
         api.updateKeys({
@@ -181,17 +226,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           signed_prekey: keys.signed_prekey,
           signed_prekey_signature: keys.signed_prekey_signature,
         }),
-        api.uploadPreKeys({ prekeys: keys.one_time_prekeys }),
+        // Clear stale OTPs (whose private keys are lost) before uploading fresh ones
+        api.clearPreKeys().then(() =>
+          api.uploadPreKeys({ prekeys: keys.one_time_prekeys }),
+        ),
       ]);
     } else {
-      // Same identity key — only refresh prekeys (signed + one-time)
+      // Same identity key — reuse signed prekey, refresh one-time prekeys.
+      // Clear stale OTPs from previous sessions before uploading fresh ones.
       await Promise.all([
         api.updateKeys({
           identity_key: keys.identity_key,
           signed_prekey: keys.signed_prekey,
           signed_prekey_signature: keys.signed_prekey_signature,
         }),
-        api.uploadPreKeys({ prekeys: keys.one_time_prekeys }),
+        api.clearPreKeys().then(() =>
+          api.uploadPreKeys({ prekeys: keys.one_time_prekeys }),
+        ),
       ]);
     }
 
@@ -225,3 +276,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // so re-login on the same browser reuses it.
   },
 }));
+
+/** Convenience selector: is the current user an instance admin? */
+export const useIsAdmin = () => useAuthStore((s) => s.user?.is_instance_admin === true);

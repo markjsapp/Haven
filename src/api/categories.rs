@@ -170,5 +170,6 @@ pub async fn set_channel_category(
         created_at: updated.created_at,
         category_id: updated.category_id,
         dm_status: updated.dm_status,
+        last_message_id: None,
     }))
 }

@@ -8,12 +8,12 @@ use axum::{
 use dashmap::DashMap;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use sqlx::PgPool;
+use haven_backend::db::Pool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
 use base64::Engine;
-use haven_backend::{build_router, config::AppConfig, AppState};
+use haven_backend::{build_router, config::AppConfig, memory_store::MemoryStore, middleware::UserRateLimiter, AppState};
 
 /// Test helper that wraps a fully-built Haven router.
 ///
@@ -25,7 +25,7 @@ pub struct TestApp {
 
 impl TestApp {
     /// Build a TestApp from the pool provided by `#[sqlx::test]`.
-    pub async fn new(pool: PgPool) -> Self {
+    pub async fn new(pool: Pool) -> Self {
         let config = AppConfig {
             host: "127.0.0.1".into(),
             port: 0,
@@ -55,6 +55,13 @@ impl TestApp {
             livekit_url: String::new(),
             livekit_api_key: String::new(),
             livekit_api_secret: String::new(),
+            livekit_bundled: false,
+            livekit_port: 7880,
+            tls_enabled: false,
+            tls_port: 8443,
+            tls_cert_path: "./data/certs/cert.pem".into(),
+            tls_key_path: "./data/certs/key.pem".into(),
+            tls_auto_generate: false,
         };
 
         std::fs::create_dir_all(&config.storage_dir).ok();
@@ -74,13 +81,17 @@ impl TestApp {
 
         let state = AppState {
             db: haven_backend::db::DbPools::from_single(pool),
-            redis,
+            redis: Some(redis),
             config,
             storage_key,
             storage,
             connections: Arc::new(DashMap::new()),
             channel_broadcasts: Arc::new(DashMap::new()),
             pubsub_subscriptions: haven_backend::pubsub::empty_subscriptions(),
+            memory: MemoryStore::new(),
+            ws_rate_limiter: UserRateLimiter::new(1000, 10),
+            api_rate_limiter: UserRateLimiter::new(1000, 60),
+            sessions: Arc::new(DashMap::new()),
         };
 
         TestApp { state }

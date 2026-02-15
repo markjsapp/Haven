@@ -2,15 +2,26 @@ import { useCallback, useEffect, useState } from "react";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
+  VideoTrack,
   useLocalParticipant,
   useRemoteParticipants,
   useIsSpeaking,
+  useTracks,
 } from "@livekit/components-react";
-import { Track } from "livekit-client";
-import { useVoiceStore } from "../store/voice.js";
+import { Track, ScreenSharePresets, type VideoPreset } from "livekit-client";
+import type { TrackReference } from "@livekit/components-core";
+import { useVoiceStore, type ScreenShareQuality } from "../store/voice.js";
 import { useAuthStore } from "../store/auth.js";
 import Avatar from "./Avatar.js";
 import VoiceContextMenu from "./VoiceContextMenu.js";
+
+const SCREEN_SHARE_PRESET_MAP: Record<ScreenShareQuality, VideoPreset> = {
+  "360p": ScreenSharePresets.h360fps15,
+  "720p": ScreenSharePresets.h720fps15,
+  "720p60": ScreenSharePresets.h720fps30,
+  "1080p": ScreenSharePresets.h1080fps15,
+  "1080p60": ScreenSharePresets.h1080fps30,
+};
 
 interface VoiceRoomProps {
   channelId: string;
@@ -47,6 +58,14 @@ export default function VoiceRoom({ channelId, channelName, serverId }: VoiceRoo
     leaveVoice();
   }, [leaveVoice]);
 
+  // Auto-disconnect voice when window/tab is closed or page is navigated away
+  useEffect(() => {
+    if (!isConnected) return;
+    const handler = () => { leaveVoice(); };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isConnected, leaveVoice]);
+
   // If we have a token and URL, render LiveKitRoom
   if (livekitToken && livekitUrl && isConnected) {
     return (
@@ -58,6 +77,8 @@ export default function VoiceRoom({ channelId, channelName, serverId }: VoiceRoo
           audio={!isMuted}
           video={false}
           options={{
+            dynacast: true,
+            adaptiveStream: true,
             audioCaptureDefaults: {
               deviceId: inputDeviceId || undefined,
               echoCancellation,
@@ -140,7 +161,10 @@ interface RoomContentProps {
 function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: RoomContentProps) {
   const { localParticipant } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
-  const { toggleMute, toggleDeafen, leaveVoice, participants, userVolumes } = useVoiceStore();
+  const {
+    toggleMute, toggleDeafen, leaveVoice, participants, userVolumes,
+    screenSharePreset, setScreenSharePreset, isScreenSharing, setIsScreenSharing,
+  } = useVoiceStore();
   const user = useAuthStore((s) => s.user);
 
   const [contextMenu, setContextMenu] = useState<{
@@ -149,6 +173,21 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
     serverDeafened: boolean;
     position: { x: number; y: number };
   } | null>(null);
+
+  // Screen share tracks from all participants (filter out placeholders)
+  const allScreenShareTracks = useTracks([Track.Source.ScreenShare]);
+  const screenShareTracks = allScreenShareTracks.filter(
+    (t): t is TrackReference => t.publication !== undefined,
+  );
+  const [focusedScreenIndex, setFocusedScreenIndex] = useState(0);
+  const hasScreenShares = screenShareTracks.length > 0;
+
+  // Clamp focused index when streams change
+  useEffect(() => {
+    if (focusedScreenIndex >= screenShareTracks.length) {
+      setFocusedScreenIndex(Math.max(0, screenShareTracks.length - 1));
+    }
+  }, [screenShareTracks.length, focusedScreenIndex]);
 
   // Sync mute state to LiveKit
   useEffect(() => {
@@ -162,6 +201,20 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
       rp.setVolume(vol / 100);
     }
   }, [remoteParticipants, userVolumes]);
+
+  // Detect when screen share stops externally (browser "Stop sharing" button)
+  useEffect(() => {
+    const handleTrackUnpublished = () => {
+      const hasSS = Array.from(localParticipant.trackPublications.values()).some(
+        (p) => p.source === Track.Source.ScreenShare,
+      );
+      if (!hasSS) setIsScreenSharing(false);
+    };
+    localParticipant.on("localTrackUnpublished", handleTrackUnpublished);
+    return () => {
+      localParticipant.off("localTrackUnpublished", handleTrackUnpublished);
+    };
+  }, [localParticipant, setIsScreenSharing]);
 
   const channelParticipants = participants[channelId] ?? [];
 
@@ -180,8 +233,70 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
     });
   }
 
+  async function toggleScreenShare() {
+    if (!isScreenSharing) {
+      try {
+        const preset = SCREEN_SHARE_PRESET_MAP[screenSharePreset];
+        await localParticipant.setScreenShareEnabled(true, {
+          audio: true,
+          contentHint: "detail",
+          resolution: preset.resolution,
+          surfaceSwitching: "include",
+          systemAudio: "include",
+        }, {
+          screenShareEncoding: preset.encoding,
+        });
+        setIsScreenSharing(true);
+      } catch {
+        // User cancelled the browser picker
+      }
+    } else {
+      await localParticipant.setScreenShareEnabled(false);
+      setIsScreenSharing(false);
+    }
+  }
+
   // Find server mute/deafen state for local user
   const localParticipantData = channelParticipants.find((p) => p.user_id === user?.id);
+
+  // Build participant tiles (reused in both layouts)
+  const participantTiles = (
+    <>
+      <ParticipantTile
+        identity={localParticipant.identity}
+        userId={user?.id ?? ""}
+        name={user?.display_name || user?.username || "You"}
+        avatarUrl={user?.avatar_url ?? null}
+        isMuted={isMuted}
+        isLocal={true}
+        serverMuted={localParticipantData?.server_muted ?? false}
+        serverDeafened={localParticipantData?.server_deafened ?? false}
+        isScreenSharing={isScreenSharing}
+        onContextMenu={handleContextMenu}
+      />
+      {remoteParticipants.map((p) => {
+        const pData = channelParticipants.find((cp) => cp.user_id === p.identity);
+        const pIsScreenSharing = screenShareTracks.some(
+          (t) => t.participant.identity === p.identity,
+        );
+        return (
+          <ParticipantTile
+            key={p.identity}
+            identity={p.identity}
+            userId={p.identity}
+            name={p.name || p.identity}
+            avatarUrl={pData?.avatar_url ?? null}
+            isMuted={!p.isMicrophoneEnabled}
+            isLocal={false}
+            serverMuted={pData?.server_muted ?? false}
+            serverDeafened={pData?.server_deafened ?? false}
+            isScreenSharing={pIsScreenSharing}
+            onContextMenu={handleContextMenu}
+          />
+        );
+      })}
+    </>
+  );
 
   return (
     <>
@@ -194,38 +309,22 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
         <span className="voice-connected-badge">Connected</span>
       </div>
 
-      <div className="voice-participant-grid">
-        {/* Local participant */}
-        <ParticipantTile
-          identity={localParticipant.identity}
-          userId={user?.id ?? ""}
-          name={user?.display_name || user?.username || "You"}
-          avatarUrl={user?.avatar_url ?? null}
-          isMuted={isMuted}
-          isLocal={true}
-          serverMuted={localParticipantData?.server_muted ?? false}
-          serverDeafened={localParticipantData?.server_deafened ?? false}
-          onContextMenu={handleContextMenu}
-        />
-        {/* Remote participants */}
-        {remoteParticipants.map((p) => {
-          const pData = channelParticipants.find((cp) => cp.user_id === p.identity);
-          return (
-            <ParticipantTile
-              key={p.identity}
-              identity={p.identity}
-              userId={p.identity}
-              name={p.name || p.identity}
-              avatarUrl={pData?.avatar_url ?? null}
-              isMuted={!p.isMicrophoneEnabled}
-              isLocal={false}
-              serverMuted={pData?.server_muted ?? false}
-              serverDeafened={pData?.server_deafened ?? false}
-              onContextMenu={handleContextMenu}
-            />
-          );
-        })}
-      </div>
+      {hasScreenShares ? (
+        <div className="voice-room-with-screenshare">
+          <ScreenShareView
+            tracks={screenShareTracks}
+            focusedIndex={focusedScreenIndex}
+            onFocusChange={setFocusedScreenIndex}
+          />
+          <div className="voice-participant-strip">
+            {participantTiles}
+          </div>
+        </div>
+      ) : (
+        <div className="voice-participant-grid">
+          {participantTiles}
+        </div>
+      )}
 
       <div className="voice-controls">
         <button
@@ -259,6 +358,32 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
             </svg>
           )}
         </button>
+
+        {/* Screen Share */}
+        <div className="voice-control-group">
+          <button
+            className={`voice-control-btn ${isScreenSharing ? "screen-sharing" : ""}`}
+            onClick={toggleScreenShare}
+            title={isScreenSharing ? "Stop Sharing" : "Share Screen"}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z" />
+            </svg>
+          </button>
+          <select
+            className="screen-share-quality-picker"
+            value={screenSharePreset}
+            onChange={(e) => setScreenSharePreset(e.target.value as ScreenShareQuality)}
+            title="Screen share quality"
+          >
+            <option value="360p">360p</option>
+            <option value="720p">720p</option>
+            <option value="720p60">720p 60fps</option>
+            <option value="1080p">1080p</option>
+            <option value="1080p60">1080p 60fps</option>
+          </select>
+        </div>
+
         <button
           className="voice-control-btn voice-disconnect-btn"
           onClick={leaveVoice}
@@ -285,6 +410,47 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
   );
 }
 
+// ─── Screen Share View ───
+
+interface ScreenShareViewProps {
+  tracks: TrackReference[];
+  focusedIndex: number;
+  onFocusChange: (index: number) => void;
+}
+
+function ScreenShareView({ tracks, focusedIndex, onFocusChange }: ScreenShareViewProps) {
+  const focused = tracks[focusedIndex];
+
+  return (
+    <div className="screen-share-view">
+      <div className="screen-share-main">
+        {focused && (
+          <>
+            <VideoTrack trackRef={focused} />
+            <div className="screen-share-label">
+              {focused.participant.name || focused.participant.identity}&apos;s screen
+            </div>
+          </>
+        )}
+      </div>
+      {tracks.length > 1 && (
+        <div className="screen-share-strip">
+          {tracks.map((t, i) => (
+            <button
+              key={`${t.participant.identity}-${i}`}
+              className={`screen-share-thumb ${i === focusedIndex ? "focused" : ""}`}
+              onClick={() => onFocusChange(i)}
+            >
+              <VideoTrack trackRef={t} />
+              <span>{t.participant.name || t.participant.identity}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Participant Tile ───
 
 interface ParticipantTileProps {
@@ -296,6 +462,7 @@ interface ParticipantTileProps {
   isLocal: boolean;
   serverMuted: boolean;
   serverDeafened: boolean;
+  isScreenSharing: boolean;
   onContextMenu: (
     e: React.MouseEvent,
     userId: string,
@@ -313,6 +480,7 @@ function ParticipantTile({
   isLocal,
   serverMuted,
   serverDeafened,
+  isScreenSharing,
   onContextMenu,
 }: ParticipantTileProps) {
   return (
@@ -329,6 +497,11 @@ function ParticipantTile({
           {isLocal && <span className="voice-you-badge">(you)</span>}
         </span>
         <div className="voice-participant-icons">
+          {isScreenSharing && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--green)" className="voice-mute-icon" aria-label="Screen Sharing">
+              <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z" />
+            </svg>
+          )}
           {isMuted && (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)" className="voice-mute-icon" aria-label="Muted">
               <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.55-.9l4.17 4.18L21 19.73 4.27 3z" />

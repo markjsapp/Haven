@@ -44,6 +44,7 @@ pub struct User {
     pub banner_url: Option<String>,
     pub dm_privacy: String, // "everyone", "friends_only", "server_members"
     pub encrypted_profile: Option<Vec<u8>>,
+    pub is_instance_admin: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,10 +60,13 @@ pub struct UserPublic {
     pub created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encrypted_profile: Option<String>, // base64
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_instance_admin: Option<bool>,
 }
 
 impl From<User> for UserPublic {
     fn from(u: User) -> Self {
+        let admin = if u.is_instance_admin { Some(true) } else { None };
         Self {
             id: u.id,
             username: u.username,
@@ -76,6 +80,7 @@ impl From<User> for UserPublic {
             encrypted_profile: u.encrypted_profile.map(|v| {
                 base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &v)
             }),
+            is_instance_admin: admin,
         }
     }
 }
@@ -244,6 +249,8 @@ pub struct ChannelResponse {
     pub category_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dm_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_message_id: Option<Uuid>,
 }
 
 // ─── Channel Categories ──────────────────────────────
@@ -614,6 +621,10 @@ pub enum WsClientMessage {
     UnpinMessage { channel_id: Uuid, message_id: Uuid },
     /// Ping (keepalive)
     Ping,
+    /// Mark a channel as read (up to latest message)
+    MarkRead { channel_id: Uuid },
+    /// Resume a previous session after reconnect
+    Resume { session_id: Uuid },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -700,6 +711,33 @@ pub enum WsServerMessage {
         server_id: Uuid,
         emoji_id: Uuid,
     },
+    /// Multiple messages were bulk-deleted from a channel
+    BulkMessagesDeleted {
+        channel_id: Uuid,
+        message_ids: Vec<Uuid>,
+    },
+    /// A member was timed out (or timeout removed)
+    MemberTimedOut {
+        server_id: Uuid,
+        user_id: Uuid,
+        timed_out_until: Option<DateTime<Utc>>,
+    },
+    /// Read state synced across devices
+    ReadStateUpdated {
+        channel_id: Uuid,
+        last_read_at: DateTime<Utc>,
+    },
+    /// Sent on initial connection with session info
+    Hello {
+        session_id: Uuid,
+        heartbeat_interval_ms: u64,
+    },
+    /// Resume succeeded — missed events were replayed
+    Resumed {
+        replayed_count: u32,
+    },
+    /// Session expired or invalid — do a full reconnect
+    InvalidSession,
 }
 
 // ─── Presence ─────────────────────────────────────────
@@ -786,6 +824,8 @@ pub struct ServerMemberResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nickname: Option<String>,
     pub role_ids: Vec<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timed_out_until: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1171,6 +1211,104 @@ pub struct RenameEmojiRequest {
 #[derive(Debug, Deserialize)]
 pub struct DeleteAccountRequest {
     pub password: String,
+}
+
+// ─── Audit Log ───────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AuditLogEntry {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub actor_id: Uuid,
+    pub action: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<Uuid>,
+    pub changes: Option<serde_json::Value>,
+    pub reason: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuditLogResponse {
+    pub id: Uuid,
+    pub actor_id: Uuid,
+    pub actor_username: String,
+    pub action: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<Uuid>,
+    pub changes: Option<serde_json::Value>,
+    pub reason: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+// ─── Moderation ──────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct TimeoutMemberRequest {
+    pub duration_seconds: i64,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkDeleteRequest {
+    pub message_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuditLogQuery {
+    pub limit: Option<i64>,
+    pub before: Option<DateTime<Utc>>,
+}
+
+// ─── Read States ─────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ReadState {
+    pub user_id: Uuid,
+    pub channel_id: Uuid,
+    pub last_read_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChannelUnreadInfo {
+    pub channel_id: Uuid,
+    pub last_message_id: Option<Uuid>,
+    pub last_message_at: Option<DateTime<Utc>>,
+    pub unread_count: i64,
+}
+
+// ─── Admin Dashboard ─────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct AdminStats {
+    pub total_users: i64,
+    pub total_servers: i64,
+    pub total_channels: i64,
+    pub total_messages: i64,
+    pub active_connections: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminSearchQuery {
+    pub search: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct AdminUserResponse {
+    pub id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub is_instance_admin: bool,
+    pub server_count: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetAdminRequest {
+    pub is_admin: bool,
 }
 
 // ─── Validation helpers ───────────────────────────────

@@ -2,6 +2,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::db::queries;
@@ -52,6 +53,13 @@ pub async fn create_channel(
     // Add creator to the channel
     queries::add_channel_member(state.db.write(), channel.id, user_id).await?;
 
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "channel_create",
+        Some("channel"), Some(channel.id),
+        Some(&serde_json::json!({ "channel_type": &channel.channel_type })), None,
+    ).await;
+
     Ok(Json(ChannelResponse {
         id: channel.id,
         server_id: channel.server_id,
@@ -64,6 +72,7 @@ pub async fn create_channel(
         created_at: channel.created_at,
         category_id: channel.category_id,
         dm_status: channel.dm_status,
+        last_message_id: None,
     }))
 }
 
@@ -117,6 +126,7 @@ pub async fn create_dm(
             created_at: existing.created_at,
             category_id: None,
             dm_status: existing.dm_status,
+            last_message_id: None,
         }));
     }
 
@@ -184,6 +194,7 @@ pub async fn create_dm(
         created_at: channel.created_at,
         category_id: None,
         dm_status: Some(dm_status.to_string()),
+        last_message_id: None,
     }))
 }
 
@@ -208,6 +219,7 @@ pub async fn list_dm_channels(
             created_at: ch.created_at,
             category_id: ch.category_id,
             dm_status: ch.dm_status,
+            last_message_id: None,
         })
         .collect();
     Ok(Json(responses))
@@ -249,6 +261,12 @@ pub async fn update_channel(
 
     let updated = queries::update_channel_meta(state.db.write(), channel_id, &encrypted_meta).await?;
 
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "channel_update",
+        Some("channel"), Some(channel_id), None, None,
+    ).await;
+
     Ok(Json(ChannelResponse {
         id: updated.id,
         server_id: updated.server_id,
@@ -261,6 +279,7 @@ pub async fn update_channel(
         created_at: updated.created_at,
         category_id: updated.category_id,
         dm_status: updated.dm_status,
+        last_message_id: None,
     }))
 }
 
@@ -313,6 +332,12 @@ pub async fn delete_channel(
     .await?;
 
     queries::delete_channel(state.db.write(), channel_id).await?;
+
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "channel_delete",
+        Some("channel"), Some(channel_id), None, None,
+    ).await;
 
     Ok(Json(serde_json::json!({ "message": "Channel deleted" })))
 }
@@ -396,6 +421,7 @@ pub async fn create_group_dm(
         created_at: channel.created_at,
         category_id: None,
         dm_status: Some("active".to_string()),
+        last_message_id: None,
     }))
 }
 
@@ -512,5 +538,78 @@ async fn send_to_user(state: &AppState, user_id: Uuid, msg: WsServerMessage) {
             let _ = tx.send(msg.clone());
         }
     }
-    crate::pubsub::publish_user_event(&mut state.redis.clone(), user_id, &msg).await;
+    crate::pubsub::publish_user_event(state.redis.clone().as_mut(), user_id, &msg).await;
+}
+
+/// PUT /api/v1/channels/:channel_id/read-state
+/// Mark a channel as read (sets last_read_at to now).
+pub async fn mark_channel_read(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(channel_id): Path<Uuid>,
+) -> AppResult<Json<ReadState>> {
+    // Verify channel access
+    if !queries::can_access_channel(state.db.read(), channel_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
+    }
+
+    // Upsert read state
+    let read_state = queries::upsert_read_state(state.db.write(), user_id, channel_id).await?;
+
+    // Broadcast to other connections of same user (multi-device sync)
+    let sync_msg = WsServerMessage::ReadStateUpdated {
+        channel_id,
+        last_read_at: read_state.last_read_at,
+    };
+    if let Some(conns) = state.connections.get(&user_id) {
+        for conn in conns.iter() {
+            let _ = conn.send(sync_msg.clone());
+        }
+    }
+    crate::pubsub::publish_user_event(state.redis.clone().as_mut(), user_id, &sync_msg).await;
+
+    Ok(Json(read_state))
+}
+
+/// GET /api/v1/channels/read-states
+/// Get unread info for all channels the user belongs to.
+pub async fn get_read_states(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+) -> AppResult<Json<Vec<ChannelUnreadInfo>>> {
+    // Get all channel IDs the user has access to
+    let all_channel_ids = queries::get_user_channel_ids(state.db.read(), user_id).await?;
+
+    if all_channel_ids.is_empty() {
+        return Ok(Json(vec![]));
+    }
+
+    // Fetch last message IDs and unread counts in parallel
+    let (last_msgs, unread_counts) = tokio::try_join!(
+        queries::get_channel_last_message_ids(state.db.read(), &all_channel_ids),
+        queries::get_user_unread_counts(state.db.read(), user_id, &all_channel_ids),
+    )?;
+
+    // Build lookup maps
+    let last_msg_map: HashMap<Uuid, (Uuid, chrono::DateTime<chrono::Utc>)> = last_msgs
+        .into_iter()
+        .map(|(ch_id, msg_id, ts)| (ch_id, (msg_id, ts)))
+        .collect();
+    let unread_map: HashMap<Uuid, i64> = unread_counts.into_iter().collect();
+
+    // Only return channels that have unreads or recent messages
+    let infos: Vec<ChannelUnreadInfo> = all_channel_ids
+        .iter()
+        .filter_map(|ch_id| {
+            let (last_id, last_at) = last_msg_map.get(ch_id)?;
+            Some(ChannelUnreadInfo {
+                channel_id: *ch_id,
+                last_message_id: Some(*last_id),
+                last_message_at: Some(*last_at),
+                unread_count: *unread_map.get(ch_id).unwrap_or(&0),
+            })
+        })
+        .collect();
+
+    Ok(Json(infos))
 }

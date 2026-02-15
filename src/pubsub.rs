@@ -8,12 +8,14 @@ use uuid::Uuid;
 use crate::models::WsServerMessage;
 use crate::AppState;
 
-/// Publish a channel-scoped WS event to Redis for cross-instance delivery.
+/// Publish a channel-scoped WS event via Redis for cross-instance delivery.
+/// No-op if Redis is not configured (single-instance mode uses local broadcasts).
 pub async fn publish_channel_event(
-    redis: &mut redis::aio::ConnectionManager,
+    redis: Option<&mut redis::aio::ConnectionManager>,
     channel_id: Uuid,
     msg: &WsServerMessage,
 ) {
+    let Some(redis) = redis else { return };
     let channel = format!("haven:ws:ch:{}", channel_id);
     if let Ok(payload) = serde_json::to_string(msg) {
         let _: Result<(), _> = redis::cmd("PUBLISH")
@@ -24,12 +26,14 @@ pub async fn publish_channel_event(
     }
 }
 
-/// Publish a user-directed WS event to Redis for cross-instance delivery.
+/// Publish a user-directed WS event via Redis for cross-instance delivery.
+/// No-op if Redis is not configured.
 pub async fn publish_user_event(
-    redis: &mut redis::aio::ConnectionManager,
+    redis: Option<&mut redis::aio::ConnectionManager>,
     user_id: Uuid,
     msg: &WsServerMessage,
 ) {
+    let Some(redis) = redis else { return };
     let channel = format!("haven:ws:user:{}", user_id);
     if let Ok(payload) = serde_json::to_string(msg) {
         let _: Result<(), _> = redis::cmd("PUBLISH")
@@ -49,17 +53,16 @@ pub fn empty_subscriptions() -> PubSubSubscriptions {
 }
 
 /// Start the Redis subscriber background task.
-///
-/// This task maintains a Redis pub/sub connection and forwards messages
-/// to the appropriate local broadcast channels or user connections.
-///
-/// Architecture:
-/// - A single Redis connection handles all SUBSCRIBE/UNSUBSCRIBE commands
-/// - Channel subscriptions are registered when local users subscribe to Haven channels
-/// - User subscriptions are registered when a user connects via WebSocket
-/// - Incoming messages are deserialized and forwarded to local broadcast/connection senders
+/// Returns empty subscriptions immediately if Redis is not configured.
 pub fn start_subscriber(state: AppState) -> PubSubSubscriptions {
     let subscriptions: PubSubSubscriptions = Arc::new(Mutex::new(HashSet::new()));
+
+    // No Redis → no pub/sub subscriber needed (single-instance mode)
+    let Some(_) = &state.redis else {
+        tracing::info!("Redis not configured — pub/sub disabled (single-instance mode)");
+        return subscriptions;
+    };
+
     let subs_clone = subscriptions.clone();
 
     tokio::spawn(async move {
@@ -134,26 +137,26 @@ pub fn start_subscriber(state: AppState) -> PubSubSubscriptions {
 }
 
 /// Subscribe this instance to a Redis channel (called when a local user subscribes).
+/// No-op if Redis is not configured.
 pub async fn subscribe_redis_channel(
     state: &AppState,
     channel_id: Uuid,
 ) {
+    if state.redis.is_none() { return; }
     let channel = format!("haven:ws:ch:{}", channel_id);
     let mut subs = state.pubsub_subscriptions.lock().await;
     if subs.insert(channel.clone()) {
-        // New subscription — notify the subscriber task by publishing a control message
-        // The subscriber task will pick it up on next reconnect
-        // For immediate effect, we'd need a more complex signaling mechanism
-        // For now, the subscriber re-subscribes on reconnect
         tracing::debug!("Tracked Redis subscription: {}", channel);
     }
 }
 
 /// Subscribe this instance to a user's Redis channel (called on WS connect).
+/// No-op if Redis is not configured.
 pub async fn subscribe_redis_user(
     state: &AppState,
     user_id: Uuid,
 ) {
+    if state.redis.is_none() { return; }
     let channel = format!("haven:ws:user:{}", user_id);
     let mut subs = state.pubsub_subscriptions.lock().await;
     if subs.insert(channel.clone()) {
@@ -162,10 +165,12 @@ pub async fn subscribe_redis_user(
 }
 
 /// Unsubscribe from a user's Redis channel (called on WS disconnect).
+/// No-op if Redis is not configured.
 pub async fn unsubscribe_redis_user(
     state: &AppState,
     user_id: Uuid,
 ) {
+    if state.redis.is_none() { return; }
     // Only unsubscribe if no local connections remain
     if state.connections.get(&user_id).is_some() {
         return;

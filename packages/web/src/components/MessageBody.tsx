@@ -1,4 +1,5 @@
 import { useMemo, useCallback, useState } from "react";
+import { getServerUrl } from "../lib/serverUrl";
 import { generateHTML } from "@tiptap/html";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
@@ -114,7 +115,7 @@ interface Props {
 export default function MessageBody({ text, contentType, formatting, customEmojiMap }: Props) {
   const [warningUrl, setWarningUrl] = useState<string | null>(null);
 
-  const baseUrl = useMemo(() => window.location.origin, []);
+  const baseUrl = useMemo(() => getServerUrl(), []);
 
   const html = useMemo(() => {
     if (contentType === "tiptap" && formatting) {
@@ -174,7 +175,8 @@ export default function MessageBody({ text, contentType, formatting, customEmoji
       try {
         const linkUrl = new URL(anchor.href);
         // Allow same-origin links to pass through
-        if (linkUrl.hostname === window.location.hostname) return;
+        const serverHostname = new URL(getServerUrl()).hostname;
+        if (linkUrl.hostname === serverHostname) return;
       } catch {
         // If URL parsing fails, still show warning
       }

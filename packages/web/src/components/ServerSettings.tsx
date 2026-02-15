@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
-import { Permission, type InviteResponse, type ServerMemberResponse, type CategoryResponse, type BanResponse, type ChannelResponse, type CustomEmojiResponse } from "@haven/core";
+import { Permission, type InviteResponse, type ServerMemberResponse, type CategoryResponse, type BanResponse, type ChannelResponse, type CustomEmojiResponse, type AuditLogEntry } from "@haven/core";
 import { usePermissions } from "../hooks/usePermissions.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import RoleSettings from "./RoleSettings.js";
@@ -10,6 +10,11 @@ import BanMemberModal from "./BanMemberModal.js";
 import EditMemberRolesModal from "./EditMemberRolesModal.js";
 import Avatar from "./Avatar.js";
 import { parseChannelDisplay } from "../lib/channel-utils.js";
+
+/** Format snake_case audit action into a readable label. */
+function formatAuditAction(action: string): string {
+  return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 interface Props {
   serverId: string;
@@ -28,6 +33,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
   const canBanMembers = can(Permission.BAN_MEMBERS);
   const canKickMembers = can(Permission.KICK_MEMBERS);
   const canManageEmojis = can(Permission.MANAGE_EMOJIS);
+  const canViewAuditLog = can(Permission.VIEW_AUDIT_LOG);
 
   const server = useChatStore((s) => s.servers.find((sv) => sv.id === serverId));
   const allChannels = useChatStore((s) => s.channels);
@@ -41,7 +47,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
   const [categories, setCategories] = useState<CategoryResponse[]>([]);
   const [bans, setBans] = useState<BanResponse[]>([]);
   const [systemChannelId, setSystemChannelId] = useState<string | null>(null);
-  const [tab, setTab] = useState<"overview" | "members" | "invites" | "categories" | "roles" | "bans" | "emoji">(
+  const [tab, setTab] = useState<"overview" | "members" | "invites" | "categories" | "roles" | "bans" | "emoji" | "audit">(
     canManageServer ? "overview" : "members"
   );
   const [error, setError] = useState("");
@@ -50,6 +56,11 @@ export default function ServerSettings({ serverId, onClose }: Props) {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [editingCatName, setEditingCatName] = useState("");
+
+  // Audit log state
+  const [auditEntries, setAuditEntries] = useState<AuditLogEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditHasMore, setAuditHasMore] = useState(true);
 
   // Emoji tab state
   const customEmojis = useChatStore((s) => s.customEmojis);
@@ -87,6 +98,19 @@ export default function ServerSettings({ serverId, onClose }: Props) {
   useEffect(() => {
     setSystemChannelId(server?.system_channel_id ?? null);
   }, [server?.system_channel_id]);
+
+  // Load audit log when tab opens
+  useEffect(() => {
+    if (tab !== "audit" || !canViewAuditLog) return;
+    if (auditEntries.length > 0) return; // already loaded
+    setAuditLoading(true);
+    api.getAuditLog(serverId, { limit: 50 }).then((entries) => {
+      setAuditEntries(entries);
+      setAuditHasMore(entries.length >= 50);
+    }).catch(() => {
+      setError("Failed to load audit log");
+    }).finally(() => setAuditLoading(false));
+  }, [tab, serverId, canViewAuditLog]);
 
   async function loadData() {
     try {
@@ -250,6 +274,14 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                 onClick={() => setTab("emoji")}
               >
                 Emoji
+              </button>
+            )}
+            {canViewAuditLog && (
+              <button
+                className={`user-settings-nav-item ${tab === "audit" ? "active" : ""}`}
+                onClick={() => setTab("audit")}
+              >
+                Audit Log
               </button>
             )}
             <div className="user-settings-sidebar-divider" />
@@ -699,6 +731,70 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                   <p className="settings-description" style={{ marginTop: 16 }}>
                     No custom emojis yet. Upload one to get started.
                   </p>
+                )}
+              </div>
+            )}
+
+            {tab === "audit" && canViewAuditLog && (
+              <div className="settings-section">
+                <div className="settings-section-title">Audit Log</div>
+                {auditLoading && auditEntries.length === 0 && (
+                  <p className="settings-description">Loading...</p>
+                )}
+                {auditEntries.length === 0 && !auditLoading && (
+                  <p className="settings-description">No audit log entries yet.</p>
+                )}
+                <div className="audit-log-list">
+                  {auditEntries.map((entry) => (
+                    <div key={entry.id} className="audit-log-entry">
+                      <div className="audit-log-entry-header">
+                        <span className="audit-log-actor">{entry.actor_username}</span>
+                        <span className="audit-log-action">{formatAuditAction(entry.action)}</span>
+                        {entry.target_type && (
+                          <span className="audit-log-target">
+                            {entry.target_type}{entry.target_id ? ` ${entry.target_id.slice(0, 8)}` : ""}
+                          </span>
+                        )}
+                      </div>
+                      {entry.reason && (
+                        <div className="audit-log-reason">Reason: {entry.reason}</div>
+                      )}
+                      {entry.changes && Object.keys(entry.changes).length > 0 && (
+                        <div className="audit-log-changes">
+                          {Object.entries(entry.changes).map(([key, val]) => (
+                            <span key={key} className="audit-log-change">
+                              {key}: {typeof val === "string" ? val : JSON.stringify(val)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <time className="audit-log-time">
+                        {new Date(entry.created_at).toLocaleString()}
+                      </time>
+                    </div>
+                  ))}
+                </div>
+                {auditHasMore && auditEntries.length > 0 && (
+                  <button
+                    className="btn-ghost"
+                    style={{ marginTop: 12 }}
+                    disabled={auditLoading}
+                    onClick={async () => {
+                      setAuditLoading(true);
+                      try {
+                        const last = auditEntries[auditEntries.length - 1];
+                        const more = await api.getAuditLog(serverId, { limit: 50, before: last.id });
+                        setAuditEntries((prev) => [...prev, ...more]);
+                        setAuditHasMore(more.length >= 50);
+                      } catch {
+                        setError("Failed to load more audit entries");
+                      } finally {
+                        setAuditLoading(false);
+                      }
+                    }}
+                  >
+                    {auditLoading ? "Loading..." : "Load More"}
+                  </button>
                 )}
               </div>
             )}

@@ -9,12 +9,17 @@ pub mod config;
 pub mod crypto;
 pub mod db;
 pub mod errors;
+pub mod memory_store;
 pub mod middleware;
 pub mod models;
 pub mod permissions;
 pub mod pubsub;
 pub mod storage;
+pub mod tls;
+pub mod livekit_proc;
 pub mod ws;
+#[cfg(feature = "embed-ui")]
+pub mod embedded_ui;
 
 use axum::{
     extract::DefaultBodyLimit,
@@ -40,17 +45,20 @@ use ws::{ChannelBroadcastMap, ConnectionMap};
 #[derive(Clone)]
 pub struct AppState {
     pub db: db::DbPools,
-    pub redis: redis::aio::ConnectionManager,
+    pub redis: Option<redis::aio::ConnectionManager>,
     pub config: AppConfig,
     pub storage_key: [u8; 32],
     pub storage: storage::Storage,
     pub connections: ConnectionMap,
     pub channel_broadcasts: ChannelBroadcastMap,
     pub pubsub_subscriptions: pubsub::PubSubSubscriptions,
+    pub memory: memory_store::MemoryStore,
     /// Per-user rate limiter for WebSocket message sending (30 msg / 10s)
     pub ws_rate_limiter: UserRateLimiter,
     /// Per-user rate limiter for write API endpoints (30 req / 60s)
     pub api_rate_limiter: UserRateLimiter,
+    /// WebSocket sessions for resume support
+    pub sessions: ws::SessionMap,
 }
 
 // ─── Router ────────────────────────────────────────────
@@ -123,7 +131,7 @@ pub fn build_router(state: AppState) -> Router {
     // Key management routes
     let key_routes = Router::new()
         .route("/identity", put(api::keys::update_identity_keys))
-        .route("/prekeys", post(api::keys::upload_prekeys))
+        .route("/prekeys", post(api::keys::upload_prekeys).delete(api::keys::delete_prekeys))
         .route("/prekeys/count", get(api::keys::prekey_count))
         .route(
             "/backup",
@@ -243,6 +251,14 @@ pub fn build_router(state: AppState) -> Router {
             put(api::servers::set_member_nickname),
         )
         .route(
+            "/:server_id/members/:user_id/timeout",
+            put(api::servers::timeout_member),
+        )
+        .route(
+            "/:server_id/audit-log",
+            get(api::servers::get_audit_log),
+        )
+        .route(
             "/:server_id/icon",
             post(api::servers::upload_icon)
                 .get(api::servers::get_icon)
@@ -264,6 +280,8 @@ pub fn build_router(state: AppState) -> Router {
 
     // Channel routes
     let channel_routes = Router::new()
+        .route("/read-states", get(api::channels::get_read_states))
+        .route("/:channel_id/read-state", put(api::channels::mark_channel_read))
         .route("/:channel_id", put(api::channels::update_channel))
         .route("/:channel_id", delete(api::channels::delete_channel))
         .route("/:channel_id/join", post(api::channels::join_channel))
@@ -283,6 +301,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/:channel_id/messages",
             post(api::messages::send_message),
+        )
+        .route(
+            "/:channel_id/messages/bulk-delete",
+            post(api::messages::bulk_delete_messages),
         )
         .route(
             "/:channel_id/sender-keys",
@@ -380,9 +402,48 @@ pub fn build_router(state: AppState) -> Router {
         });
     }
 
+    // Background task: prune expired WebSocket sessions
+    {
+        let sessions = state.sessions.clone();
+        let session_ttl_secs = state.config.ws_session_ttl_secs;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                let ttl = std::time::Duration::from_secs(session_ttl_secs);
+                let mut removed = 0u32;
+                sessions.retain(|_, session| {
+                    // Use try_lock to avoid blocking the cleanup task
+                    match session.last_active.try_lock() {
+                        Ok(last) => {
+                            if last.elapsed() <= ttl {
+                                true
+                            } else {
+                                removed += 1;
+                                false
+                            }
+                        }
+                        Err(_) => true, // Session is in use, keep it
+                    }
+                });
+                if removed > 0 {
+                    tracing::debug!("Pruned {} expired WebSocket sessions", removed);
+                }
+            }
+        });
+    }
+
+    // Admin routes (requires instance admin)
+    let admin_routes = Router::new()
+        .route("/stats", get(api::admin::get_stats))
+        .route("/users", get(api::admin::list_users))
+        .route("/users/:user_id/admin", put(api::admin::set_admin))
+        .route("/users/:user_id", delete(api::admin::delete_user));
+
     // Assemble the full API
     let api = Router::new()
         .nest("/auth", auth_routes.merge(auth_protected))
+        .nest("/admin", admin_routes)
         .nest("/keys", key_routes)
         .nest("/users", user_routes)
         .nest("/servers", server_routes)

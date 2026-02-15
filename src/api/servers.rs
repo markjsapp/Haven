@@ -1,6 +1,6 @@
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Redirect},
     Json,
@@ -168,6 +168,7 @@ pub async fn list_server_channels(
             created_at: c.created_at,
             category_id: c.category_id,
             dm_status: c.dm_status,
+            last_message_id: None,
         })
         .collect();
 
@@ -221,6 +222,13 @@ pub async fn update_server(
 
     queries::update_system_channel(state.db.write(), server_id, req.system_channel_id).await?;
 
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, user_id, "server_update",
+        Some("server"), Some(server_id),
+        Some(&serde_json::json!({ "system_channel_id": req.system_channel_id })), None,
+    ).await;
+
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -273,6 +281,13 @@ pub async fn set_member_nickname(
 
     queries::update_member_nickname(state.db.write(), server_id, target_user_id, req.nickname.as_deref()).await?;
 
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(), server_id, caller_id, "member_nickname_update",
+        Some("member"), Some(target_user_id),
+        Some(&serde_json::json!({ "nickname": req.nickname })), None,
+    ).await;
+
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -300,7 +315,7 @@ pub async fn leave_server(
         }
         // Owner is the only member — delete the entire server
         queries::delete_server(state.db.write(), server_id).await?;
-        crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:server:{}", server_id)).await;
+        crate::cache::invalidate(state.redis.clone().as_mut(), &state.memory, &format!("haven:server:{}", server_id)).await;
         return Ok(Json(serde_json::json!({ "ok": true })));
     }
 
@@ -355,7 +370,7 @@ pub async fn delete_server(
     queries::delete_server(state.db.write(), server_id).await?;
 
     // Invalidate cache
-    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:server:{}", server_id)).await;
+    crate::cache::invalidate(state.redis.clone().as_mut(), &state.memory, &format!("haven:server:{}", server_id)).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -398,7 +413,7 @@ pub async fn upload_icon(
     queries::update_server_icon(state.db.write(), server_id, Some(&icon_url)).await?;
 
     // Invalidate cache
-    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:server:{}", server_id)).await;
+    crate::cache::invalidate(state.redis.clone().as_mut(), &state.memory, &format!("haven:server:{}", server_id)).await;
 
     Ok(Json(serde_json::json!({ "icon_url": icon_url })))
 }
@@ -473,9 +488,122 @@ pub async fn delete_icon(
     queries::update_server_icon(state.db.write(), server_id, None).await?;
 
     // Invalidate cache
-    crate::cache::invalidate(&mut state.redis.clone(), &format!("haven:server:{}", server_id)).await;
+    crate::cache::invalidate(state.redis.clone().as_mut(), &state.memory, &format!("haven:server:{}", server_id)).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ─── Member Timeout ──────────────────────────────────
+
+/// PUT /api/v1/servers/:server_id/members/:user_id/timeout
+pub async fn timeout_member(
+    State(state): State<AppState>,
+    AuthUser(caller_id): AuthUser,
+    Path((server_id, target_user_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<TimeoutMemberRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    queries::require_server_permission(
+        state.db.read(),
+        server_id,
+        caller_id,
+        crate::permissions::MODERATE_MEMBERS,
+    )
+    .await?;
+
+    if target_user_id == caller_id {
+        return Err(AppError::Validation("Cannot timeout yourself".into()));
+    }
+
+    // Verify target is a member
+    if !queries::is_server_member(state.db.read(), server_id, target_user_id).await? {
+        return Err(AppError::NotFound("Member not found".into()));
+    }
+
+    // Cannot timeout the server owner
+    let server = queries::find_server_by_id(state.db.read(), server_id)
+        .await?
+        .ok_or(AppError::NotFound("Server not found".into()))?;
+    if target_user_id == server.owner_id {
+        return Err(AppError::Forbidden("Cannot timeout the server owner".into()));
+    }
+
+    // Hierarchy check: cannot timeout users with higher/equal role position
+    let (is_owner, _) = queries::get_member_permissions(state.db.read(), server_id, caller_id).await?;
+    if !is_owner {
+        let my_roles = queries::get_member_roles(state.db.read(), server_id, caller_id).await?;
+        let target_roles = queries::get_member_roles(state.db.read(), server_id, target_user_id).await?;
+        let my_highest = my_roles.iter().map(|r| r.position).max().unwrap_or(0);
+        let target_highest = target_roles.iter().map(|r| r.position).max().unwrap_or(0);
+        if target_highest >= my_highest {
+            return Err(AppError::Forbidden(
+                "Cannot timeout a member with equal or higher role".into(),
+            ));
+        }
+    }
+
+    let timed_out_until = if req.duration_seconds > 0 {
+        // Max 28 days
+        let clamped = req.duration_seconds.min(28 * 24 * 3600);
+        Some(chrono::Utc::now() + chrono::Duration::seconds(clamped))
+    } else {
+        None // Remove timeout
+    };
+
+    queries::set_member_timeout(state.db.write(), server_id, target_user_id, timed_out_until)
+        .await?;
+
+    // Broadcast to connected server members
+    let ws_msg = WsServerMessage::MemberTimedOut {
+        server_id,
+        user_id: target_user_id,
+        timed_out_until,
+    };
+    if let Ok(members) = queries::get_server_member_ids(state.db.read(), server_id).await {
+        for member_id in members {
+            if let Some(conns) = state.connections.get(&member_id) {
+                for sender in conns.iter() {
+                    let _ = sender.send(ws_msg.clone());
+                }
+            }
+        }
+    }
+
+    // Audit log
+    let _ = queries::insert_audit_log(
+        state.db.write(),
+        server_id,
+        caller_id,
+        "member_timeout",
+        Some("member"),
+        Some(target_user_id),
+        Some(&serde_json::json!({ "duration_seconds": req.duration_seconds })),
+        req.reason.as_deref(),
+    )
+    .await;
+
+    Ok(Json(serde_json::json!({ "timed_out_until": timed_out_until })))
+}
+
+// ─── Audit Log ───────────────────────────────────────
+
+/// GET /api/v1/servers/:server_id/audit-log
+pub async fn get_audit_log(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(server_id): Path<Uuid>,
+    Query(params): Query<AuditLogQuery>,
+) -> AppResult<Json<Vec<AuditLogResponse>>> {
+    queries::require_server_permission(
+        state.db.read(),
+        server_id,
+        user_id,
+        crate::permissions::VIEW_AUDIT_LOG,
+    )
+    .await?;
+
+    let limit = params.limit.unwrap_or(50).min(100).max(1);
+    let entries = queries::get_audit_log(state.db.read(), server_id, limit, params.before).await?;
+    Ok(Json(entries))
 }
 
 fn detect_icon_type(data: &[u8]) -> String {

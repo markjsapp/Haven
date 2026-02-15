@@ -44,6 +44,9 @@ export default function ServerBar() {
   const [serverName, setServerName] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
+  const [iconFile, setIconFile] = useState<File | null>(null);
+  const [iconPreview, setIconPreview] = useState<string | null>(null);
+  const iconInputRef = useRef<HTMLInputElement>(null);
 
   const serverListRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown: handleRovingKeyDown } = useRovingTabindex(serverListRef);
@@ -124,9 +127,21 @@ export default function ServerBar() {
     try {
       const meta = JSON.stringify({ name: serverName.trim() });
       const newServer = await api.createServer({ encrypted_meta: unicodeBtoa(meta) });
+      // Upload icon if one was selected
+      if (iconFile) {
+        try {
+          const buf = await iconFile.arrayBuffer();
+          await api.uploadServerIcon(newServer.id, buf);
+        } catch {
+          // Icon upload failure is non-fatal — server was created
+        }
+      }
       await loadChannels();
       selectServer(newServer.id);
       setServerName("");
+      if (iconPreview) URL.revokeObjectURL(iconPreview);
+      setIconFile(null);
+      setIconPreview(null);
       setShowCreate(false);
     } catch (err: any) {
       setError(err.message || "Failed");
@@ -340,10 +355,36 @@ export default function ServerBar() {
 
       {/* Create server modal */}
       {showCreate && (
-        <div className="modal-overlay" onClick={() => setShowCreate(false)} role="presentation">
+        <div className="modal-overlay" onClick={() => { setShowCreate(false); if (iconPreview) URL.revokeObjectURL(iconPreview); setIconFile(null); setIconPreview(null); }} role="presentation">
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="create-server-title">
             <h2 className="modal-title" id="create-server-title">Create a Server</h2>
-            <p className="modal-subtitle">Give your new server a name to get started.</p>
+            <p className="modal-subtitle">Give your new server a name and icon.</p>
+            <input
+              ref={iconInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (iconInputRef.current) iconInputRef.current.value = "";
+                if (!file) return;
+                if (file.size > 2 * 1024 * 1024) { setError("Icon too large (max 2MB)"); return; }
+                if (iconPreview) URL.revokeObjectURL(iconPreview);
+                setIconFile(file);
+                setIconPreview(URL.createObjectURL(file));
+                setError("");
+              }}
+            />
+            <div className="create-server-icon-wrap" onClick={() => iconInputRef.current?.click()} role="button" tabIndex={0} aria-label="Upload server icon" onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); iconInputRef.current?.click(); } }}>
+              {iconPreview ? (
+                <img src={iconPreview} alt="Server icon preview" className="create-server-icon-preview" />
+              ) : (
+                <div className="create-server-icon-placeholder">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                  <span>Upload</span>
+                </div>
+              )}
+            </div>
             <label className="modal-label">SERVER NAME</label>
             <input
               className="modal-input"
@@ -356,7 +397,7 @@ export default function ServerBar() {
             />
             {error && <span className="modal-error">{error}</span>}
             <div className="modal-footer">
-              <button className="btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
+              <button className="btn-ghost" onClick={() => { setShowCreate(false); if (iconPreview) URL.revokeObjectURL(iconPreview); setIconFile(null); setIconPreview(null); }}>Cancel</button>
               <button className="btn-primary modal-submit" onClick={handleCreate}>Create</button>
             </div>
           </div>
