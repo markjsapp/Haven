@@ -1,4 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// Mock libsodium so tests don't need the native WASM module.
+// solvePoW() calls initSodium + getSodium().crypto_hash_sha256.
+// Returning all-zero bytes satisfies any difficulty check.
+vi.mock("../crypto/utils.js", () => ({
+  initSodium: vi.fn(),
+  getSodium: vi.fn(() => ({
+    crypto_hash_sha256: () => new Uint8Array(32),
+  })),
+}));
+
 import { HavenApi, HavenApiError } from "./api.js";
 
 // ── Mock fetch ──────────────────────────────────────────
@@ -74,12 +85,17 @@ describe("auth", () => {
   });
 
   it("register sends POST and sets tokens", async () => {
+    // First call: getChallenge()
+    const challengeResponse = { challenge: "test-challenge", difficulty: 0 };
+    // Second call: register POST
     const authResponse = {
       access_token: "at-reg",
       refresh_token: "rt-reg",
       user: { id: "uuid-2", username: "bob" },
     };
-    fetchMock.mockResolvedValueOnce(mockResponse(authResponse));
+    fetchMock
+      .mockResolvedValueOnce(mockResponse(challengeResponse))
+      .mockResolvedValueOnce(mockResponse(authResponse));
 
     const api = new HavenApi({ baseUrl: "http://localhost:8080" });
     const result = await api.register({
@@ -91,6 +107,13 @@ describe("auth", () => {
       one_time_prekeys: [],
     });
 
+    // First call is GET /challenge, second is POST /register
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [challengeUrl] = fetchMock.mock.calls[0];
+    expect(challengeUrl).toBe("http://localhost:8080/api/v1/auth/challenge");
+    const [regUrl, regOpts] = fetchMock.mock.calls[1];
+    expect(regUrl).toBe("http://localhost:8080/api/v1/auth/register");
+    expect(regOpts.method).toBe("POST");
     expect(result.user.username).toBe("bob");
     expect(api.currentAccessToken).toBe("at-reg");
   });
@@ -820,7 +843,7 @@ describe("server members and invites", () => {
     const members = await api.listServerMembers("s1");
 
     const [url, opts] = fetchMock.mock.calls[0];
-    expect(url).toBe("http://localhost:8080/api/v1/servers/s1/members");
+    expect(url).toBe("http://localhost:8080/api/v1/servers/s1/members?limit=100");
     expect(opts.method).toBe("GET");
     expect(members).toEqual([]);
   });

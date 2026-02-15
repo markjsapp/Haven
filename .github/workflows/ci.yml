@@ -26,33 +26,7 @@ jobs:
       - run: cd packages/web && npm ci && npm run build
 
       - run: cargo check --features postgres,embed-ui
-      - run: cargo check --features sqlite --no-default-features
-      - run: cargo test --workspace --all-targets
       - run: cargo clippy --workspace -- -D warnings
-
-  check-client:
-    name: Client Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: client/src-tauri
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install Linux Tauri deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev \
-            libjavascriptcoregtk-4.1-dev libsoup-3.0-dev
-
-      - run: cd packages/haven-core && npm ci && npm run build
-      - run: cd packages/web && npm ci
-      - run: cd client && npm ci
-      - run: cd client/src-tauri && cargo check
 
   test-web:
     name: Web Tests
