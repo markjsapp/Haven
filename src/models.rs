@@ -108,6 +108,9 @@ pub struct RegisterRequest {
     // Proof-of-Work anti-bot challenge
     pub pow_challenge: String,
     pub pow_nonce: String,
+
+    /// Registration invite code (required when REGISTRATION_INVITE_ONLY=true)
+    pub invite_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -812,6 +815,49 @@ impl From<Invite> for InviteResponse {
             created_at: i.created_at,
         }
     }
+}
+
+// ─── Registration Invites (instance-level) ────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct RegistrationInvite {
+    pub id: Uuid,
+    pub code: String,
+    pub created_by: Option<Uuid>,
+    pub used_by: Option<Uuid>,
+    pub used_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RegistrationInviteResponse {
+    pub id: Uuid,
+    pub code: String,
+    pub created_by: Option<Uuid>,
+    pub used: bool,
+    pub used_by: Option<Uuid>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<RegistrationInvite> for RegistrationInviteResponse {
+    fn from(i: RegistrationInvite) -> Self {
+        Self {
+            id: i.id,
+            code: i.code,
+            created_by: i.created_by,
+            used: i.used_by.is_some(),
+            used_by: i.used_by,
+            expires_at: i.expires_at,
+            created_at: i.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminCreateInvitesRequest {
+    pub count: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]

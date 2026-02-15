@@ -1,76 +1,62 @@
 # Haven
 
-A privacy-first, end-to-end encrypted communication platform that cannot read your messages.
+A privacy-first, end-to-end encrypted chat platform. Think Discord, but the server can't read your messages.
 
 ## What is Haven?
 
-Haven is a full-stack chat application with servers, channels, direct messages, friends, roles, and permissions. All message content is encrypted client-side before it ever reaches the server. The backend is an intentional **"dumb relay"** for encrypted data — it handles routing, authentication, and access control, but cannot read message content, group names, or file contents.
+Haven is a full-featured chat application — servers, channels, DMs, friends, roles, voice, file sharing — with one fundamental difference: **all message content is encrypted client-side before it ever touches the server**. The backend is an intentional "dumb relay" for encrypted blobs. It handles routing, auth, and access control, but has zero knowledge of what you're saying.
 
-## Project Structure
+### What the server can see
+- Encrypted blobs (messages, metadata, attachments)
+- Public cryptographic keys (for key exchange)
+- Routing data (channel IDs, ephemeral sender tokens, timestamps)
 
-```
-Haven/
-├── src/                    # Rust backend (axum, sqlx, PostgreSQL, Redis)
-├── packages/
-│   ├── haven-core/         # Shared TypeScript library (crypto, API client, types)
-│   └── web/                # React frontend (Vite, Zustand, vanilla CSS)
-├── migrations/             # PostgreSQL schema migrations
-├── tests/                  # Rust integration tests
-└── docs/                   # Documentation
-```
+### What the server cannot see
+- Message content (Double Ratchet / Sender Keys encryption)
+- Sender identity within channels (sealed sender tokens)
+- Server/channel names (encrypted metadata)
+- File contents or types (client-side encryption with padded sizes)
+- Email addresses (hashed before storage)
 
 ## Features
 
-### Communication
-- **Servers & Channels** — create servers with text channels, organized into categories
-- **Direct Messages** — 1-on-1 and group DMs with request/accept flow
-- **Friends System** — send/accept/decline friend requests, mutual auto-accept
-- **Real-time** — WebSocket-based messaging with typing indicators and presence
-- **Rich Embeds** — link previews with YouTube, Spotify, Tenor, Giphy, and Imgur embeds
-- **Big Emoji** — jumbo rendering for emoji-only messages (up to 10 emoji)
-- **@Mentions** — mention users in messages with autocomplete, mention-aware notification badges
-- **Message Pinning** — pin messages with clickable system message links
+**Communication** — Servers with text and voice channels, 1-on-1 and group DMs, friend requests, typing indicators, online presence, link previews, @mentions, message pinning, emoji reactions, big emoji rendering
 
-### Organization
-- **Channel Categories** — group channels into collapsible categories with drag-and-drop reordering
-- **Roles & Permissions** — Discord-style role system with bitfield permissions and channel overwrites
-- **Channel Mute & Notifications** — per-channel mute with timed durations and notification overrides
-- **Invites** — shareable invite codes with optional expiry and usage limits
-- **Server Management** — leave or delete servers with confirmation dialogs
+**Organization** — Channel categories with drag-and-drop, Discord-style roles and permissions (bitfield with channel overwrites), shareable invite codes, server management, audit logs
 
-### Security
-- **End-to-End Encryption** — messages encrypted with Double Ratchet (Signal Protocol)
-- **Sealed Sender** — only the recipient can see who sent a message
-- **Zero-Knowledge Server** — server stores only encrypted blobs and public keys
-- **Encrypted Key Backup** — sync E2EE keys across devices with a security phrase (Argon2id KDF + XSalsa20-Poly1305)
-- **Argon2id** password hashing, JWT auth with rotating refresh tokens, optional TOTP 2FA
-- **Encrypted Attachments** — files encrypted client-side, stored as opaque blobs
+**Security** — X3DH + Double Ratchet for DMs (Signal Protocol), Sender Keys for group channels, encrypted file attachments, encrypted key backup (Argon2id KDF), Argon2id password hashing, JWT + rotating refresh tokens, optional TOTP 2FA, proof-of-work registration gate
 
-### What the server stores
-- Encrypted blobs (messages, metadata, attachments)
-- Public cryptographic keys (for X3DH key exchange)
-- Routing data (channel IDs, ephemeral sender tokens, timestamps)
-
-### What the server CANNOT see
-- Message content (E2EE with Double Ratchet)
-- Sender identity (sealed sender)
-- Group names or membership lists (encrypted with group key)
-- File contents or types (client-side encryption, padded sizes)
-- Email addresses (hashed before storage)
+**Voice** — LiveKit-powered voice channels with server mute/deafen controls
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Backend | Rust, axum 0.7, Tokio |
-| Database | PostgreSQL 16 (via sqlx with compile-time checks) |
+| Database | PostgreSQL 16 (sqlx 0.7) |
 | Cache / Pub-Sub | Redis 7 |
 | Frontend | React 19, Vite 6, Zustand 5 |
-| Shared Library | TypeScript (crypto primitives, API client, types) |
-| Auth | Argon2id + JWT + optional TOTP 2FA |
-| Real-time | WebSockets (axum built-in) |
+| Shared Library | TypeScript (crypto, API client, types) |
 | Crypto | libsodium (X25519, Ed25519, XChaCha20-Poly1305) |
-| Storage | Local filesystem with AES-256-GCM encryption at rest |
+| Voice | LiveKit (self-hosted) |
+| Storage | Local filesystem with AES-256-GCM at rest |
+
+## Project Structure
+
+```
+Haven/
+├── src/                        # Rust backend — see src/README.md
+│   ├── api/                    # REST endpoint handlers
+│   ├── db/                     # Database queries
+│   └── middleware/              # Auth extractors, rate limiting
+├── packages/
+│   ├── haven-core/             # Shared TS library — see packages/haven-core/README.md
+│   └── web/                    # React frontend — see packages/web/README.md
+├── migrations/                 # PostgreSQL schema migrations
+├── tests/                      # Rust integration tests (126 tests)
+├── docs/                       # Guides and research
+└── docker-compose.yml          # Local dev infrastructure
+```
 
 ## Quick Start
 
@@ -81,159 +67,82 @@ Haven/
 
 ### 1. Start infrastructure
 ```bash
-docker compose up -d
+docker compose up -d    # PostgreSQL + Redis
 ```
-Starts PostgreSQL and Redis.
 
 ### 2. Configure environment
 ```bash
 cp .env.example .env
-# Edit .env if needed (defaults work for local dev)
+# Defaults work for local development
 ```
 
 ### 3. Run the backend
 ```bash
 cargo run
+# Server starts on http://localhost:8080
 ```
-The server starts on `http://localhost:8080`.
 
 ### 4. Run the frontend
 ```bash
 cd packages/haven-core && npm install && npm run build
 cd ../web && npm install && npm run dev
+# Frontend starts on http://localhost:5173
 ```
-The frontend starts on `http://localhost:5173` and proxies API requests to the backend.
 
 ### 5. Verify
 ```bash
-curl http://localhost:8080/health
-# → "ok"
+curl http://localhost:8080/health   # → "ok"
 ```
+
+The first user to register is automatically promoted to instance admin.
 
 ## Testing
 
-Haven has **92 automated tests** across the full stack. See [docs/testing.md](docs/testing.md) for details.
+Haven has **222 automated tests** across the stack:
 
 ```bash
-# Rust (22 unit + 24 integration)
-DATABASE_URL="postgres://haven:haven_secret@127.0.0.1:5432/haven" cargo test
+# Rust — 81 unit + 126 integration + 10 WebSocket = 217 tests
+cargo test
 
-# haven-core (21 API client tests)
-cd packages/haven-core && npm test
+# haven-core — 78 tests
+cd packages/haven-core && npx vitest run
 
-# Web frontend (25 store tests)
-cd packages/web && npm test
+# Web frontend — 46 tests
+cd packages/web && npx vitest run
 ```
+
+Docker must be running for Rust integration tests (they need PostgreSQL + Redis).
+
+## Deployment
+
+See [docs/deployment.md](docs/deployment.md) for the full production deployment guide, covering:
+- Hetzner Cloud VPS setup (Debian 12, ~8/mo)
+- Docker Compose production stack (Caddy + Haven + PostgreSQL + Redis + LiveKit)
+- Auto-TLS via Let's Encrypt
+- Invite-only registration for beta
+- Backup strategies
+
+See [docs/contributing.md](docs/contributing.md) for the development workflow and how to push updates.
 
 ## API Overview
 
-### Auth
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/auth/register` | Register with username + crypto keys |
-| POST | `/api/v1/auth/login` | Login, returns JWT |
-| POST | `/api/v1/auth/refresh` | Refresh access token |
-| POST | `/api/v1/auth/logout` | Revoke refresh tokens |
-| POST | `/api/v1/auth/totp/setup` | Enable 2FA |
-| POST | `/api/v1/auth/totp/verify` | Verify TOTP code |
-| DELETE | `/api/v1/auth/totp` | Disable 2FA |
+All routes are under `/api/v1/`. The WebSocket endpoint is at `/api/v1/ws?token=<JWT>`.
 
-### Key Management
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/users/:id/keys` | Fetch key bundle for E2EE session |
-| PUT | `/api/v1/keys/identity` | Update identity + signed prekey |
-| POST | `/api/v1/keys/prekeys` | Upload one-time prekeys |
-| GET | `/api/v1/keys/prekeys/count` | Check remaining prekeys |
-| PUT | `/api/v1/keys/backup` | Upload encrypted key backup |
-| GET | `/api/v1/keys/backup` | Download encrypted key backup |
-| GET | `/api/v1/keys/backup/status` | Check if backup exists |
-| DELETE | `/api/v1/keys/backup` | Delete key backup |
+| Area | Endpoints | Description |
+|------|-----------|-------------|
+| Auth | `/auth/register`, `/auth/login`, `/auth/refresh` | Registration with PoW, JWT auth, TOTP 2FA |
+| Keys | `/users/:id/keys`, `/keys/prekeys`, `/keys/backup` | X3DH key bundles, prekey management, encrypted backup |
+| Servers | `/servers`, `/servers/:id/channels` | CRUD servers and channels |
+| Messages | `/channels/:id/messages` | Send/receive encrypted messages |
+| Sender Keys | `/channels/:id/sender-keys` | Group E2EE key distribution |
+| Roles | `/servers/:id/roles`, `/channels/:id/overwrites` | Permission management |
+| Friends | `/friends`, `/dm` | Friend requests, DMs, privacy settings |
+| Invites | `/servers/:id/invites`, `/invites/:code/join` | Server invite codes |
+| Voice | `/voice/:id/join` | LiveKit voice channel tokens |
+| Attachments | `/attachments/upload`, `/attachments/:id` | Encrypted file upload/download |
+| Admin | `/admin/stats`, `/admin/users` | Instance administration |
+| Registration Invites | `/registration-invites`, `/auth/invite-required` | Beta invite system |
 
-### Servers & Channels
-| Method | Path | Description |
-|--------|------|-------------|
-| GET/POST | `/api/v1/servers` | List / create servers |
-| GET | `/api/v1/servers/:id` | Get server details |
-| DELETE | `/api/v1/servers/:id` | Delete server (owner only) |
-| POST | `/api/v1/servers/:id/leave` | Leave server |
-| GET/POST | `/api/v1/servers/:id/channels` | List / create channels |
-| PUT/DELETE | `/api/v1/channels/:id` | Update / delete channel |
-| GET/POST | `/api/v1/servers/:id/categories` | List / create categories |
-| PUT | `/api/v1/channels/:id/category` | Assign channel to category |
+## License
 
-### Messages & Attachments
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/channels/:id/messages` | Paginated message history |
-| POST | `/api/v1/channels/:id/messages` | Send message |
-| POST | `/api/v1/attachments/upload` | Upload encrypted file |
-| GET | `/api/v1/attachments/:id` | Download encrypted file |
-
-### Roles & Permissions
-| Method | Path | Description |
-|--------|------|-------------|
-| GET/POST | `/api/v1/servers/:id/roles` | List / create roles |
-| PUT/DELETE | `/api/v1/servers/:id/roles/:rid` | Update / delete role |
-| PUT | `/api/v1/servers/:id/members/:uid/roles` | Assign role |
-| GET/PUT | `/api/v1/channels/:id/overwrites` | Channel permission overwrites |
-
-### Friends & DMs
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/friends` | List friends |
-| POST | `/api/v1/friends/request` | Send friend request |
-| POST | `/api/v1/friends/:id/accept` | Accept friend request |
-| GET/POST | `/api/v1/dm` | List / create DM channels |
-| PUT | `/api/v1/users/dm-privacy` | Set DM privacy |
-
-### Invites
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/servers/:id/invites` | Create invite |
-| POST | `/api/v1/invites/:code/join` | Join server via invite code |
-
-### User Profiles & Presence
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/users/:id/profile` | Get user profile |
-| PUT | `/api/v1/users/profile` | Update own profile (bio, banner) |
-| GET | `/api/v1/users/search` | Search users by username |
-| POST/DELETE | `/api/v1/users/:id/block` | Block / unblock user |
-| GET | `/api/v1/presence` | Bulk presence check by user IDs |
-
-### WebSocket
-| Path | Description |
-|------|-------------|
-| `GET /api/v1/ws?token=<JWT>` | Real-time messaging connection |
-
-#### Client → Server
-```json
-{ "type": "SendMessage", "payload": { "channel_id": "...", "sender_token": "...", "encrypted_body": "..." } }
-{ "type": "Subscribe", "payload": { "channel_id": "..." } }
-{ "type": "Unsubscribe", "payload": { "channel_id": "..." } }
-{ "type": "Typing", "payload": { "channel_id": "..." } }
-{ "type": "Ping" }
-```
-
-#### Server → Client
-```json
-{ "type": "NewMessage", "payload": { "id": "...", "channel_id": "...", ... } }
-{ "type": "UserTyping", "payload": { "channel_id": "...", "ephemeral_token": "..." } }
-{ "type": "MessageAck", "payload": { "message_id": "..." } }
-{ "type": "Subscribed", "payload": { "channel_id": "..." } }
-{ "type": "Error", "payload": { "message": "..." } }
-{ "type": "Pong" }
-```
-
-## Security Notes
-
-- All passwords hashed with Argon2id (memory-hard, side-channel resistant)
-- JWT tokens with short expiry + rotating refresh tokens
-- Prekeys consumed atomically (prevents race conditions in key exchange)
-- Expired messages purged automatically by background worker
-- No plaintext PII stored (email is SHA-256 hashed)
-- All file uploads treated as opaque encrypted blobs
-- Size bucketing prevents file-type inference from attachment size
-- Discord-style bitfield permissions with channel-level overwrites
-- Encrypted key backup uses Argon2id KDF + XSalsa20-Poly1305 — server stores opaque blob, zero knowledge of key material
+All rights reserved.

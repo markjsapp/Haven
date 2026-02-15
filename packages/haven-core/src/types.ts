@@ -11,6 +11,7 @@ export interface RegisterRequest {
   one_time_prekeys: string[]; // base64[]
   pow_challenge: string;
   pow_nonce: string;
+  invite_code?: string;
 }
 
 /** Fields the caller provides — PoW fields are auto-filled by the API client */
@@ -657,6 +658,22 @@ export interface TimeoutMemberRequest {
 
 export interface BulkDeleteRequest {
   message_ids: string[];
+}
+
+// ─── Registration Invites ────────────────────────────────
+
+export interface InviteRequiredResponse {
+  invite_required: boolean;
+}
+
+export interface RegistrationInviteResponse {
+  id: string;
+  code: string;
+  created_by: string | null;
+  used: boolean;
+  used_by: string | null;
+  expires_at: string | null;
+  created_at: string;
 }
 
 // ─── API Error ─────────────────────────────────────────
