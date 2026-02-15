@@ -67,7 +67,8 @@
       "WebFetch(domain:crates.io)",
       "Bash(npx tauri icon:*)",
       "WebFetch(domain:www.npmjs.com)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(cargo clippy:*)"
     ]
   }
 }

@@ -107,7 +107,7 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
     state
         .connections
         .entry(user_id)
-        .or_insert_with(Vec::new)
+        .or_default()
         .push(tx.clone());
 
     tracing::info!("WebSocket connected: user={}, session={}", user_id, session_id);
@@ -146,7 +146,7 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
                     continue;
                 }
             };
-            if ws_sink.send(Message::Text(text.into())).await.is_err() {
+            if ws_sink.send(Message::Text(text)).await.is_err() {
                 break;
             }
         }
@@ -472,6 +472,7 @@ async fn handle_resume(
 }
 
 /// Handle a SendMessage command: persist and fan out.
+#[allow(clippy::too_many_arguments)]
 async fn handle_send_message(
     user_id: Uuid,
     channel_id: Uuid,
@@ -543,7 +544,7 @@ async fn handle_send_message(
         }
     };
 
-    let has_attachments = attachment_ids.as_ref().map_or(false, |ids| !ids.is_empty());
+    let has_attachments = attachment_ids.as_ref().is_some_and(|ids| !ids.is_empty());
 
     // Persist message
     let message = match queries::insert_message(

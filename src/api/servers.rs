@@ -601,7 +601,7 @@ pub async fn get_audit_log(
     )
     .await?;
 
-    let limit = params.limit.unwrap_or(50).min(100).max(1);
+    let limit = params.limit.unwrap_or(50).clamp(1, 100);
     let entries = queries::get_audit_log(state.db.read(), server_id, limit, params.before).await?;
     Ok(Json(entries))
 }
