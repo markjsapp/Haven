@@ -19,3 +19,4 @@ pub mod reports;
 pub mod users;
 pub mod registration_invites;
 pub mod voice;
+pub mod gifs;

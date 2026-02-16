@@ -454,6 +454,11 @@ pub fn build_router(state: AppState) -> Router {
             delete(api::registration_invites::admin_delete_invite),
         );
 
+    // GIF proxy routes
+    let gif_routes = Router::new()
+        .route("/search", get(api::gifs::search_gifs))
+        .route("/trending", get(api::gifs::trending_gifs));
+
     // Assemble the full API
     let api = Router::new()
         .nest("/auth", auth_routes.merge(auth_protected))
@@ -471,6 +476,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(dm_privacy_routes)
         .nest("/reports", report_routes)
         .nest("/voice", voice_routes)
+        .nest("/gifs", gif_routes)
         .nest("/registration-invites", registration_invite_routes);
 
     Router::new()

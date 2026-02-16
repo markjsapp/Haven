@@ -68,6 +68,16 @@ export default function ServerSettings({ serverId, onClose }: Props) {
   const serverEmojis = customEmojis[serverId] ?? [];
   const staticCount = serverEmojis.filter((e) => !e.animated).length;
   const animatedCount = serverEmojis.filter((e) => e.animated).length;
+
+  // Re-fetch emojis from API when emoji tab is opened (ensures persistence)
+  useEffect(() => {
+    if (tab !== "emoji") return;
+    api.listServerEmojis(serverId).then((emojis) => {
+      useChatStore.setState((s) => ({
+        customEmojis: { ...s.customEmojis, [serverId]: emojis },
+      }));
+    }).catch(() => {});
+  }, [tab, serverId]);
   const [emojiUploading, setEmojiUploading] = useState(false);
   const [pendingEmoji, setPendingEmoji] = useState<{ file: File; preview: string; name: string } | null>(null);
   const [deleteEmojiTarget, setDeleteEmojiTarget] = useState<{ id: string; name: string } | null>(null);

@@ -6,7 +6,7 @@ import { useFriendsStore } from "../store/friends.js";
 const ProfilePopup = lazy(() => import("./ProfilePopup.js"));
 import ConfirmDialog from "./ConfirmDialog.js";
 import Avatar from "./Avatar.js";
-import type { ChannelMemberInfo } from "@haven/core";
+import type { ChannelMemberInfo, UserProfileResponse } from "@haven/core";
 
 interface DmMemberSidebarProps {
   channelId: string;
@@ -17,6 +17,7 @@ const MAX_GROUP_MEMBERS = 10;
 
 export default function DmMemberSidebar({ channelId, channelType }: DmMemberSidebarProps) {
   const api = useAuthStore((s) => s.api);
+  const currentUser = useAuthStore((s) => s.user);
   const presenceStatuses = usePresenceStore((s) => s.statuses);
   const fetchPresence = usePresenceStore((s) => s.fetchPresence);
   const loadChannels = useChatStore((s) => s.loadChannels);
@@ -51,6 +52,12 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
   };
 
   const isGroup = channelType === "group";
+  const isDm = channelType === "dm";
+
+  // For 1-on-1 DMs, find the other person
+  const otherMember = isDm && currentUser
+    ? members.find((m) => m.user_id !== currentUser.id)
+    : null;
 
   const handleLeaveGroup = async () => {
     try {
@@ -93,6 +100,16 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
     }
   }
 
+  // 1-on-1 DM → show profile card instead of member list
+  if (isDm && otherMember) {
+    return (
+      <aside className="member-sidebar dm-member-sidebar">
+        <DmProfileCard userId={otherMember.user_id} />
+      </aside>
+    );
+  }
+
+  // Group DM or fallback → show member list
   return (
     <aside className="member-sidebar dm-member-sidebar">
       <div className="member-sidebar-header">
@@ -205,5 +222,132 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
         />
       )}
     </aside>
+  );
+}
+
+/** Inline profile card for 1-on-1 DM sidebar */
+function DmProfileCard({ userId }: { userId: string }) {
+  const api = useAuthStore((s) => s.api);
+  const presenceStatus = usePresenceStore((s) => s.statuses[userId] ?? "offline");
+  const statusConfig = STATUS_CONFIG[presenceStatus] ?? STATUS_CONFIG.offline;
+
+  const [profile, setProfile] = useState<UserProfileResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.getUserProfile(userId).then((p) => {
+      if (!cancelled) {
+        setProfile(p);
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [userId, api]);
+
+  if (loading) {
+    return <div className="dm-profile-card-loading">Loading profile...</div>;
+  }
+
+  if (!profile) {
+    return <div className="dm-profile-card-loading">Profile unavailable</div>;
+  }
+
+  const displayName = profile.display_name || profile.username;
+
+  return (
+    <div className="dm-profile-card">
+      {/* Banner */}
+      <div
+        className={`dm-profile-banner${profile.banner_url ? " has-image" : ""}`}
+        style={profile.banner_url ? { backgroundImage: `url(${profile.banner_url})` } : undefined}
+      />
+
+      {/* Avatar + presence */}
+      <div className="dm-profile-avatar-section">
+        <div className="dm-profile-avatar-wrap">
+          <Avatar
+            avatarUrl={profile.avatar_url}
+            name={displayName}
+            size={80}
+            className="dm-profile-avatar"
+          />
+          <span
+            className="dm-profile-presence-dot"
+            style={{ backgroundColor: statusConfig.color }}
+            aria-label={statusConfig.label}
+          />
+        </div>
+      </div>
+
+      {/* Name block */}
+      <div className="dm-profile-names">
+        <span className="dm-profile-displayname">{displayName}</span>
+        <span className="dm-profile-username">{profile.username}</span>
+      </div>
+
+      <div className="dm-profile-divider" />
+
+      {/* Custom status */}
+      {profile.custom_status && (
+        <>
+          <div className="dm-profile-section">
+            <div className="dm-profile-section-value">{profile.custom_status}</div>
+          </div>
+          <div className="dm-profile-divider" />
+        </>
+      )}
+
+      {/* About me */}
+      {profile.about_me && (
+        <>
+          <div className="dm-profile-section">
+            <div className="dm-profile-section-label">ABOUT ME</div>
+            <div className="dm-profile-section-value">{profile.about_me}</div>
+          </div>
+          <div className="dm-profile-divider" />
+        </>
+      )}
+
+      {/* Member since */}
+      <div className="dm-profile-section">
+        <div className="dm-profile-section-label">MEMBER SINCE</div>
+        <div className="dm-profile-section-value">
+          {new Date(profile.created_at).toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+          })}
+        </div>
+      </div>
+
+      {/* Mutual info */}
+      {(profile.mutual_server_count > 0 || profile.mutual_friend_count > 0) && (
+        <>
+          <div className="dm-profile-divider" />
+          <div className="dm-profile-section">
+            {profile.mutual_server_count > 0 && (
+              <div className="dm-profile-mutual-row">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="dm-profile-mutual-icon">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                </svg>
+                <span>{profile.mutual_server_count} Mutual Server{profile.mutual_server_count !== 1 ? "s" : ""}</span>
+              </div>
+            )}
+            {profile.mutual_friend_count > 0 && (
+              <div className="dm-profile-mutual-row">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="dm-profile-mutual-icon">
+                  <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
+                </svg>
+                <span>{profile.mutual_friend_count} Mutual Friend{profile.mutual_friend_count !== 1 ? "s" : ""}</span>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
   );
 }

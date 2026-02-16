@@ -106,6 +106,10 @@ pub struct ConfigFile {
     pub registration_invite_only: bool,
     #[serde(default = "default_registration_invites_per_user")]
     pub registration_invites_per_user: u32,
+
+    // External APIs
+    #[serde(default)]
+    pub giphy_api_key: String,
 }
 
 // ─── TLS Config ───────────────────────────────────────
@@ -145,7 +149,7 @@ fn default_storage_backend() -> String { "local".into() }
 fn default_storage_dir() -> String { "./data/attachments".into() }
 fn default_s3_region() -> String { "us-east-1".into() }
 fn default_cors_origins() -> String { "*".into() }
-fn default_max_requests_per_minute() -> u32 { 300 }
+fn default_max_requests_per_minute() -> u32 { 1200 }
 fn default_max_ws_connections_per_user() -> u32 { 5 }
 fn default_broadcast_channel_capacity() -> usize { 4096 }
 fn default_ws_heartbeat_timeout_secs() -> u64 { 90 }
@@ -241,6 +245,9 @@ pub struct AppConfig {
     // Registration gating
     pub registration_invite_only: bool,
     pub registration_invites_per_user: u32,
+
+    // External APIs
+    pub giphy_api_key: String,
 }
 
 impl AppConfig {
@@ -300,6 +307,8 @@ impl AppConfig {
 
             registration_invite_only: false,
             registration_invites_per_user: 3,
+
+            giphy_api_key: String::new(),
         }
     }
 
@@ -432,6 +441,8 @@ impl AppConfig {
                 .unwrap_or_else(|_| "3".into())
                 .parse()
                 .unwrap_or(3),
+
+            giphy_api_key: env::var("GIPHY_API_KEY").unwrap_or_default(),
         }
     }
 
@@ -501,6 +512,8 @@ impl AppConfig {
 
             registration_invite_only: file.registration_invite_only,
             registration_invites_per_user: file.registration_invites_per_user,
+
+            giphy_api_key: file.giphy_api_key,
         }
     }
 
@@ -562,6 +575,8 @@ impl AppConfig {
 
             registration_invite_only: false,
             registration_invites_per_user: default_registration_invites_per_user(),
+
+            giphy_api_key: String::new(),
         };
 
         // Write the TOML file
@@ -620,6 +635,8 @@ impl AppConfig {
 
             registration_invite_only: file.registration_invite_only,
             registration_invites_per_user: file.registration_invites_per_user,
+
+            giphy_api_key: file.giphy_api_key,
         }
     }
 }

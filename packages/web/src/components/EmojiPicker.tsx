@@ -59,6 +59,12 @@ export default function EmojiPicker({ onSelect, onClose, serverId, position = "a
     ];
   }, [serverId, customEmojis]);
 
+  // When server emojis exist, put them first in category order
+  const categoryOrder = useMemo(() => {
+    if (!custom) return undefined;
+    return ["server-emojis", "frequent", "people", "nature", "foods", "activity", "places", "objects", "symbols", "flags"];
+  }, [custom]);
+
   return (
     <div className={`emoji-picker${position === "below" ? " emoji-picker-below" : ""}`} ref={ref} role="dialog" aria-label="Emoji picker">
       <Suspense fallback={<div className="emoji-picker-loading" />}>
@@ -79,6 +85,7 @@ export default function EmojiPicker({ onSelect, onClose, serverId, position = "a
           perLine={8}
           maxFrequentRows={2}
           custom={custom}
+          categories={categoryOrder}
         />
       </Suspense>
     </div>

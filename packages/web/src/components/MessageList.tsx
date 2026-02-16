@@ -88,10 +88,14 @@ export default function MessageList() {
   const pinnedMessageIds = useChatStore((s) => s.pinnedMessageIds);
   const userRoleColors = useChatStore((s) => s.userRoleColors);
   const customEmojis = useChatStore((s) => s.customEmojis);
+  const newMessageDividers = useChatStore((s) => s.newMessageDividers);
   const user = useAuthStore((s) => s.user);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const channelMessages = currentChannelId ? messages[currentChannelId] ?? [] : [];
+  const newDividerIndex = currentChannelId
+    ? (newMessageDividers[currentChannelId] ? channelMessages.length - newMessageDividers[currentChannelId] : -1)
+    : -1;
   const currentChannel = channels.find((c) => c.id === currentChannelId);
   const serverId = currentChannel?.server_id ?? null;
   const { can } = usePermissions(serverId);
@@ -208,6 +212,13 @@ export default function MessageList() {
           </div>
         ) : null;
 
+        const showNewDivider = i === newDividerIndex && i > 0;
+        const newDividerEl = showNewDivider ? (
+          <div className="new-messages-divider" key={`new-${msg.id}`}>
+            <span className="new-messages-divider-label">NEW</span>
+          </div>
+        ) : null;
+
         // System messages render differently
         if (msg.messageType === "system") {
           let systemContent: React.ReactNode = msg.text;
@@ -227,6 +238,7 @@ export default function MessageList() {
           return (
             <Fragment key={msg.id}>
               {dateDividerEl}
+              {newDividerEl}
               <div className="system-message" id={`msg-${msg.id}`}>
                 <span className="system-message-text">{systemContent}</span>
                 <span className="system-message-time">
@@ -260,6 +272,7 @@ export default function MessageList() {
           return (
             <Fragment key={msg.id}>
               {dateDividerEl}
+              {newDividerEl}
               <div id={`msg-${msg.id}`} className="message message-first message-blocked">
                 <div className="message-avatar">?</div>
                 <div className="message-content">
@@ -281,6 +294,7 @@ export default function MessageList() {
         return (
           <Fragment key={msg.id}>
             {dateDividerEl}
+            {newDividerEl}
             <div
               id={`msg-${msg.id}`}
               className={`message ${isGrouped ? "message-grouped" : "message-first"} ${highlightedMsgId === msg.id ? "message-highlight" : ""}`}

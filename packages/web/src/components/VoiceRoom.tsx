@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -54,13 +54,34 @@ export default function VoiceRoom({ channelId, channelName, serverId }: VoiceRoo
   const isThisChannel = currentChannelId === channelId;
   const isConnected = isThisChannel && (connectionState === "connected" || connectionState === "connecting");
 
+  // Debounce disconnects to handle React StrictMode double-mount.
+  // StrictMode unmounts then remounts, causing a stale LiveKit disconnect
+  // from the first instance. By delaying, we give the remounted instance
+  // time to connect and cancel the pending leave.
+  const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleConnected = useCallback(() => {
+    if (disconnectTimerRef.current) {
+      clearTimeout(disconnectTimerRef.current!);
+      disconnectTimerRef.current = null;
+    }
     setConnectionState("connected");
   }, [setConnectionState]);
 
   const handleDisconnected = useCallback(() => {
-    leaveVoice();
+    disconnectTimerRef.current = setTimeout(() => {
+      const { connectionState: cs } = useVoiceStore.getState();
+      if (cs === "disconnected") return; // Already handled (explicit leave)
+      leaveVoice();
+    }, 2000);
   }, [leaveVoice]);
+
+  // Clean up disconnect timer on unmount
+  useEffect(() => {
+    return () => {
+      if (disconnectTimerRef.current) clearTimeout(disconnectTimerRef.current);
+    };
+  }, []);
 
   // Auto-disconnect voice when window/tab is closed or page is navigated away
   useEffect(() => {

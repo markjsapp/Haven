@@ -71,6 +71,7 @@ import type {
   SetAdminRequest,
   InviteRequiredResponse,
   RegistrationInviteResponse,
+  GifSearchResponse,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -848,6 +849,18 @@ export class HavenApi {
 
   async serverDeafenUser(channelId: string, userId: string, deafened: boolean): Promise<void> {
     await this.put(`/api/v1/voice/${channelId}/members/${userId}/deafen`, { deafened });
+  }
+
+  // ─── GIF Search ─────────────────────────────────
+
+  async searchGifs(query: string, offset?: number): Promise<GifSearchResponse> {
+    const params = new URLSearchParams({ q: query });
+    if (offset !== undefined) params.set("offset", String(offset));
+    return this.get<GifSearchResponse>(`/api/v1/gifs/search?${params}`);
+  }
+
+  async trendingGifs(): Promise<GifSearchResponse> {
+    return this.get<GifSearchResponse>("/api/v1/gifs/trending");
   }
 
   // ─── HTTP Helpers ────────────────────────────────

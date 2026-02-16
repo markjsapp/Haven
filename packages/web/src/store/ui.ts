@@ -42,11 +42,25 @@ interface UiState {
   /** Private user notes (userId -> note text, only visible to you) */
   userNotes: Record<string, string>;
 
+  /** Show a send button in the message bar */
+  showSendButton: boolean;
+
+  /** Enable browser spellcheck in message bar */
+  spellcheck: boolean;
+
   /** Custom CSS injected by the user */
   customCss: string;
 
   /** Mobile sidebar overlay state (not persisted) */
   mobileSidebarOpen: boolean;
+
+  /** Resizable sidebar widths */
+  channelSidebarWidth: number;
+  memberSidebarWidth: number;
+  serverBarWidth: number;
+
+  /** Hide muted channels in channel sidebar */
+  hideMutedChannels: boolean;
 
   selectServer(id: string | null): void;
   toggleMemberSidebar(): void;
@@ -68,9 +82,15 @@ interface UiState {
   setA11yHighContrast(enabled: boolean): void;
   setA11yAlwaysShowTimestamps(enabled: boolean): void;
   setUserNote(userId: string, note: string): void;
+  setShowSendButton(show: boolean): void;
+  setSpellcheck(enabled: boolean): void;
   setCustomCss(css: string): void;
   toggleMobileSidebar(): void;
   setMobileSidebarOpen(open: boolean): void;
+  setChannelSidebarWidth(w: number): void;
+  setMemberSidebarWidth(w: number): void;
+  setServerBarWidth(w: number): void;
+  setHideMutedChannels(hide: boolean): void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -95,8 +115,14 @@ export const useUiStore = create<UiState>()(
       a11yAlwaysShowTimestamps: false,
 
       userNotes: {},
+      showSendButton: false,
+      spellcheck: true,
       customCss: "",
       mobileSidebarOpen: false,
+      channelSidebarWidth: 240,
+      memberSidebarWidth: 240,
+      serverBarWidth: 72,
+      hideMutedChannels: false,
 
       selectServer(id) {
         set({
@@ -180,9 +206,15 @@ export const useUiStore = create<UiState>()(
       setA11yFont(font) { set({ a11yFont: font }); },
       setA11yHighContrast(enabled) { set({ a11yHighContrast: enabled }); },
       setA11yAlwaysShowTimestamps(enabled) { set({ a11yAlwaysShowTimestamps: enabled }); },
+      setShowSendButton(show) { set({ showSendButton: show }); },
+      setSpellcheck(enabled) { set({ spellcheck: enabled }); },
       setCustomCss(css) { set({ customCss: css }); },
       toggleMobileSidebar() { set((s) => ({ mobileSidebarOpen: !s.mobileSidebarOpen })); },
       setMobileSidebarOpen(open) { set({ mobileSidebarOpen: open }); },
+      setChannelSidebarWidth(w) { set({ channelSidebarWidth: w }); },
+      setMemberSidebarWidth(w) { set({ memberSidebarWidth: w }); },
+      setServerBarWidth(w) { set({ serverBarWidth: w }); },
+      setHideMutedChannels(hide) { set({ hideMutedChannels: hide }); },
       setUserNote(userId, note) {
         set((s) => {
           if (!note.trim()) {
@@ -206,7 +238,13 @@ export const useUiStore = create<UiState>()(
         a11yHighContrast: state.a11yHighContrast,
         a11yAlwaysShowTimestamps: state.a11yAlwaysShowTimestamps,
         userNotes: state.userNotes,
+        showSendButton: state.showSendButton,
+        spellcheck: state.spellcheck,
         customCss: state.customCss,
+        channelSidebarWidth: state.channelSidebarWidth,
+        memberSidebarWidth: state.memberSidebarWidth,
+        serverBarWidth: state.serverBarWidth,
+        hideMutedChannels: state.hideMutedChannels,
       }),
     },
   ),

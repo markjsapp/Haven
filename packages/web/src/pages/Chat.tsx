@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
+import { usePresenceStore } from "../store/presence.js";
 import ServerBar from "../components/ServerBar.js";
 import ChannelSidebar from "../components/ChannelSidebar.js";
 import MemberSidebar from "../components/MemberSidebar.js";
@@ -30,6 +31,7 @@ export default function Chat() {
   const connect = useChatStore((s) => s.connect);
   const disconnect = useChatStore((s) => s.disconnect);
   const loadChannels = useChatStore((s) => s.loadChannels);
+  const dataLoaded = useChatStore((s) => s.dataLoaded);
   const wsState = useChatStore((s) => s.wsState);
   const currentChannelId = useChatStore((s) => s.currentChannelId);
   const channels = useChatStore((s) => s.channels);
@@ -50,6 +52,48 @@ export default function Chat() {
   const mobileSidebarOpen = useUiStore((s) => s.mobileSidebarOpen);
   const toggleMobileSidebar = useUiStore((s) => s.toggleMobileSidebar);
   const setMobileSidebarOpen = useUiStore((s) => s.setMobileSidebarOpen);
+  const channelSidebarWidth = useUiStore((s) => s.channelSidebarWidth);
+  const memberSidebarWidth = useUiStore((s) => s.memberSidebarWidth);
+  const serverBarWidth = useUiStore((s) => s.serverBarWidth);
+  const setChannelSidebarWidth = useUiStore((s) => s.setChannelSidebarWidth);
+  const setMemberSidebarWidth = useUiStore((s) => s.setMemberSidebarWidth);
+  const setServerBarWidth = useUiStore((s) => s.setServerBarWidth);
+
+  // ─── Sidebar width sync ────────────────────────────
+  useEffect(() => {
+    document.documentElement.style.setProperty("--channel-sidebar-width", `${channelSidebarWidth}px`);
+    document.documentElement.style.setProperty("--member-sidebar-width", `${memberSidebarWidth}px`);
+    document.documentElement.style.setProperty("--server-bar-width", `${serverBarWidth}px`);
+  }, [channelSidebarWidth, memberSidebarWidth, serverBarWidth]);
+
+  function handleResizeStart(
+    e: React.MouseEvent,
+    cssVar: string,
+    currentWidth: number,
+    min: number,
+    max: number,
+    setter: (w: number) => void,
+    direction: 1 | -1 = 1,
+  ) {
+    e.preventDefault();
+    const startX = e.clientX;
+    let width = currentWidth;
+    const handleMove = (ev: MouseEvent) => {
+      width = Math.min(max, Math.max(min, currentWidth + direction * (ev.clientX - startX)));
+      document.documentElement.style.setProperty(cssVar, `${width}px`);
+    };
+    const handleUp = () => {
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("mouseup", handleUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setter(width);
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mouseup", handleUp);
+  }
 
   // ─── Mobile detection ──────────────────────────────
   const [isMobile, setIsMobile] = useState(false);
@@ -170,8 +214,20 @@ export default function Chat() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [showCommandPalette]);
 
+  // Always clear drag overlay on any drop event. Uses capture phase so it fires
+  // even when child elements call stopPropagation() (e.g. TipTap editor's handleDrop).
+  useEffect(() => {
+    const clearDrag = () => {
+      dragCounterRef.current = 0;
+      setDragOver(false);
+    };
+    window.addEventListener("drop", clearDrag, true);
+    return () => window.removeEventListener("drop", clearDrag, true);
+  }, []);
+
   // Start WS connection and HTTP data loading in parallel.
   // loadChannels() is pure HTTP — no reason to wait for WS handshake.
+  // Note: loadChannels() has an internal guard to prevent concurrent calls.
   useEffect(() => {
     connect();
     loadChannels();
@@ -179,6 +235,8 @@ export default function Chat() {
   }, [connect, disconnect, loadChannels]);
 
   // Once WS connects, subscribe to any channels already loaded via HTTP
+  // and re-fetch presence (server broadcasts "online" on connect, so
+  // presence fetched before WS connect may be stale)
   useEffect(() => {
     if (wsState === "connected") {
       const { channels: chs, ws } = useChatStore.getState();
@@ -187,8 +245,20 @@ export default function Chat() {
           ws.subscribe(ch.id);
         }
       }
+      // Broadcast own status and re-fetch member presence after short delay
+      // to let the server process the online broadcast first
+      const ps = usePresenceStore.getState();
+      ps.setOwnStatus(ps.ownStatus);
+      const timer = setTimeout(() => {
+        const knownIds = Object.keys(ps.statuses);
+        if (user?.id && !knownIds.includes(user.id)) knownIds.push(user.id);
+        if (knownIds.length > 0) {
+          ps.fetchPresence(knownIds);
+        }
+      }, 500);
+      return () => clearTimeout(timer);
     }
-  }, [wsState]);
+  }, [wsState, user?.id]);
 
   const currentChannel = channels.find((c) => c.id === currentChannelId);
   const channelDisplay = currentChannel
@@ -198,6 +268,8 @@ export default function Chat() {
   const isServerChannel = currentChannel && currentChannel.server_id !== null;
   const isVoiceChannel = currentChannel?.channel_type === "voice";
   const isDmOrGroupChannel = currentChannel && (currentChannel.channel_type === "dm" || currentChannel.channel_type === "group");
+  const is1on1Dm = currentChannel?.channel_type === "dm";
+  const isGroupDm = currentChannel?.channel_type === "group";
   const isDmPending = currentChannel?.dm_status === "pending";
   const showFriends = useUiStore((s) => s.showFriends);
 
@@ -218,6 +290,23 @@ export default function Chat() {
         : `Message #${channelDisplay.name}`
     : "Type a message...";
 
+  // Show splash screen between login and app while data loads
+  if (!dataLoaded) {
+    return (
+      <div className="splash-screen">
+        <div className="splash-logo">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18L19.27 7.5 12 10.82 4.73 7.5 12 4.18zM4 8.83l7 3.5V19.5l-7-3.5V8.83zm9 10.67V12.33l7-3.5V15.5l-7 3.5z"/>
+          </svg>
+        </div>
+        <div className="splash-title">Haven</div>
+        <div className="splash-dots">
+          <span /><span /><span />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`chat-layout${isMobile ? " mobile" : ""}`}>
       <div className="titlebar-drag-region" data-tauri-drag-region />
@@ -229,7 +318,9 @@ export default function Chat() {
       )}
       <div className={`chat-sidebar-group${isMobile && mobileSidebarOpen ? " open" : ""}`}>
         <ServerBar />
+        {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--server-bar-width", serverBarWidth, 56, 96, setServerBarWidth)} />}
         <ChannelSidebar />
+        {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--channel-sidebar-width", channelSidebarWidth, 180, 380, setChannelSidebarWidth)} />}
       </div>
 
       <div className="chat-main" role="main">
@@ -285,16 +376,18 @@ export default function Chat() {
                     <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
                   </svg>
                 </button>
-                <button
-                  className={`chat-header-btn ${memberSidebarOpen ? "active" : ""}`}
-                  onClick={toggleMemberSidebar}
-                  title="Member List"
-                  aria-label="Member List"
-                >
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
-                  </svg>
-                </button>
+                {!is1on1Dm && (
+                  <button
+                    className={`chat-header-btn ${memberSidebarOpen ? "active" : ""}`}
+                    onClick={toggleMemberSidebar}
+                    title="Member List"
+                    aria-label="Member List"
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
+                    </svg>
+                  </button>
+                )}
               </>
             )}
             <span className={`ws-badge ws-${wsState}`} />
@@ -353,11 +446,26 @@ export default function Chat() {
       </div>
 
       {memberSidebarOpen && isServerChannel && currentChannel && selectedServerId !== null && (
-        <MemberSidebar serverId={currentChannel.server_id!} />
+        <>
+          {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} />}
+          <MemberSidebar serverId={currentChannel.server_id!} />
+        </>
       )}
 
-      {memberSidebarOpen && isDmOrGroupChannel && currentChannel && !(showFriends && selectedServerId === null) && (
-        <DmMemberSidebar channelId={currentChannel.id} channelType={currentChannel.channel_type} />
+      {/* 1-on-1 DM: always show profile card sidebar */}
+      {is1on1Dm && currentChannel && !(showFriends && selectedServerId === null) && (
+        <>
+          {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} />}
+          <DmMemberSidebar channelId={currentChannel.id} channelType={currentChannel.channel_type} />
+        </>
+      )}
+
+      {/* Group DM: toggle member list with button */}
+      {memberSidebarOpen && isGroupDm && currentChannel && !(showFriends && selectedServerId === null) && (
+        <>
+          {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} />}
+          <DmMemberSidebar channelId={currentChannel.id} channelType={currentChannel.channel_type} />
+        </>
       )}
 
       {pinnedPanelOpen && currentChannelId && <PinnedMessagesPanel channelId={currentChannelId} />}

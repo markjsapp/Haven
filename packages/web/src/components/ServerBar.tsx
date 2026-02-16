@@ -131,6 +131,27 @@ export default function ServerBar() {
     [sortedServers, folderedServerIds]
   );
 
+  // Interleaved display order: folders appear at the position of their first server
+  const displayItems = useMemo(() => {
+    const items: string[] = [];
+    const seenFolders = new Set<string>();
+    for (const serverId of serverOrder) {
+      const folder = folders.find((f) => f.serverIds.includes(serverId));
+      if (folder) {
+        if (!seenFolders.has(folder.id)) {
+          seenFolders.add(folder.id);
+          items.push(`folder:${folder.id}`);
+        }
+      } else {
+        items.push(serverId);
+      }
+    }
+    for (const f of folders) {
+      if (!seenFolders.has(f.id)) items.push(`folder:${f.id}`);
+    }
+    return items;
+  }, [serverOrder, folders]);
+
   function createFolder(serverId: string) {
     const srv = servers.find((s) => s.id === serverId);
     const name = srv ? parseServerName(srv.encrypted_meta) : "Folder";
@@ -188,39 +209,111 @@ export default function ServerBar() {
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
-  const [dragServerId, setDragServerId] = useState<string | null>(null);
+  const [dragActiveId, setDragActiveId] = useState<string | null>(null);
 
   function handleServerDragStart(event: DragStartEvent) {
-    setDragServerId(event.active.id as string);
+    setDragActiveId(event.active.id as string);
+  }
+
+  function findServerFolder(serverId: string): ServerFolder | undefined {
+    return folders.find((f) => f.serverIds.includes(serverId));
+  }
+
+  function rebuildServerOrderFromDisplay(newDisplay: string[]) {
+    const newOrder: string[] = [];
+    for (const item of newDisplay) {
+      if (item.startsWith("folder:")) {
+        const fId = item.replace("folder:", "");
+        const f = folders.find((ff) => ff.id === fId);
+        if (f) newOrder.push(...f.serverIds);
+      } else {
+        newOrder.push(item);
+      }
+    }
+    setServerOrder(newOrder);
+    saveServerOrder(newOrder);
   }
 
   function handleServerDragEnd(event: DragEndEvent) {
-    setDragServerId(null);
+    setDragActiveId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
     const activeId = active.id as string;
-    const overId = over.id as string;
+    let overId = over.id as string;
+    const isActiveFolder = activeId.startsWith("folder:");
 
-    // Check if dropped on a folder drop zone
+    // Normalize folder-drop zone IDs → folder:xxx
     if (overId.startsWith("folder-drop-")) {
-      const folderId = overId.replace("folder-drop-", "");
-      // Don't add if already in this folder
+      overId = `folder:${overId.replace("folder-drop-", "")}`;
+    }
+    const isOverFolder = overId.startsWith("folder:");
+
+    // CASE A: Dragging a folder → reorder in display list
+    if (isActiveFolder) {
+      const oldIdx = displayItems.indexOf(activeId);
+      const newIdx = displayItems.indexOf(overId);
+      if (oldIdx !== -1 && newIdx !== -1 && oldIdx !== newIdx) {
+        rebuildServerOrderFromDisplay(arrayMove(displayItems, oldIdx, newIdx));
+      }
+      return;
+    }
+
+    // CASE B: Dragging a server onto a folder → add to folder
+    if (isOverFolder) {
+      const folderId = overId.replace("folder:", "");
       const folder = folders.find((f) => f.id === folderId);
       if (folder && !folder.serverIds.includes(activeId)) {
+        const sourceFolder = findServerFolder(activeId);
+        if (sourceFolder) removeFromFolder(sourceFolder.id, activeId);
         addToFolder(folderId, activeId);
       }
       return;
     }
 
-    // Normal server reorder
-    const ids = topLevelServers.map((s) => s.id);
-    const oldIdx = ids.indexOf(activeId);
-    const newIdx = ids.indexOf(overId);
-    if (oldIdx === -1 || newIdx === -1) return;
-    const newOrder = arrayMove(sortedServers.map((s) => s.id), sortedServers.findIndex((s) => s.id === activeId), sortedServers.findIndex((s) => s.id === overId));
-    setServerOrder(newOrder);
-    saveServerOrder(newOrder);
+    // CASE C: Both are servers
+    const activeFolder = findServerFolder(activeId);
+    const overFolder = findServerFolder(overId);
+
+    // C1: Same folder → reorder within
+    if (activeFolder && overFolder && activeFolder.id === overFolder.id) {
+      const ids = activeFolder.serverIds;
+      const oldIdx = ids.indexOf(activeId);
+      const newIdx = ids.indexOf(overId);
+      if (oldIdx !== -1 && newIdx !== -1) {
+        const updated = folders.map((f) =>
+          f.id === activeFolder.id ? { ...f, serverIds: arrayMove(ids, oldIdx, newIdx) } : f
+        );
+        setFolders(updated);
+        saveFolders(updated);
+      }
+      return;
+    }
+
+    // C2: From folder to top-level
+    if (activeFolder && !overFolder) {
+      removeFromFolder(activeFolder.id, activeId);
+      const newOrder = serverOrder.filter((id) => id !== activeId);
+      const overIdx = newOrder.indexOf(overId);
+      if (overIdx !== -1) newOrder.splice(overIdx, 0, activeId);
+      else newOrder.push(activeId);
+      setServerOrder(newOrder);
+      saveServerOrder(newOrder);
+      return;
+    }
+
+    // C3: Top-level onto server inside a folder → add to that folder
+    if (!activeFolder && overFolder) {
+      addToFolder(overFolder.id, activeId);
+      return;
+    }
+
+    // C4: Both top-level → reorder in display list
+    const oldIdx = displayItems.indexOf(activeId);
+    const newIdx = displayItems.indexOf(overId);
+    if (oldIdx !== -1 && newIdx !== -1) {
+      rebuildServerOrderFromDisplay(arrayMove(displayItems, oldIdx, newIdx));
+    }
   }
 
   // Compute per-server unread totals
@@ -399,63 +492,57 @@ export default function ServerBar() {
           onDragStart={handleServerDragStart}
           onDragEnd={handleServerDragEnd}
         >
-          <SortableContext items={topLevelServers.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-            {/* Render folders first */}
-            {folders.map((folder) => {
-              const isExpanded = expandedFolders.has(folder.id);
-              const folderServers = folder.serverIds
-                .map((id) => servers.find((s) => s.id === id))
-                .filter(Boolean) as typeof servers;
-              const folderUnread = folderServers.reduce((sum, s) => sum + (serverUnreads[s.id] ?? 0), 0);
-              const hasActive = folderServers.some((s) => s.id === selectedServerId);
-              return (
-                <DroppableFolderIcon
-                  key={`folder-${folder.id}`}
-                  folderId={folder.id}
-                  folder={folder}
-                  isExpanded={isExpanded}
-                  hasActive={hasActive}
-                  folderUnread={folderUnread}
-                  onToggle={() => toggleFolder(folder.id)}
-                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFolderCtxMenu({ x: e.clientX, y: e.clientY, folderId: folder.id }); }}
-                >
-                  {isExpanded && (
-                    <div className="server-folder-expanded">
-                      {folderServers.map((srv) => {
-                        const name = parseServerName(srv.encrypted_meta);
-                        const isActive = selectedServerId === srv.id;
-                        const srvUnread = serverUnreads[srv.id] ?? 0;
-                        return (
-                          <div key={srv.id} className={`server-icon-wrapper ${isActive ? "active" : ""}`}>
-                            <span className="server-pill" />
-                            <button
-                              className={`server-icon ${isActive ? "active" : ""}`}
-                              onClick={() => selectServer(srv.id)}
+          <SortableContext items={displayItems} strategy={verticalListSortingStrategy}>
+            {displayItems.map((item) => {
+              if (item.startsWith("folder:")) {
+                const folderId = item.replace("folder:", "");
+                const folder = folders.find((f) => f.id === folderId);
+                if (!folder) return null;
+                const isExpanded = expandedFolders.has(folder.id);
+                const folderServers = folder.serverIds
+                  .map((id) => servers.find((s) => s.id === id))
+                  .filter(Boolean) as typeof servers;
+                const folderUnread = folderServers.reduce((sum, s) => sum + (serverUnreads[s.id] ?? 0), 0);
+                const hasActive = folderServers.some((s) => s.id === selectedServerId);
+                return (
+                  <SortableFolderIcon
+                    key={item}
+                    id={item}
+                    folderId={folder.id}
+                    folder={folder}
+                    isExpanded={isExpanded}
+                    hasActive={hasActive}
+                    folderUnread={folderUnread}
+                    onToggle={() => toggleFolder(folder.id)}
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFolderCtxMenu({ x: e.clientX, y: e.clientY, folderId: folder.id }); }}
+                  >
+                    {isExpanded && (
+                      <SortableContext items={folder.serverIds} strategy={verticalListSortingStrategy}>
+                        {folderServers.map((srv) => {
+                          const name = parseServerName(srv.encrypted_meta);
+                          const isActive = selectedServerId === srv.id;
+                          const srvUnread = serverUnreads[srv.id] ?? 0;
+                          return (
+                            <SortableServerIcon
+                              key={srv.id}
+                              id={srv.id}
+                              name={name}
+                              iconUrl={srv.icon_url}
+                              isActive={isActive}
+                              unread={srvUnread}
+                              onSelect={() => selectServer(srv.id)}
                               onContextMenu={(e) => handleServerContextMenu(e, srv.id)}
-                              title={name}
-                              aria-label={name}
-                              data-roving-item
-                              tabIndex={isActive ? 0 : -1}
-                            >
-                              {srv.icon_url ? (
-                                <img src={srv.icon_url} alt={name} className="server-icon-img" />
-                              ) : (
-                                name.charAt(0).toUpperCase()
-                              )}
-                              {srvUnread > 0 && <span className="server-unread-dot" />}
-                            </button>
-                          </div>
-                        );
-                      })}
-                      <div className="server-folder-end-line" style={{ borderColor: folder.color }} />
-                    </div>
-                  )}
-                </DroppableFolderIcon>
-              );
-            })}
-
-            {/* Top-level servers (not in any folder) */}
-            {topLevelServers.map((srv) => {
+                              innerRef={(el) => { if (el) serverItemRefs.current.set(srv.id, el); else serverItemRefs.current.delete(srv.id); }}
+                            />
+                          );
+                        })}
+                      </SortableContext>
+                    )}
+                  </SortableFolderIcon>
+                );
+              }
+              const srv = servers.find((s) => s.id === item);
+              if (!srv) return null;
               const name = parseServerName(srv.encrypted_meta);
               const isActive = selectedServerId === srv.id;
               const srvUnread = serverUnreads[srv.id] ?? 0;
@@ -476,8 +563,22 @@ export default function ServerBar() {
           </SortableContext>
 
           <DragOverlay>
-            {dragServerId ? (() => {
-              const srv = sortedServers.find((s) => s.id === dragServerId);
+            {dragActiveId ? (() => {
+              if (dragActiveId.startsWith("folder:")) {
+                const folderId = dragActiveId.replace("folder:", "");
+                const folder = folders.find((f) => f.id === folderId);
+                if (!folder) return null;
+                return (
+                  <div className="server-icon-wrapper server-drag-overlay">
+                    <div className="server-folder-icon" style={{ borderColor: folder.color }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill={folder.color} aria-hidden="true">
+                        <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                      </svg>
+                    </div>
+                  </div>
+                );
+              }
+              const srv = servers.find((s) => s.id === dragActiveId);
               if (!srv) return null;
               const name = parseServerName(srv.encrypted_meta);
               return (
@@ -831,7 +932,7 @@ function SortableServerIcon({
         ) : (
           name.charAt(0).toUpperCase()
         )}
-        {unread > 0 && <span className="server-unread-dot" />}
+        {unread > 0 && <span className="server-unread-badge">{unread}</span>}
       </button>
     </div>
   );
@@ -918,7 +1019,8 @@ function ServerBarContextMenu({
   );
 }
 
-function DroppableFolderIcon({
+function SortableFolderIcon({
+  id,
   folderId,
   folder,
   isExpanded,
@@ -928,6 +1030,7 @@ function DroppableFolderIcon({
   onContextMenu,
   children,
 }: {
+  id: string;
   folderId: string;
   folder: ServerFolder;
   isExpanded: boolean;
@@ -937,29 +1040,58 @@ function DroppableFolderIcon({
   onContextMenu: (e: React.MouseEvent) => void;
   children?: React.ReactNode;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `folder-drop-${folderId}` });
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setSortableRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `folder-drop-${folderId}` });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    opacity: isDragging ? 0.3 : undefined,
+  };
+
+  const folderButton = (
+    <button
+      className={`server-folder-icon ${hasActive ? "active" : ""}`}
+      style={{ borderColor: folder.color }}
+      onClick={onToggle}
+      title={folder.name}
+      aria-label={`${folder.name} folder${isExpanded ? " (expanded)" : ""}`}
+      aria-expanded={isExpanded}
+      data-roving-item
+      {...listeners}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill={folder.color} aria-hidden="true">
+        <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+      </svg>
+      {folderUnread > 0 && <span className="server-unread-dot" />}
+    </button>
+  );
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(el) => { setSortableRef(el); setDropRef(el); }}
+      style={style}
       className={`server-folder-wrapper ${isOver ? "folder-drop-hover" : ""}`}
       onContextMenu={onContextMenu}
+      {...attributes}
     >
-      <button
-        className={`server-folder-icon ${hasActive ? "active" : ""}`}
-        style={{ borderColor: folder.color }}
-        onClick={onToggle}
-        title={folder.name}
-        aria-label={`${folder.name} folder${isExpanded ? " (expanded)" : ""}`}
-        aria-expanded={isExpanded}
-        data-roving-item
-      >
-        <span style={{ color: folder.color, fontSize: 14, fontWeight: 700 }}>
-          {folder.name.charAt(0).toUpperCase()}
-        </span>
-        {folderUnread > 0 && <span className="server-unread-dot" />}
-      </button>
-      {children}
+      {isExpanded ? (
+        <div className="server-folder-expanded" style={{ "--folder-bg": `${folder.color}18` } as React.CSSProperties}>
+          {folderButton}
+          {children}
+          <div className="server-folder-end-line" style={{ borderColor: folder.color }} />
+        </div>
+      ) : (
+        folderButton
+      )}
     </div>
   );
 }
