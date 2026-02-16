@@ -22,11 +22,13 @@ Haven is a full-featured chat application — servers, channels, DMs, friends, r
 
 **Communication** — Servers with text and voice channels, 1-on-1 and group DMs, friend requests, typing indicators, online presence, link previews, @mentions, message pinning, emoji reactions, big emoji rendering
 
-**Organization** — Channel categories with drag-and-drop, Discord-style roles and permissions (bitfield with channel overwrites), shareable invite codes, server management, audit logs
+**Media** — Encrypted file attachments with inline image/video/audio previews, image lightbox viewer, embedded audio player with seek and volume controls, video playback with MIME normalization, spoiler overlays for sensitive content, drag-and-drop uploads with progress tracking, thumbnail previews during loading
+
+**Organization** — Channel categories with drag-and-drop, server folders for grouping servers, Discord-style roles and permissions (bitfield with channel overwrites), shareable invite codes, server management, audit logs
 
 **Security** — X3DH + Double Ratchet for DMs (Signal Protocol), Sender Keys for group channels, encrypted file attachments, encrypted key backup (Argon2id KDF), Argon2id password hashing, JWT + rotating refresh tokens, optional TOTP 2FA, proof-of-work registration gate
 
-**Voice** — LiveKit-powered voice channels with server mute/deafen controls
+**Voice** — LiveKit-powered voice channels with screen sharing (360p–4K quality presets), per-user volume control (0–200%), server mute/deafen, right-click context menu on participants
 
 ## Tech Stack
 
@@ -98,16 +100,14 @@ The first user to register is automatically promoted to instance admin.
 
 ## Testing
 
-Haven has **222 automated tests** across the stack:
-
 ```bash
-# Rust — 81 unit + 126 integration + 10 WebSocket = 217 tests
+# Rust backend
 cargo test
 
 # haven-core — 78 tests
 cd packages/haven-core && npx vitest run
 
-# Web frontend — 46 tests
+# Web frontend — 53 tests
 cd packages/web && npx vitest run
 ```
 

@@ -1357,6 +1357,30 @@ pub struct SetAdminRequest {
     pub is_admin: bool,
 }
 
+// ─── GIF Search (Giphy Proxy) ────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct GifSearchQuery {
+    pub q: String,
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GifSearchResponse {
+    pub results: Vec<GifResult>,
+    pub total_count: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GifResult {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    pub preview_url: String,
+    pub width: u32,
+    pub height: u32,
+}
+
 // ─── Validation helpers ───────────────────────────────
 
 use std::sync::LazyLock;

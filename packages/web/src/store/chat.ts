@@ -30,12 +30,14 @@ export interface AttachmentMeta {
   thumbnail?: string; // base64 data URL — small JPEG preview (images only)
   width?: number;     // original image width
   height?: number;    // original image height
+  spoiler?: boolean;  // true if marked as spoiler (blur until clicked)
 }
 
 export interface PendingUpload {
   file: File;
   progress: number; // 0-100
   status: "pending" | "uploading" | "done" | "error";
+  spoiler?: boolean;
   meta?: AttachmentMeta;
 }
 
@@ -103,6 +105,10 @@ interface ChatState {
   memberTimeouts: Record<string, string | null>;
   /** Incremented when server membership changes (join/leave/kick) — triggers member list refresh */
   memberListVersion: number;
+  /** channelId -> unread count snapshot (at time of opening), used for "NEW" divider */
+  newMessageDividers: Record<string, number>;
+  /** Set to true after initial loadChannels() completes (used by splash screen) */
+  dataLoaded: boolean;
 
   connect(): void;
   disconnect(): void;
@@ -117,6 +123,7 @@ interface ChatState {
   sendMessageToChannel(channelId: string, text: string, formatting?: { contentType: string; data: object }): Promise<void>;
   addFiles(files: File[]): void;
   removePendingUpload(index: number): void;
+  togglePendingUploadSpoiler(index: number): void;
   uploadPendingFiles(): Promise<AttachmentMeta[]>;
   startEditing(messageId: string): void;
   cancelEditing(): void;
@@ -184,6 +191,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   customEmojis: {},
   memberTimeouts: {},
   memberListVersion: 0,
+  newMessageDividers: {},
+  dataLoaded: false,
 
   connect() {
     const { api } = useAuthStore.getState();
@@ -473,10 +482,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   async loadChannels() {
+    // Prevent concurrent calls (React Strict Mode fires effects twice)
+    if ((get() as any)._channelsLoading) return;
+    set({ _channelsLoading: true } as any);
+
     const { api } = useAuthStore.getState();
 
     // Load servers first (everything else depends on the server list)
     const servers = await api.listServers();
+
+    // Normalize relative icon URLs to absolute (needed for Tauri / custom server URL)
+    const base = getServerUrl();
+    for (const srv of servers) {
+      if (srv.icon_url && srv.icon_url.startsWith("/")) {
+        srv.icon_url = base + srv.icon_url;
+      }
+    }
 
     // Fire ALL independent requests in parallel — DMs, members, and blocked
     // users no longer wait for server channels/categories/roles to finish
@@ -496,7 +517,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       api.listDmChannels(),
       Promise.all(servers.map((server) => api.listServerMembers(server.id))),
       api.getBlockedUsers().catch(() => [] as Array<{ user_id: string; username: string; blocked_at: string }>),
-      Promise.all(servers.map((server) => api.listServerEmojis(server.id).catch(() => [] as CustomEmojiResponse[]))),
+      Promise.all(servers.map((server) => api.listServerEmojis(server.id).catch((err) => {
+        console.warn("Failed to fetch emojis for server", server.id, err);
+        return [] as CustomEmojiResponse[];
+      }))),
       api.getReadStates().catch(() => []),
     ]);
 
@@ -592,7 +616,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       myPermissions,
       userRoleColors,
       unreadCounts: serverUnreads,
-    });
+      dataLoaded: true,
+      _channelsLoading: false,
+    } as any);
 
     // Subscribe to all channels via WebSocket
     const { ws } = get();
@@ -601,19 +627,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ws.subscribe(ch.id);
       }
     }
+
+    // Fetch bulk presence for all server members
+    const allMemberIds = new Set<string>();
+    for (const members of memberArrays) {
+      for (const m of members) {
+        allMemberIds.add(m.user_id);
+      }
+    }
+    usePresenceStore.getState().fetchPresence([...allMemberIds]);
+
+    // Ensure current user always shows their own status (avoids race with WS connect)
+    const { user: currentUser } = useAuthStore.getState();
+    if (currentUser) {
+      const ps = usePresenceStore.getState();
+      ps.setStatus(currentUser.id, ps.ownStatus);
+    }
   },
 
   async selectChannel(channelId) {
+    // Snapshot unread count before clearing, for "NEW" divider
+    const unreadSnapshot = get().unreadCounts[channelId] ?? 0;
+
     set((state) => {
       const { [channelId]: _, ...restUnread } = state.unreadCounts;
       const { [channelId]: __, ...restMention } = state.mentionCounts;
-      return { currentChannelId: channelId, unreadCounts: restUnread, mentionCounts: restMention };
+      const newDividers = unreadSnapshot > 0
+        ? { ...state.newMessageDividers, [channelId]: unreadSnapshot }
+        : state.newMessageDividers;
+      return { currentChannelId: channelId, unreadCounts: restUnread, mentionCounts: restMention, newMessageDividers: newDividers };
     });
 
     // Mark channel as read on server (fire-and-forget via WS)
     const wsConn = get().ws;
     if (wsConn) {
       try { wsConn.markRead(channelId); } catch { /* non-fatal */ }
+    }
+
+    // Clear the "NEW" divider after a delay so it's visible briefly
+    if (unreadSnapshot > 0) {
+      setTimeout(() => {
+        set((state) => {
+          const { [channelId]: _, ...rest } = state.newMessageDividers;
+          return { newMessageDividers: rest };
+        });
+      }, 5000);
     }
 
     // Fetch any pending sender key distributions for this channel
@@ -791,6 +849,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
 
+  togglePendingUploadSpoiler(index: number) {
+    set((state) => ({
+      pendingUploads: state.pendingUploads.map((u, i) =>
+        i === index ? { ...u, spoiler: !u.spoiler } : u
+      ),
+    }));
+  },
+
   async uploadPendingFiles() {
     const { pendingUploads } = get();
     if (pendingUploads.length === 0) return [];
@@ -813,12 +879,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const fileBytes = new Uint8Array(await upload.file.arrayBuffer());
         const { encrypted, key, nonce } = encryptFile(fileBytes);
 
-        // 2. Upload encrypted blob directly to backend
+        // 2. Upload encrypted blob with progress tracking via XHR
         const encryptedBuf = (encrypted.buffer as ArrayBuffer).slice(
           encrypted.byteOffset,
           encrypted.byteOffset + encrypted.byteLength,
         );
-        const { attachment_id } = await api.uploadAttachment(encryptedBuf);
+        const { attachment_id } = await new Promise<{ attachment_id: string }>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const token = api.currentAccessToken;
+          xhr.open("POST", `${getServerUrl()}/api/v1/attachments/upload`);
+          xhr.setRequestHeader("Content-Type", "application/octet-stream");
+          if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              const pct = Math.round((e.loaded / e.total) * 100);
+              set((state) => ({
+                pendingUploads: state.pendingUploads.map((u, idx) =>
+                  idx === i ? { ...u, progress: pct } : u
+                ),
+              }));
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try { resolve(JSON.parse(xhr.responseText)); }
+              catch { reject(new Error("Invalid upload response")); }
+            } else {
+              reject(new Error(`Upload failed: ${xhr.status}`));
+            }
+          };
+          xhr.onerror = () => reject(new Error("Upload network error"));
+          xhr.send(encryptedBuf);
+        });
 
         const meta: AttachmentMeta = {
           id: attachment_id,
@@ -839,6 +931,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
 
+        // Pass through spoiler flag
+        if (upload.spoiler) {
+          meta.spoiler = true;
+        }
+
+        // Pre-cache the original file as a blob URL so the rendered message
+        // shows the full-quality image immediately (avoids re-downloading the
+        // same file we just uploaded and showing a pixelated thumbnail instead).
+        if (isMediaFile(upload.file.type)) {
+          const { preCacheBlobUrl } = await import("../components/MessageAttachments.js");
+          preCacheBlobUrl(attachment_id, URL.createObjectURL(upload.file));
+        }
+
         results.push(meta);
 
         // Mark done
@@ -856,8 +961,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    // Clear completed uploads
-    set({ pendingUploads: [] });
+    // Clear only successful uploads; keep failed ones visible so the user sees the error
+    const failedUploads = get().pendingUploads.filter((u) => u.status === "error");
+    set({ pendingUploads: failedUploads });
     return results;
   },
 
@@ -1415,6 +1521,10 @@ async function fetchLinkPreviews(text: string): Promise<LinkPreview[]> {
   }
 
   return previews;
+}
+
+function isMediaFile(mimeType: string): boolean {
+  return mimeType.startsWith("image/") || mimeType.startsWith("video/");
 }
 
 // ─── Thumbnail Generation ────────────────────────────

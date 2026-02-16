@@ -91,7 +91,7 @@ function replaceCustomEmojis(
   return input.replace(CUSTOM_EMOJI_RE, (match, id) => {
     const emoji = emojiMap.get(id);
     if (!emoji) return match;
-    return `<img class="custom-emoji" src="${baseUrl}${emoji.image_url}" alt=":${emoji.name}:" title=":${emoji.name}:" draggable="false" />`;
+    return `<img class="custom-emoji" data-custom-emoji data-emoji-id="${id}" src="${baseUrl}${emoji.image_url}" alt=":${emoji.name}:" title=":${emoji.name}:" draggable="false" />`;
   });
 }
 

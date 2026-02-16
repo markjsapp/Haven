@@ -43,7 +43,14 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
   },
 
   setOwnStatus(status) {
-    set({ ownStatus: status });
+    // Update both local preference AND the statuses map so member sidebar stays in sync
+    const userId = useAuthStore.getState().user?.id;
+    set((s) => ({
+      ownStatus: status,
+      statuses: userId
+        ? { ...s.statuses, [userId]: status === "invisible" ? "offline" : status }
+        : s.statuses,
+    }));
     const fn = get()._wsSendStatus;
     if (fn) fn(status);
   },

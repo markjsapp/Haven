@@ -81,6 +81,7 @@ function DmView() {
   const [error, setError] = useState("");
   const [headerSearch, setHeaderSearch] = useState(false);
   const [headerSearchValue, setHeaderSearchValue] = useState("");
+  const [dmCtx, setDmCtx] = useState<{ channelId: string; channelType: string; x: number; y: number } | null>(null);
 
   const dmListRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown: handleDmRovingKeyDown } = useRovingTabindex(dmListRef);
@@ -236,6 +237,7 @@ function DmView() {
                   <button
                     className={`channel-item dm-item ${ch.id === currentChannelId ? "active" : ""} ${unread > 0 ? "unread" : ""}`}
                     onClick={() => { selectChannel(ch.id); setShowFriends(false); setHeaderSearch(false); setHeaderSearchValue(""); }}
+                    onContextMenu={(e) => { e.preventDefault(); setDmCtx({ channelId: ch.id, channelType: "group", x: e.clientX, y: e.clientY }); }}
                     data-roving-item
                     tabIndex={!showFriends && ch.id === currentChannelId ? 0 : -1}
                   >
@@ -272,6 +274,7 @@ function DmView() {
                 <button
                   className={`channel-item dm-item ${ch.id === currentChannelId ? "active" : ""} ${unread > 0 ? "unread" : ""}`}
                   onClick={() => { selectChannel(ch.id); setShowFriends(false); setHeaderSearch(false); setHeaderSearchValue(""); }}
+                  onContextMenu={(e) => { e.preventDefault(); setDmCtx({ channelId: ch.id, channelType: "dm", x: e.clientX, y: e.clientY }); }}
                   data-roving-item
                   tabIndex={!showFriends && ch.id === currentChannelId ? 0 : -1}
                 >
@@ -312,7 +315,97 @@ function DmView() {
       {showCreateDm && (
         <CreateGroupDm onClose={() => setShowCreateDm(false)} />
       )}
+
+      {dmCtx && (
+        <DmContextMenu
+          channelId={dmCtx.channelId}
+          channelType={dmCtx.channelType}
+          x={dmCtx.x}
+          y={dmCtx.y}
+          onClose={() => setDmCtx(null)}
+        />
+      )}
     </>
+  );
+}
+
+// ─── DM Context Menu ─────────────────────────────────
+
+function DmContextMenu({ channelId, channelType, x, y, onClose }: {
+  channelId: string;
+  channelType: string;
+  x: number;
+  y: number;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const ws = useChatStore((s) => s.ws);
+  const api = useAuthStore((s) => s.api);
+  const loadChannels = useChatStore((s) => s.loadChannels);
+  const currentChannelId = useChatStore((s) => s.currentChannelId);
+  const { handleKeyDown } = useMenuKeyboard(ref);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  const style: React.CSSProperties = {
+    position: "fixed",
+    top: Math.min(y, window.innerHeight - 120),
+    left: Math.min(x, window.innerWidth - 180),
+    zIndex: 1000,
+  };
+
+  return (
+    <div className="message-context-menu" style={style} ref={ref} role="menu" aria-label="DM options" tabIndex={-1} onKeyDown={handleKeyDown}>
+      <button
+        type="button"
+        role="menuitem"
+        tabIndex={-1}
+        className="context-menu-item"
+        onClick={() => {
+          if (ws) try { ws.markRead(channelId); } catch { /* */ }
+          useChatStore.setState((s) => {
+            const { [channelId]: _, ...rest } = s.unreadCounts;
+            const { [channelId]: __, ...restM } = s.mentionCounts;
+            return { unreadCounts: rest, mentionCounts: restM };
+          });
+          onClose();
+        }}
+      >
+        Mark as Read
+      </button>
+      <div className="context-menu-separator" role="separator" />
+      <button
+        type="button"
+        role="menuitem"
+        tabIndex={-1}
+        className="context-menu-item context-menu-item-danger"
+        onClick={async () => {
+          try {
+            await api.leaveChannel(channelId);
+            if (currentChannelId === channelId) {
+              useChatStore.setState({ currentChannelId: null });
+            }
+            await loadChannels();
+          } catch { /* */ }
+          onClose();
+        }}
+      >
+        {channelType === "group" ? "Leave Group" : "Close DM"}
+      </button>
+    </div>
   );
 }
 
@@ -512,13 +605,23 @@ function CategoryContextMenuPopup({
 function ServerHeaderContextMenu({
   x,
   y,
+  canManageChannels,
+  canCreateInvites,
+  hideMutedChannels,
   onCreateChannel,
   onCreateCategory,
+  onInvite,
+  onToggleHideMuted,
 }: {
   x: number;
   y: number;
+  canManageChannels: boolean;
+  canCreateInvites: boolean;
+  hideMutedChannels: boolean;
   onCreateChannel: () => void;
   onCreateCategory: () => void;
+  onInvite: () => void;
+  onToggleHideMuted: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
@@ -533,12 +636,29 @@ function ServerHeaderContextMenu({
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
-      <button role="menuitem" tabIndex={-1} onClick={onCreateChannel}>
-        Create Channel
+      <button role="menuitem" tabIndex={-1} className="context-menu-toggle" onClick={onToggleHideMuted}>
+        Hide Muted Channels
+        <span className={`context-menu-check${hideMutedChannels ? " checked" : ""}`} />
       </button>
-      <button role="menuitem" tabIndex={-1} onClick={onCreateCategory}>
-        Create Category
-      </button>
+      {canManageChannels && (
+        <>
+          <div className="context-menu-separator" />
+          <button role="menuitem" tabIndex={-1} onClick={onCreateChannel}>
+            Create Channel
+          </button>
+          <button role="menuitem" tabIndex={-1} onClick={onCreateCategory}>
+            Create Category
+          </button>
+        </>
+      )}
+      {canCreateInvites && (
+        <>
+          <div className="context-menu-separator" />
+          <button role="menuitem" tabIndex={-1} onClick={onInvite}>
+            Invite to Server
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -735,7 +855,7 @@ function ChannelItemContent({ ch, isOverlay, onContextMenu }: { ch: ChannelRespo
         )}
         {mentions > 0 && <span className="unread-badge" aria-label={`${mentions} unread messages`}>{mentions}</span>}
       </button>
-      {!isOverlay && isVoice && <VoiceChannelPreview channelId={ch.id} />}
+      {!isOverlay && isVoice && ch.server_id && <VoiceChannelPreview channelId={ch.id} serverId={ch.server_id} />}
     </>
   );
 }
@@ -934,6 +1054,9 @@ function ServerView({ serverId }: { serverId: string }) {
   const selectChannel = useChatStore((s) => s.selectChannel);
   const loadChannels = useChatStore((s) => s.loadChannels);
   const unreadCounts = useChatStore((s) => s.unreadCounts);
+  const hideMutedChannels = useUiStore((s) => s.hideMutedChannels);
+  const setHideMutedChannels = useUiStore((s) => s.setHideMutedChannels);
+  const isChannelMuted = useUiStore((s) => s.isChannelMuted);
   const api = useAuthStore((s) => s.api);
   const user = useAuthStore((s) => s.user);
 
@@ -1146,7 +1269,6 @@ function ServerView({ serverId }: { serverId: string }) {
   }
 
   function handleServerContextMenu(e: React.MouseEvent) {
-    if (!canManageChannels) return;
     e.preventDefault();
     setContextMenu(null);
     setCategoryContextMenu(null);
@@ -1454,7 +1576,7 @@ function ServerView({ serverId }: { serverId: string }) {
 
               <SortableContext items={uncatChannelIds} strategy={verticalListSortingStrategy}>
                 <ul className="channel-list">
-                  {getOrderedChannels("uncategorized").map((ch) => {
+                  {getOrderedChannels("uncategorized").filter((ch) => !hideMutedChannels || !isChannelMuted(ch.id) || ch.id === currentChannelId).map((ch) => {
                     if (renamingId === ch.id) {
                       return (
                         <li key={ch.id}>
@@ -1490,7 +1612,7 @@ function ServerView({ serverId }: { serverId: string }) {
           <SortableContext items={categoryIds} strategy={verticalListSortingStrategy}>
             {serverCategories.map((cat) => {
               const isCollapsed = collapsedCategories.has(cat.id);
-              const catChannels = getOrderedChannels(cat.id);
+              const catChannels = getOrderedChannels(cat.id).filter((ch) => !hideMutedChannels || !isChannelMuted(ch.id) || ch.id === currentChannelId);
               return (
                 <SortableCategorySection
                   key={cat.id}
@@ -1586,12 +1708,23 @@ function ServerView({ serverId }: { serverId: string }) {
         <ServerHeaderContextMenu
           x={serverContextMenu.x}
           y={serverContextMenu.y}
+          canManageChannels={canManageChannels}
+          canCreateInvites={canCreateInvites}
+          hideMutedChannels={hideMutedChannels}
           onCreateChannel={() => {
             setCreateModal({ categoryId: null });
             setServerContextMenu(null);
           }}
           onCreateCategory={() => {
             setShowCreateCategory(true);
+            setServerContextMenu(null);
+          }}
+          onInvite={() => {
+            setShowInviteModal(true);
+            setServerContextMenu(null);
+          }}
+          onToggleHideMuted={() => {
+            setHideMutedChannels(!hideMutedChannels);
             setServerContextMenu(null);
           }}
         />

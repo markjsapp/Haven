@@ -66,14 +66,7 @@ export default function App() {
     init();
   }, [init]);
 
-  if (!initialized) {
-    return (
-      <div className="loading-screen">
-        <h1>Haven</h1>
-        <p>Loading...</p>
-      </div>
-    );
-  }
+  if (!initialized) return null;
 
   const connectRequired = needsServerUrl();
 

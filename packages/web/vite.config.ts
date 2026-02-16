@@ -41,7 +41,10 @@ export default defineConfig({
         target: "ws://127.0.0.1:8080",
         ws: true,
       },
-      "/api": "http://127.0.0.1:8080",
+      "/api": {
+        target: "http://127.0.0.1:8080",
+        timeout: 300000, // 5 minutes — large file uploads need time
+      },
     },
   },
 });

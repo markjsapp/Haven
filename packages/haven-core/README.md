@@ -67,3 +67,5 @@ await api.register({ username, password, ...keys });
 await api.login({ username, password });
 const servers = await api.listServers();
 ```
+
+Covers all Haven API areas: auth, servers, channels, messages, sender keys, roles, friends, invites, voice (join/leave/participants/mute/deafen), attachments (upload/download), link previews, admin, and user management.

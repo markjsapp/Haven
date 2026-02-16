@@ -544,6 +544,14 @@ async fn handle_send_message(
         }
     };
 
+    // Reject messages that are too large (roughly 4000 chars + E2EE overhead)
+    if encrypted_body_bytes.len() > 8192 {
+        let _ = reply_tx.send(WsServerMessage::Error {
+            message: "Message too large".into(),
+        });
+        return;
+    }
+
     let has_attachments = attachment_ids.as_ref().is_some_and(|ids| !ids.is_empty());
 
     // Persist message

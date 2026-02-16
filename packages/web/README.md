@@ -14,14 +14,21 @@ src/
 │   ├── Register.tsx        # Registration page (with invite code support)
 │   └── ...
 ├── components/
-│   ├── ServerBar.tsx       # Left server navigation (drag-and-drop folders)
-│   ├── ChannelSidebar.tsx  # Channel list with categories
-│   ├── MessageList.tsx     # Message display with virtual scrolling
-│   ├── MessageInput.tsx    # TipTap rich text editor
-│   ├── FriendsList.tsx     # Friends panel (list, requests, blocked)
-│   ├── VoiceRoom.tsx       # Voice channel UI
-│   ├── UserContextMenu.tsx # Right-click user menu
-│   └── ...                 # ~35 components total
+│   ├── ServerBar.tsx            # Left server navigation (drag-and-drop folders)
+│   ├── ChannelSidebar.tsx       # Channel list with categories
+│   ├── MessageList.tsx          # Message display with virtual scrolling
+│   ├── MessageInput.tsx         # TipTap rich text editor with file upload
+│   ├── MessageAttachments.tsx   # Inline image/video/audio previews, spoiler overlays
+│   ├── ImageLightbox.tsx        # Full-screen image viewer
+│   ├── FriendsList.tsx          # Friends panel (list, requests, blocked)
+│   ├── VoiceRoom.tsx            # Voice channel UI with screen sharing
+│   ├── VoiceChannelPreview.tsx  # Sidebar voice participant list
+│   ├── VoiceContextMenu.tsx     # Right-click voice user menu (volume, mute)
+│   ├── UserContextMenu.tsx      # Right-click user menu
+│   ├── EmojiPicker.tsx          # Emoji picker with categories and search
+│   ├── LinkPreviewCard.tsx      # OpenGraph link previews and inline embeds
+│   ├── ProfilePopup.tsx         # User profile popup (@mention clicks)
+│   └── ...                      # ~40 components total
 ├── store/
 │   ├── auth.ts             # Authentication, key management, registration
 │   ├── chat.ts             # Servers, channels, messages, WebSocket
@@ -49,6 +56,10 @@ src/
 
 **Rich text**: The message input uses TipTap with custom extensions for @mentions, spoilers, underline, subtext, and masked links.
 
+**Media attachments**: Files are encrypted client-side (XChaCha20-Poly1305) before upload. Images render with thumbnail previews during loading, videos play inline with MIME normalization, and audio files get an embedded player with play/pause, seekable progress bar, and volume control. Spoiler overlays are supported for images and videos.
+
+**Voice**: LiveKit-powered voice channels with screen sharing, per-user volume (0–200%), server mute/deafen, and right-click context menus on participants (both in the voice room and the channel sidebar).
+
 **Theming**: CSS variables in `styles/index.css` power the theme system. Theme selection is persisted in localStorage.
 
 ## Development
@@ -65,7 +76,7 @@ npm run dev
 npx tsc --noEmit
 
 # Run tests
-npx vitest run    # 46 tests
+npx vitest run    # 53 tests
 ```
 
 **Important**: If you change anything in `packages/haven-core/`, you must rebuild it before the web frontend will pick up the changes:

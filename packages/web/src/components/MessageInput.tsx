@@ -15,9 +15,11 @@ import { Subtext } from "../lib/tiptap-subtext.js";
 import { MaskedLink } from "../lib/tiptap-masked-link.js";
 import { CustomEmojiNode } from "../lib/tiptap-custom-emoji.js";
 import EmojiPicker from "./EmojiPicker.js";
+import GifPicker from "./GifPicker.js";
 import { saveDraft, loadDraft, clearDraft } from "../lib/draft-store.js";
 import { createMentionExtension, suggestionActiveRef, type MemberItem } from "../lib/tiptap-mention.js";
 import { createChannelMentionExtension, type ChannelItem } from "../lib/tiptap-channel-mention.js";
+import { createEmojiSuggestExtension } from "../lib/tiptap-emoji-suggest.js";
 import { useUiStore } from "../store/ui.js";
 import { parseChannelName } from "../lib/channel-utils.js";
 
@@ -53,21 +55,28 @@ interface MessageInputProps {
   placeholder?: string;
 }
 
-// Create mention extensions once (stable references)
+// Create mention/suggestion extensions once (stable references)
 const memberListRef = { current: [] as MemberItem[] };
 const channelListRef = { current: [] as ChannelItem[] };
+const customEmojiListRef = { current: [] as Array<{ id: string; name: string; image_url: string }> };
 const MentionExtension = createMentionExtension(() => memberListRef.current);
 const ChannelMentionExtension = createChannelMentionExtension(() => channelListRef.current);
+const EmojiSuggestExtension = createEmojiSuggestExtension(() => customEmojiListRef.current);
 
 export default function MessageInput({ placeholder = "Type a message..." }: MessageInputProps) {
   const [sending, setSending] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [gifOpen, setGifOpen] = useState(false);
+  const [charCount, setCharCount] = useState(0);
+  const [inputCtx, setInputCtx] = useState<{ x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputCtxRef = useRef<HTMLDivElement>(null);
 
   const sendMessage = useChatStore((s) => s.sendMessage);
   const sendTyping = useChatStore((s) => s.sendTyping);
   const addFiles = useChatStore((s) => s.addFiles);
   const removePendingUpload = useChatStore((s) => s.removePendingUpload);
+  const togglePendingUploadSpoiler = useChatStore((s) => s.togglePendingUploadSpoiler);
   const uploadPendingFiles = useChatStore((s) => s.uploadPendingFiles);
   const pendingUploads = useChatStore((s) => s.pendingUploads);
   const editingMessageId = useChatStore((s) => s.editingMessageId);
@@ -81,6 +90,10 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
   const channels = useChatStore((s) => s.channels);
   const customEmojis = useChatStore((s) => s.customEmojis);
   const selectedServerId = useUiStore((s) => s.selectedServerId);
+  const showSendButton = useUiStore((s) => s.showSendButton);
+  const setShowSendButton = useUiStore((s) => s.setShowSendButton);
+  const spellcheck = useUiStore((s) => s.spellcheck);
+  const setSpellcheck = useUiStore((s) => s.setSpellcheck);
 
   // Keep mention member list in sync
   memberListRef.current = Object.entries(userNames).map(([id, name]) => ({ id, label: name }));
@@ -89,6 +102,9 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
   channelListRef.current = channels
     .filter((ch) => ch.server_id === selectedServerId && ch.channel_type === "text")
     .map((ch) => ({ id: ch.id, label: parseChannelName(ch.encrypted_meta) }));
+
+  // Keep custom emoji list in sync for :name: autocomplete
+  customEmojiListRef.current = selectedServerId ? (customEmojis[selectedServerId] ?? []) : [];
 
   // Store placeholder in a ref so TipTap's placeholder function always reads the latest
   const placeholderRef = useRef(placeholder);
@@ -118,10 +134,11 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
       MaskedLink,
       MentionExtension,
       ChannelMentionExtension,
+      EmojiSuggestExtension,
       CustomEmojiNode,
       ShiftEnterBreak,
     ],
-    onUpdate: () => sendTyping(),
+    onUpdate: ({ editor: e }) => { sendTyping(); setCharCount(e.getText().length); },
     editorProps: {
       attributes: {
         class: "tiptap-input",
@@ -169,6 +186,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
       handleDrop: (_view, event) => {
         const files = Array.from(event.dataTransfer?.files ?? []);
         if (files.length > 0) {
+          event.stopPropagation(); // Prevent Chat.tsx drop handler from also adding files
           addFiles(files);
           return true;
         }
@@ -176,6 +194,30 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
       },
     },
   });
+
+  // Sync spellcheck attribute
+  useEffect(() => {
+    if (!editor) return;
+    editor.view.dom.setAttribute("spellcheck", spellcheck ? "true" : "false");
+  }, [editor, spellcheck]);
+
+  // Close input context menu on outside click / scroll / escape
+  useEffect(() => {
+    if (!inputCtx) return;
+    function handleClick(e: MouseEvent) {
+      if (inputCtxRef.current && !inputCtxRef.current.contains(e.target as Node)) setInputCtx(null);
+    }
+    function handleKey(e: KeyboardEvent) { if (e.key === "Escape") setInputCtx(null); }
+    function handleScroll() { setInputCtx(null); }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    document.addEventListener("scroll", handleScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+      document.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [inputCtx]);
 
   // Update placeholder attribute when it changes
   useEffect(() => {
@@ -236,7 +278,10 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
 
     const text = editor.getText().trim();
     const hasPendingFiles = useChatStore.getState().pendingUploads.length > 0;
-    if (!text && !hasPendingFiles) return;
+    // editor.getText() returns "" for atom nodes (custom emoji), so also check !editor.isEmpty
+    if (!text && !hasPendingFiles && editor.isEmpty) return;
+
+    if (text.length > 4000) return;
 
     setSending(true);
     try {
@@ -373,10 +418,10 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
           {pendingUploads.map((upload, i) => {
             const isImage = upload.file.type.startsWith("image/");
             return (
-              <div key={i} className="pending-upload-card">
+              <div key={i} className={`pending-upload-card${upload.spoiler ? " spoiler-marked" : ""}`}>
                 {isImage ? (
                   <img
-                    className="upload-thumbnail"
+                    className={`upload-thumbnail${upload.spoiler ? " upload-spoiler-blur" : ""}`}
                     src={URL.createObjectURL(upload.file)}
                     alt={upload.file.name}
                   />
@@ -385,6 +430,9 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
                     {getFileIcon(upload.file.type)}
                   </div>
                 )}
+                {upload.spoiler && isImage && (
+                  <div className="upload-spoiler-label">SPOILER</div>
+                )}
                 <div className="pending-upload-info">
                   <span className="pending-upload-name" title={upload.file.name}>
                     {upload.file.name.length > 20 ? upload.file.name.slice(0, 17) + "..." : upload.file.name}
@@ -392,12 +440,31 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
                   <span className="pending-upload-size">{formatFileSize(upload.file.size)}</span>
                 </div>
                 {upload.status === "uploading" && (
-                  <div className="upload-progress-bar">
-                    <div className="upload-progress-fill" style={{ width: `${upload.progress}%` }} />
-                  </div>
+                  <>
+                    <div className="upload-progress-bar">
+                      <div className="upload-progress-fill" style={{ width: `${upload.progress}%` }} />
+                    </div>
+                    <span className="pending-upload-status">
+                      {upload.progress === 0 ? "Encrypting..." : `Uploading ${upload.progress}%`}
+                    </span>
+                  </>
                 )}
                 {upload.status === "error" && (
                   <span className="pending-upload-status error">Failed</span>
+                )}
+                {isImage && (
+                  <button
+                    type="button"
+                    className={`pending-upload-spoiler${upload.spoiler ? " active" : ""}`}
+                    onClick={() => togglePendingUploadSpoiler(i)}
+                    title={upload.spoiler ? "Remove spoiler" : "Mark as spoiler"}
+                    aria-label={upload.spoiler ? "Remove spoiler" : "Mark as spoiler"}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+                      {upload.spoiler && <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" strokeWidth="2" />}
+                    </svg>
+                  </button>
                 )}
                 <button
                   type="button"
@@ -413,7 +480,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
           })}
         </div>
       )}
-      <div className="message-input">
+      <div className="message-input" onContextMenu={(e) => { e.preventDefault(); setInputCtx({ x: e.clientX, y: e.clientY }); }}>
         <button
           type="button"
           className="attach-btn"
@@ -431,11 +498,33 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
           onChange={handleFileChange}
         />
         <EditorContent editor={editor} className="tiptap-editor" aria-label="Message editor" />
+        <div className="gif-trigger-wrap">
+          <button
+            type="button"
+            className="gif-trigger-btn"
+            onClick={() => { setGifOpen(!gifOpen); if (!gifOpen) setEmojiOpen(false); }}
+            title="GIF"
+            aria-label="GIF"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M11.5 9H13v6h-1.5zM9 9H6c-.6 0-1 .5-1 1v4c0 .5.4 1 1 1h3c.6 0 1-.5 1-1v-2H8.5v1.5h-2v-3H10V10c0-.5-.4-1-1-1zm10 1.5V9h-4.5v6H16v-2h2v-1.5h-2v-1z" />
+            </svg>
+          </button>
+          {gifOpen && (
+            <GifPicker
+              onSelect={(gifUrl) => {
+                sendMessage(gifUrl);
+                setGifOpen(false);
+              }}
+              onClose={() => setGifOpen(false)}
+            />
+          )}
+        </div>
         <div className="emoji-trigger-wrap">
           <button
             type="button"
             className="emoji-trigger-btn"
-            onClick={() => setEmojiOpen(!emojiOpen)}
+            onClick={() => { setEmojiOpen(!emojiOpen); if (!emojiOpen) setGifOpen(false); }}
             title="Emoji"
             aria-label="Emoji"
           >
@@ -451,10 +540,23 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
             />
           )}
         </div>
+        {showSendButton && (
+          <button
+            type="button"
+            className="send-btn"
+            onClick={() => document.dispatchEvent(new CustomEvent("haven:send"))}
+            title="Send message"
+            aria-label="Send message"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+          </button>
+        )}
         {editor && (
           <BubbleMenu
             editor={editor}
-            options={{ placement: "top" }}
+            options={{
+              placement: "top",
+            }}
             className="bubble-toolbar"
           >
             <button
@@ -523,6 +625,42 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
           </BubbleMenu>
         )}
       </div>
+      {charCount >= 3800 && (
+        <div className={`char-counter ${charCount > 4000 ? "over-limit" : ""}`}>
+          {charCount}/4000
+        </div>
+      )}
+      {inputCtx && (
+        <div
+          ref={inputCtxRef}
+          className="message-context-menu input-context-menu"
+          style={{ position: "fixed", top: Math.min(inputCtx.y, window.innerHeight - 220), left: Math.min(inputCtx.x, window.innerWidth - 200), zIndex: 1000 }}
+          role="menu"
+          aria-label="Input options"
+        >
+          <button type="button" role="menuitem" className="context-menu-item context-menu-toggle" onClick={() => { setShowSendButton(!showSendButton); setInputCtx(null); }}>
+            Send Message Button
+            <span className={`context-menu-check ${showSendButton ? "checked" : ""}`} />
+          </button>
+          <button type="button" role="menuitem" className="context-menu-item context-menu-toggle" onClick={() => { setSpellcheck(!spellcheck); setInputCtx(null); }}>
+            Spellcheck
+            <span className={`context-menu-check ${spellcheck ? "checked" : ""}`} />
+          </button>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" className="context-menu-item" onClick={() => { document.execCommand("cut"); setInputCtx(null); }}>
+            Cut
+            <span className="context-menu-shortcut">{navigator.platform.includes("Mac") ? "\u2318X" : "Ctrl+X"}</span>
+          </button>
+          <button type="button" role="menuitem" className="context-menu-item" onClick={() => { document.execCommand("copy"); setInputCtx(null); }}>
+            Copy
+            <span className="context-menu-shortcut">{navigator.platform.includes("Mac") ? "\u2318C" : "Ctrl+C"}</span>
+          </button>
+          <button type="button" role="menuitem" className="context-menu-item" onClick={() => { navigator.clipboard.readText().then((t) => editor?.commands.insertContent(t)); setInputCtx(null); }}>
+            Paste
+            <span className="context-menu-shortcut">{navigator.platform.includes("Mac") ? "\u2318V" : "Ctrl+V"}</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

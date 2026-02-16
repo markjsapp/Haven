@@ -676,6 +676,22 @@ export interface RegistrationInviteResponse {
   created_at: string;
 }
 
+// ─── GIF Search ──────────────────────────────────────
+
+export interface GifResult {
+  id: string;
+  title: string;
+  url: string;
+  preview_url: string;
+  width: number;
+  height: number;
+}
+
+export interface GifSearchResponse {
+  results: GifResult[];
+  total_count: number;
+}
+
 // ─── API Error ─────────────────────────────────────────
 
 export interface ApiError {
