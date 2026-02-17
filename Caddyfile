@@ -1,3 +1,7 @@
+discordsucks.org {
+    redir https://www.discordsucks.org{uri} permanent
+}
+
 {$HAVEN_DOMAIN} {
     # WebSocket — long-lived connections need special handling
     @ws path /api/v1/ws

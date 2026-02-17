@@ -4,18 +4,19 @@ FROM node:22-slim AS frontend
 WORKDIR /app
 
 # Build haven-core (shared library)
-COPY packages/haven-core/package.json packages/haven-core/tsconfig.json packages/haven-core/
+COPY packages/haven-core/package.json packages/haven-core/package-lock.json packages/haven-core/tsconfig.json packages/haven-core/
 COPY packages/haven-core/src packages/haven-core/src
 RUN cd packages/haven-core && npm ci && npm run build
 
 # Build web frontend
-COPY packages/web/package.json packages/web/tsconfig.json packages/web/vite.config.ts packages/web/index.html packages/web/
+COPY packages/web/package.json packages/web/package-lock.json packages/web/tsconfig.json packages/web/vite.config.ts packages/web/index.html packages/web/
+COPY packages/web/.npmrc packages/web/
 COPY packages/web/src packages/web/src
 COPY packages/web/public packages/web/public
 RUN cd packages/web && npm ci && npm run build
 
 # ─── Stage 2: Rust Build ───────────────────────────────
-FROM rust:1.77-slim-bookworm AS builder
+FROM rust:slim-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -54,6 +55,8 @@ WORKDIR /app
 
 COPY --from=builder /app/target/release/haven-backend /app/haven-backend
 COPY --from=builder /app/migrations /app/migrations
+
+RUN mkdir -p /data/attachments && chown -R haven:haven /data
 
 USER haven
 
