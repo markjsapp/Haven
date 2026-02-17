@@ -67,7 +67,6 @@ export default function Register() {
                 type="text"
                 value={inviteCode}
                 onChange={(e) => setInviteCode(e.target.value)}
-                required
                 placeholder={t("register.inviteCodePlaceholder")}
               />
             </div>
