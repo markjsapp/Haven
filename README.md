@@ -18,6 +18,24 @@ Haven is a full-featured chat application — servers, channels, DMs, friends, r
 - File contents or types (client-side encryption with padded sizes)
 - Email addresses (hashed before storage)
 
+## Why Use Haven?
+
+Most chat platforms choose between features and privacy. Haven doesn't.
+
+| | Haven | Discord | Matrix/Element | Signal |
+|---|:---:|:---:|:---:|:---:|
+| End-to-end encryption | All messages | None | Opt-in per room | All messages |
+| Servers & channels | Yes | Yes | Yes (spaces) | No |
+| Voice & screen share | Yes | Yes | Yes | 1-on-1 only |
+| Roles & permissions | Yes | Yes | Limited | No |
+| Self-hostable | Yes | No | Yes | Partial |
+| Open source | Yes | No | Yes | Yes |
+| Rich text & embeds | Yes | Yes | Limited | No |
+| Encrypted file sharing | Yes | No encryption | Opt-in | Yes |
+| No tracking / telemetry | Yes | No | Varies | Yes |
+
+**Haven gives you Discord-level features with Signal-level privacy.** Your server, your data, your keys. The backend never sees plaintext — not messages, not filenames, not even channel names.
+
 ## Features
 
 **Communication** — Servers with text and voice channels, 1-on-1 and group DMs, friend requests, typing indicators, online presence, link previews, @mentions, message pinning, emoji reactions, big emoji rendering
@@ -28,7 +46,7 @@ Haven is a full-featured chat application — servers, channels, DMs, friends, r
 
 **Security** — X3DH + Double Ratchet for DMs (Signal Protocol), Sender Keys for group channels, encrypted file attachments, encrypted key backup (Argon2id KDF), Argon2id password hashing, JWT + rotating refresh tokens, optional TOTP 2FA, proof-of-work registration gate
 
-**Voice** — LiveKit-powered voice channels with screen sharing (360p–4K quality presets), per-user volume control (0–200%), server mute/deafen, right-click context menu on participants
+**Voice** — self hosted LiveKit-powered voice channels with screen sharing (360p–4K quality presets), per-user volume control (0–200%), server mute/deafen, right-click context menu on participants
 
 ## Tech Stack
 

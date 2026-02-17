@@ -11,6 +11,7 @@ use crate::db::queries;
 use crate::errors::{AppError, AppResult};
 use crate::middleware::AuthUser;
 use crate::models::*;
+use crate::permissions;
 use crate::storage;
 use crate::AppState;
 
@@ -59,6 +60,7 @@ pub async fn create_server(
         "text",
         0,
         None,
+        false,
     )
     .await?;
 
@@ -154,9 +156,34 @@ pub async fn list_server_channels(
 
     let channels = queries::get_server_channels(state.db.read(), server_id).await?;
 
-    let responses: Vec<ChannelResponse> = channels
-        .into_iter()
-        .map(|c| ChannelResponse {
+    // For private channel filtering, compute member's base permissions and role IDs
+    let (_is_owner, base_perms) = queries::get_member_permissions(state.db.read(), server_id, user_id).await?;
+    let member_role_ids = queries::get_member_role_ids(state.db.read(), server_id, user_id).await?;
+    let everyone_role = queries::find_default_role(state.db.read(), server_id).await?;
+    let everyone_role_id = everyone_role.map(|r| r.id).unwrap_or(Uuid::nil());
+
+    let mut responses = Vec::with_capacity(channels.len());
+    for c in channels {
+        // Filter out private channels the user can't see
+        if c.is_private {
+            let overwrites = queries::get_channel_overwrites(state.db.read(), c.id).await?;
+            let ow_tuples: Vec<_> = overwrites.iter().map(|o| {
+                let target = if o.target_type == "role" {
+                    permissions::OverwriteTarget::Role(o.target_id)
+                } else {
+                    permissions::OverwriteTarget::Member(o.target_id)
+                };
+                (target, o.allow_bits, o.deny_bits)
+            }).collect();
+            let effective = permissions::apply_channel_overwrites(
+                base_perms, &ow_tuples, &member_role_ids, user_id, everyone_role_id,
+            );
+            if !permissions::has_permission(effective, permissions::VIEW_CHANNELS) {
+                continue;
+            }
+        }
+
+        responses.push(ChannelResponse {
             id: c.id,
             server_id: c.server_id,
             encrypted_meta: base64::Engine::encode(
@@ -169,8 +196,9 @@ pub async fn list_server_channels(
             category_id: c.category_id,
             dm_status: c.dm_status,
             last_message_id: None,
-        })
-        .collect();
+            is_private: c.is_private,
+        });
+    }
 
     Ok(Json(responses))
 }

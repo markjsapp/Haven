@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import type { GifResult } from "@haven/core";
 
@@ -19,6 +20,7 @@ const SEARCH_TTL = 2 * 60 * 1000;   // 2 minutes
 const DEBOUNCE_MS = 500;
 
 export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GifResult[]>([]);
@@ -153,12 +155,12 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
   }
 
   return (
-    <div className="gif-picker" ref={ref} role="dialog" aria-label="GIF picker">
+    <div className="gif-picker" ref={ref} role="dialog" aria-label={t("gifPicker.ariaLabel")}>
       <div className="gif-picker-inner">
         {/* Search bar */}
         <div className="gif-search-bar">
           {mode === "search" && (
-            <button type="button" className="gif-back-btn" onClick={handleBack} aria-label="Back">
+            <button type="button" className="gif-back-btn" onClick={handleBack} aria-label={t("gifPicker.backAriaLabel")}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
               </svg>
@@ -172,13 +174,13 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
               ref={searchInputRef}
               type="text"
               className="gif-search-field"
-              placeholder="Search GIFs"
+              placeholder={t("gifPicker.searchPlaceholder")}
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
               autoFocus
             />
             {query && (
-              <button type="button" className="gif-clear-btn" onClick={() => { setQuery(""); handleBack(); }} aria-label="Clear search">
+              <button type="button" className="gif-clear-btn" onClick={() => { setQuery(""); handleBack(); }} aria-label={t("gifPicker.clearSearchAriaLabel")}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
                 </svg>
@@ -189,23 +191,23 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
 
         {/* Header */}
         <div className="gif-section-header">
-          {mode === "trending" ? "Trending GIFs" : `Results for "${query}"`}
+          {mode === "trending" ? t("gifPicker.trending") : t("gifPicker.resultsFor", { query })}
         </div>
 
         {/* Grid */}
         <div className="gif-grid-container">
           {loading && results.length === 0 && (
-            <div className="gif-loading">Loading...</div>
+            <div className="gif-loading">{t("gifPicker.loading")}</div>
           )}
           {!loading && error && results.length === 0 && (
             <div className="gif-empty gif-error">
-              <div>Failed to load GIFs</div>
+              <div>{t("gifPicker.failedToLoad")}</div>
               <div className="gif-error-detail">{error}</div>
             </div>
           )}
           {!loading && !error && results.length === 0 && (
             <div className="gif-empty">
-              {mode === "search" ? "No GIFs found" : "No trending GIFs available"}
+              {mode === "search" ? t("gifPicker.noGifsFound") : t("gifPicker.noTrending")}
             </div>
           )}
           <div className="gif-grid">
@@ -217,7 +219,7 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
 
         {/* Giphy attribution (required by ToS) */}
         <div className="gif-attribution">
-          Powered by GIPHY
+          {t("gifPicker.poweredByGiphy")}
         </div>
       </div>
     </div>

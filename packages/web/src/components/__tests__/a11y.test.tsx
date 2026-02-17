@@ -1,9 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { axe } from "vitest-axe";
 import ErrorModal from "../ErrorModal.js";
 import LinkWarningModal from "../LinkWarningModal.js";
 import ConfirmDialog from "../ConfirmDialog.js";
+
+// ─── ErrorModal ──────────────────────────────────────
 
 describe("Accessibility: ErrorModal", () => {
   it("should have no a11y violations", async () => {
@@ -30,6 +32,8 @@ describe("Accessibility: ErrorModal", () => {
   });
 });
 
+// ─── LinkWarningModal ────────────────────────────────
+
 describe("Accessibility: LinkWarningModal", () => {
   it("should have no a11y violations", async () => {
     const { container } = render(
@@ -55,6 +59,8 @@ describe("Accessibility: LinkWarningModal", () => {
     expect(results).toHaveNoViolations();
   });
 });
+
+// ─── ConfirmDialog ───────────────────────────────────
 
 describe("Accessibility: ConfirmDialog", () => {
   it("should have no a11y violations", async () => {
@@ -100,5 +106,144 @@ describe("Accessibility: ConfirmDialog", () => {
     );
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it("should trap focus within the dialog", () => {
+    const { getByRole } = render(
+      <ConfirmDialog
+        title="Test Focus"
+        message="Focus test"
+        confirmLabel="OK"
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    const dialog = getByRole("alertdialog");
+    expect(dialog).toBeTruthy();
+    const buttons = dialog.querySelectorAll("button");
+    expect(buttons.length).toBeGreaterThanOrEqual(1);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it("buttons should be keyboard focusable", () => {
+    const { getAllByRole } = render(
+      <ConfirmDialog
+        title="Test"
+        message="Test"
+        confirmLabel="Yes"
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    const buttons = getAllByRole("button");
+    buttons.forEach(btn => {
+      expect(btn.tabIndex).not.toBe(-1);
+    });
+  });
+});
+
+// ─── CreateChannelModal ─────────────────────────────
+
+vi.mock("../../store/auth.js", () => ({
+  useAuthStore: (selector: (s: any) => any) => selector({
+    api: { createChannel: vi.fn().mockResolvedValue({}) },
+  }),
+}));
+
+vi.mock("../../store/chat.js", () => ({
+  useChatStore: (selector: (s: any) => any) => selector({
+    loadChannels: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+const { default: CreateChannelModal } = await import("../CreateChannelModal.js");
+const { default: BanMemberModal } = await import("../BanMemberModal.js");
+
+describe("Accessibility: CreateChannelModal", () => {
+  it("should have no a11y violations", async () => {
+    const { container } = render(
+      <CreateChannelModal
+        serverId="test-server-id"
+        onClose={() => {}}
+      />
+    );
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
+  it("should have no a11y violations with category", async () => {
+    const { container } = render(
+      <CreateChannelModal
+        serverId="test-server-id"
+        categoryId="test-cat-id"
+        categoryName="General"
+        onClose={() => {}}
+      />
+    );
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
+  it("should have properly associated labels", () => {
+    const { container } = render(
+      <CreateChannelModal
+        serverId="test-server-id"
+        onClose={() => {}}
+      />
+    );
+    const nameInput = container.querySelector("#create-channel-name");
+    expect(nameInput).toBeTruthy();
+    const label = container.querySelector('label[for="create-channel-name"]');
+    expect(label).toBeTruthy();
+    expect(label?.textContent).toContain("CHANNEL NAME");
+  });
+
+  it("should use fieldset for channel type radio group", () => {
+    const { container } = render(
+      <CreateChannelModal
+        serverId="test-server-id"
+        onClose={() => {}}
+      />
+    );
+    const fieldset = container.querySelector("fieldset");
+    expect(fieldset).toBeTruthy();
+    const legend = fieldset?.querySelector("legend");
+    expect(legend).toBeTruthy();
+    expect(legend?.textContent).toContain("CHANNEL TYPE");
+  });
+});
+
+// ─── BanMemberModal ─────────────────────────────────
+
+describe("Accessibility: BanMemberModal", () => {
+  it("should have no a11y violations", async () => {
+    const { container } = render(
+      <BanMemberModal
+        serverId="test-server"
+        userId="test-user"
+        username="TestUser"
+        onBanned={() => {}}
+        onClose={() => {}}
+      />
+    );
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
+  it("should have an associated label for the reason textarea", () => {
+    const { container } = render(
+      <BanMemberModal
+        serverId="test-server"
+        userId="test-user"
+        username="TestUser"
+        onBanned={() => {}}
+        onClose={() => {}}
+      />
+    );
+    const textarea = container.querySelector("textarea");
+    expect(textarea).toBeTruthy();
+    const label = textarea?.closest("label");
+    expect(label).toBeTruthy();
+    expect(label?.textContent).toContain("Reason");
   });
 });

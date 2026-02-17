@@ -72,6 +72,7 @@ import type {
   InviteRequiredResponse,
   RegistrationInviteResponse,
   GifSearchResponse,
+  SessionResponse,
 } from "../types.js";
 
 export interface ApiClientOptions {
@@ -170,6 +171,14 @@ export class HavenApi {
 
   async changePassword(req: ChangePasswordRequest): Promise<void> {
     await this.put("/api/v1/auth/password", req);
+  }
+
+  async getSessions(): Promise<SessionResponse[]> {
+    return this.get<SessionResponse[]>("/api/v1/auth/sessions");
+  }
+
+  async revokeSession(familyId: string): Promise<void> {
+    await this.delete(`/api/v1/auth/sessions/${familyId}`);
   }
 
   // ─── Users ────────────────────────────────────────
@@ -369,6 +378,10 @@ export class HavenApi {
 
   async getChannelReactions(channelId: string): Promise<ReactionGroup[]> {
     return this.get<ReactionGroup[]>(`/api/v1/channels/${channelId}/reactions`);
+  }
+
+  async getMessageReactions(messageId: string): Promise<ReactionGroup[]> {
+    return this.get<ReactionGroup[]>(`/api/v1/messages/${messageId}/reactions`);
   }
 
   async getPinnedMessages(channelId: string): Promise<MessageResponse[]> {

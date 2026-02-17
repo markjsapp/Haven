@@ -124,6 +124,8 @@ pub fn build_router(state: AppState) -> Router {
     let auth_protected = Router::new()
         .route("/logout", post(api::auth_routes::logout))
         .route("/password", put(api::auth_routes::change_password))
+        .route("/sessions", get(api::auth_routes::list_sessions))
+        .route("/sessions/:family_id", delete(api::auth_routes::revoke_session))
         .route("/totp/setup", post(api::auth_routes::totp_setup))
         .route("/totp/verify", post(api::auth_routes::totp_verify))
         .route("/totp", delete(api::auth_routes::totp_disable))
@@ -459,6 +461,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/search", get(api::gifs::search_gifs))
         .route("/trending", get(api::gifs::trending_gifs));
 
+    let message_routes = Router::new()
+        .route("/:message_id/reactions", get(api::messages::get_message_reactions));
+
     // Assemble the full API
     let api = Router::new()
         .nest("/auth", auth_routes.merge(auth_protected))
@@ -467,6 +472,7 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/users", user_routes)
         .nest("/servers", server_routes)
         .nest("/channels", channel_routes)
+        .nest("/messages", message_routes)
         .nest("/dm", dm_routes)
         .nest("/friends", friend_routes)
         .nest("/invites", invite_routes)

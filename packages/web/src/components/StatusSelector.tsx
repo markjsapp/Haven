@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { usePresenceStore, STATUS_CONFIG, type PresenceStatus } from "../store/presence.js";
 
@@ -10,6 +11,7 @@ interface StatusSelectorProps {
 }
 
 export default function StatusSelector({ anchorRef, onClose }: StatusSelectorProps) {
+  const { t } = useTranslation();
   const ownStatus = usePresenceStore((s) => s.ownStatus);
   const setOwnStatus = usePresenceStore((s) => s.setOwnStatus);
   const ref = useRef<HTMLDivElement>(null);
@@ -51,7 +53,7 @@ export default function StatusSelector({ anchorRef, onClose }: StatusSelectorPro
       ref={ref}
       style={{ left: pos.left, bottom: pos.bottom }}
       role="listbox"
-      aria-label="Set status"
+      aria-label={t("statusSelector.ariaLabel")}
     >
       {STATUS_OPTIONS.map((status) => {
         const config = STATUS_CONFIG[status];

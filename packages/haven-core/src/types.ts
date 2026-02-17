@@ -47,6 +47,16 @@ export interface TotpVerifyRequest {
   code: string;
 }
 
+export interface SessionResponse {
+  id: string;
+  family_id: string | null;
+  device_name: string | null;
+  ip_address: string | null;
+  last_activity: string | null;
+  created_at: string;
+  is_current: boolean;
+}
+
 // ─── Users ─────────────────────────────────────────────
 
 export interface UserPublic {
@@ -203,6 +213,7 @@ export interface CreateChannelRequest {
   channel_type?: string;
   position?: number;
   category_id?: string | null;
+  is_private?: boolean;
 }
 
 export interface ChannelResponse {
@@ -215,6 +226,7 @@ export interface ChannelResponse {
   category_id: string | null;
   dm_status?: string; // "active", "pending", "declined" — only for DM channels
   last_message_id?: string;
+  is_private: boolean;
 }
 
 // ─── Channel Categories ───────────────────────────────
@@ -365,8 +377,8 @@ export type WsServerMessage =
   | { type: "Pong" }
   | { type: "SenderKeysUpdated"; payload: { channel_id: string } }
   | { type: "MessageDeleted"; payload: { message_id: string; channel_id: string } }
-  | { type: "ReactionAdded"; payload: { message_id: string; channel_id: string; user_id: string; emoji: string } }
-  | { type: "ReactionRemoved"; payload: { message_id: string; channel_id: string; user_id: string; emoji: string } }
+  | { type: "ReactionAdded"; payload: { message_id: string; channel_id: string; sender_token: string; emoji: string } }
+  | { type: "ReactionRemoved"; payload: { message_id: string; channel_id: string; sender_token: string; emoji: string } }
   | { type: "PresenceUpdate"; payload: { user_id: string; status: string } }
   | { type: "FriendRequestReceived"; payload: { from_user_id: string; from_username: string; friendship_id: string } }
   | { type: "FriendRequestAccepted"; payload: { user_id: string; username: string; friendship_id: string } }

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
@@ -17,14 +18,15 @@ const CommandPalette = lazy(() => import("../components/CommandPalette.js"));
 const KeyboardShortcutsModal = lazy(() => import("../components/KeyboardShortcutsModal.js"));
 import DmMemberSidebar from "../components/DmMemberSidebar.js";
 import PinnedMessagesPanel from "../components/PinnedMessagesPanel.js";
-import SearchPanel from "../components/SearchPanel.js";
-import VoiceRoom from "../components/VoiceRoom.js";
+const SearchPanel = lazy(() => import("../components/SearchPanel.js"));
+const VoiceRoom = lazy(() => import("../components/VoiceRoom.js"));
 import { parseChannelDisplay } from "../lib/channel-utils.js";
 import SecurityPhraseSetup from "../components/SecurityPhraseSetup.js";
 import SecurityPhraseRestore from "../components/SecurityPhraseRestore.js";
 import ProfilePopup from "../components/ProfilePopup.js";
 
 export default function Chat() {
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const backupPending = useAuthStore((s) => s.backupPending);
   const backupAvailable = useAuthStore((s) => s.backupAvailable);
@@ -95,6 +97,26 @@ export default function Chat() {
     document.addEventListener("mouseup", handleUp);
   }
 
+  function handleResizeKeyDown(
+    e: React.KeyboardEvent,
+    cssVar: string,
+    currentWidth: number,
+    min: number,
+    max: number,
+    setter: (w: number) => void,
+    direction: 1 | -1 = 1,
+  ) {
+    const step = 10;
+    let delta = 0;
+    if (e.key === "ArrowRight") delta = step * direction;
+    else if (e.key === "ArrowLeft") delta = -step * direction;
+    else return;
+    e.preventDefault();
+    const newWidth = Math.min(max, Math.max(min, currentWidth + delta));
+    document.documentElement.style.setProperty(cssVar, `${newWidth}px`);
+    setter(newWidth);
+  }
+
   // ─── Mobile detection ──────────────────────────────
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -126,7 +148,7 @@ export default function Chat() {
     try {
       const api = useAuthStore.getState().api;
       const server = await api.joinByInvite(inviteCode);
-      setInviteSuccess(`Joined server successfully!`);
+      setInviteSuccess(t("chat.joinedSuccess"));
       // Reload channels to include the new server
       await useChatStore.getState().loadChannels();
       // Navigate to main view after a brief delay
@@ -135,7 +157,7 @@ export default function Chat() {
         navigate("/", { replace: true });
       }, 800);
     } catch (err: any) {
-      setInviteError(err.message || "Failed to join server");
+      setInviteError(err.message || t("chat.joinFailed"));
       setInviteJoining(false);
     }
   }
@@ -194,6 +216,13 @@ export default function Chat() {
         if (ui.showUserSettings) { ui.setShowUserSettings(false); return; }
         if (ui.searchPanelOpen) { ui.toggleSearchPanel(); return; }
         if (ui.pinnedPanelOpen) { ui.togglePinnedPanel(); return; }
+      }
+
+      // Alt+Up/Down — navigate to prev/next unread channel (works even in editable)
+      if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        useChatStore.getState().navigateUnread(e.key === "ArrowUp" ? "up" : "down");
+        return;
       }
 
       if (isEditable) return;
@@ -284,11 +313,11 @@ export default function Chat() {
 
   const inputPlaceholder = channelDisplay
     ? channelDisplay.isDm
-      ? `Message @${channelDisplay.name}`
+      ? t("chat.messageDm", { name: channelDisplay.name })
       : channelDisplay.isGroup
-        ? `Message ${channelDisplay.name}`
-        : `Message #${channelDisplay.name}`
-    : "Type a message...";
+        ? t("chat.messageGroup", { name: channelDisplay.name })
+        : t("chat.messageChannel", { name: channelDisplay.name })
+    : t("chat.typeMessage");
 
   // Show splash screen between login and app while data loads
   if (!dataLoaded) {
@@ -299,7 +328,7 @@ export default function Chat() {
             <path d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18L19.27 7.5 12 10.82 4.73 7.5 12 4.18zM4 8.83l7 3.5V19.5l-7-3.5V8.83zm9 10.67V12.33l7-3.5V15.5l-7 3.5z"/>
           </svg>
         </div>
-        <div className="splash-title">Haven</div>
+        <div className="splash-title">{t("chat.splashTitle")}</div>
         <div className="splash-dots">
           <span /><span /><span />
         </div>
@@ -310,7 +339,7 @@ export default function Chat() {
   return (
     <div className={`chat-layout${isMobile ? " mobile" : ""}`}>
       <div className="titlebar-drag-region" data-tauri-drag-region />
-      <a href="#chat-body" className="skip-nav">Skip to chat</a>
+      <a href="#chat-body" className="skip-nav">{t("chat.skipNav")}</a>
 
       {/* Mobile sidebar overlay */}
       {isMobile && mobileSidebarOpen && (
@@ -318,23 +347,29 @@ export default function Chat() {
       )}
       <div className={`chat-sidebar-group${isMobile && mobileSidebarOpen ? " open" : ""}`}>
         <ServerBar />
-        {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--server-bar-width", serverBarWidth, 56, 96, setServerBarWidth)} />}
+        {!isMobile && <div className="resize-handle" role="separator" aria-orientation="vertical" aria-label={t("chat.resizeServerBar")} tabIndex={0} onMouseDown={(e) => handleResizeStart(e, "--server-bar-width", serverBarWidth, 56, 96, setServerBarWidth)} onKeyDown={(e) => handleResizeKeyDown(e, "--server-bar-width", serverBarWidth, 56, 96, setServerBarWidth)} />}
         <ChannelSidebar />
-        {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--channel-sidebar-width", channelSidebarWidth, 180, 380, setChannelSidebarWidth)} />}
+        {!isMobile && <div className="resize-handle" role="separator" aria-orientation="vertical" aria-label={t("chat.resizeChannelSidebar")} tabIndex={0} onMouseDown={(e) => handleResizeStart(e, "--channel-sidebar-width", channelSidebarWidth, 180, 380, setChannelSidebarWidth)} onKeyDown={(e) => handleResizeKeyDown(e, "--channel-sidebar-width", channelSidebarWidth, 180, 380, setChannelSidebarWidth)} />}
       </div>
 
       <div className="chat-main" role="main">
+        {wsState === "disconnected" && dataLoaded && (
+          <div className="ws-reconnect-banner" role="alert">
+            <div className="ws-reconnect-spinner" />
+            {t("chat.reconnecting")}
+          </div>
+        )}
         <header className="chat-header">
           <div className="chat-header-left">
             {isMobile && (
-              <button className="mobile-hamburger" onClick={toggleMobileSidebar} aria-label="Toggle sidebar">
+              <button className="mobile-hamburger" onClick={toggleMobileSidebar} aria-label={t("chat.toggleSidebar")} aria-expanded={mobileSidebarOpen}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
                 </svg>
               </button>
             )}
             {showFriends && selectedServerId === null ? (
-              <h2>Friends</h2>
+              <h2>{t("chat.friends")}</h2>
             ) : channelDisplay ? (
               <>
                 <span className="chat-header-icon">
@@ -350,7 +385,7 @@ export default function Chat() {
                 )}
               </>
             ) : (
-              <h2>Select a channel</h2>
+              <h2>{t("chat.selectChannel")}</h2>
             )}
           </div>
           <div className="chat-header-right">
@@ -359,8 +394,8 @@ export default function Chat() {
                 <button
                   className={`chat-header-btn ${searchPanelOpen ? "active" : ""}`}
                   onClick={toggleSearchPanel}
-                  title="Search Messages"
-                  aria-label="Search Messages"
+                  title={t("chat.searchMessages")}
+                  aria-label={t("chat.searchMessages")}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 001.48-5.34c-.47-2.78-2.79-5-5.59-5.34A6.505 6.505 0 003.03 10.5c0 3.59 2.91 6.5 6.5 6.5 1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 20l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
@@ -369,8 +404,8 @@ export default function Chat() {
                 <button
                   className={`chat-header-btn ${pinnedPanelOpen ? "active" : ""}`}
                   onClick={togglePinnedPanel}
-                  title="Pinned Messages"
-                  aria-label="Pinned Messages"
+                  title={t("chat.pinnedMessages")}
+                  aria-label={t("chat.pinnedMessages")}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
@@ -380,8 +415,8 @@ export default function Chat() {
                   <button
                     className={`chat-header-btn ${memberSidebarOpen ? "active" : ""}`}
                     onClick={toggleMemberSidebar}
-                    title="Member List"
-                    aria-label="Member List"
+                    title={t("chat.memberList")}
+                    aria-label={t("chat.memberList")}
                   >
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                       <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
@@ -406,14 +441,14 @@ export default function Chat() {
             <div className="drop-overlay">
               <div className="drop-overlay-content">
                 <span className="drop-overlay-icon">+</span>
-                <span>Drop files to upload</span>
+                <span>{t("chat.dropFilesToUpload")}</span>
               </div>
             </div>
           )}
           {showFriends && selectedServerId === null ? (
             <FriendsList />
           ) : currentChannelId && isVoiceChannel ? (
-            <VoiceRoom channelId={currentChannelId} channelName={channelDisplay?.name ?? "Voice"} serverId={selectedServerId!} />
+            <Suspense fallback={null}><VoiceRoom channelId={currentChannelId} channelName={channelDisplay?.name ?? t("chat.voiceDefaultName")} serverId={selectedServerId!} /></Suspense>
           ) : currentChannelId ? (
             <>
               <MessageList />
@@ -424,10 +459,10 @@ export default function Chat() {
                   </span>
                   <span className="typing-text">
                     {typingNames.length === 1
-                      ? `${typingNames[0]} is typing...`
+                      ? t("chat.typingOne", { name: typingNames[0] })
                       : typingNames.length === 2
-                        ? `${typingNames[0]} and ${typingNames[1]} are typing...`
-                        : `${typingNames[0]} and ${typingNames.length - 1} others are typing...`}
+                        ? t("chat.typingTwo", { name1: typingNames[0], name2: typingNames[1] })
+                        : t("chat.typingMany", { name: typingNames[0], count: typingNames.length - 1 })}
                   </span>
                 </div>
               )}
@@ -439,7 +474,7 @@ export default function Chat() {
             </>
           ) : (
             <div className="no-channel">
-              <p>Select a channel from the sidebar to start chatting.</p>
+              <p>{t("chat.noChannelMessage")}</p>
             </div>
           )}
         </div>
@@ -447,7 +482,7 @@ export default function Chat() {
 
       {memberSidebarOpen && isServerChannel && currentChannel && selectedServerId !== null && (
         <>
-          {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} />}
+          {!isMobile && <div className="resize-handle" role="separator" aria-orientation="vertical" aria-label={t("chat.resizeMemberSidebar")} tabIndex={0} onMouseDown={(e) => handleResizeStart(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} onKeyDown={(e) => handleResizeKeyDown(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} />}
           <MemberSidebar serverId={currentChannel.server_id!} />
         </>
       )}
@@ -455,7 +490,7 @@ export default function Chat() {
       {/* 1-on-1 DM: always show profile card sidebar */}
       {is1on1Dm && currentChannel && !(showFriends && selectedServerId === null) && (
         <>
-          {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} />}
+          {!isMobile && <div className="resize-handle" role="separator" aria-orientation="vertical" aria-label={t("chat.resizeMemberSidebar")} tabIndex={0} onMouseDown={(e) => handleResizeStart(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} onKeyDown={(e) => handleResizeKeyDown(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} />}
           <DmMemberSidebar channelId={currentChannel.id} channelType={currentChannel.channel_type} />
         </>
       )}
@@ -463,13 +498,13 @@ export default function Chat() {
       {/* Group DM: toggle member list with button */}
       {memberSidebarOpen && isGroupDm && currentChannel && !(showFriends && selectedServerId === null) && (
         <>
-          {!isMobile && <div className="resize-handle" onMouseDown={(e) => handleResizeStart(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} />}
+          {!isMobile && <div className="resize-handle" role="separator" aria-orientation="vertical" aria-label={t("chat.resizeMemberSidebar")} tabIndex={0} onMouseDown={(e) => handleResizeStart(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} onKeyDown={(e) => handleResizeKeyDown(e, "--member-sidebar-width", memberSidebarWidth, 180, 380, setMemberSidebarWidth, -1)} />}
           <DmMemberSidebar channelId={currentChannel.id} channelType={currentChannel.channel_type} />
         </>
       )}
 
       {pinnedPanelOpen && currentChannelId && <PinnedMessagesPanel channelId={currentChannelId} />}
-      {searchPanelOpen && <SearchPanel />}
+      {searchPanelOpen && <Suspense fallback={null}><SearchPanel /></Suspense>}
 
       {showUserSettings && <Suspense fallback={null}><UserSettings /></Suspense>}
       {showAdminPanel && <Suspense fallback={null}><AdminPanel onClose={() => setShowAdminPanel(false)} /></Suspense>}
@@ -492,13 +527,13 @@ export default function Chat() {
         <div className="modal-overlay">
           <div className="modal-dialog">
             <div className="modal-dialog-header">
-              <h3 className="modal-title">Server Invite</h3>
-              <button className="modal-close-btn" onClick={() => navigate("/", { replace: true })} aria-label="Close">
+              <h3 className="modal-title">{t("chat.serverInviteTitle")}</h3>
+              <button className="modal-close-btn" onClick={() => navigate("/", { replace: true })} aria-label={t("chat.serverInviteClose")}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" /></svg>
               </button>
             </div>
             <p style={{ color: "var(--text-secondary)", margin: "8px 0 16px" }}>
-              You've been invited to join a server.
+              {t("chat.serverInviteMessage")}
             </p>
             {inviteError && (
               <p style={{ color: "var(--red)", fontSize: "0.875rem", margin: "0 0 8px" }}>{inviteError}</p>
@@ -508,14 +543,14 @@ export default function Chat() {
             )}
             <div className="confirm-actions">
               <button className="btn-ghost" onClick={() => navigate("/", { replace: true })}>
-                Cancel
+                {t("chat.serverInviteCancel")}
               </button>
               <button
                 className="btn-primary"
                 onClick={handleAcceptInvite}
                 disabled={inviteJoining || !!inviteSuccess}
               >
-                {inviteJoining ? "Joining..." : inviteSuccess ? "Joined!" : "Accept Invite"}
+                {inviteJoining ? t("chat.serverInviteJoining") : inviteSuccess ? t("chat.serverInviteJoined") : t("chat.serverInviteAccept")}
               </button>
             </div>
           </div>

@@ -231,6 +231,7 @@ pub struct Channel {
     pub created_at: DateTime<Utc>,
     pub category_id: Option<Uuid>,
     pub dm_status: Option<String>, // "active", "pending", "declined" — only for DM channels
+    pub is_private: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -239,6 +240,7 @@ pub struct CreateChannelRequest {
     pub channel_type: Option<String>,
     pub position: Option<i32>,
     pub category_id: Option<Uuid>,
+    pub is_private: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -254,6 +256,7 @@ pub struct ChannelResponse {
     pub dm_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_message_id: Option<Uuid>,
+    pub is_private: bool,
 }
 
 // ─── Channel Categories ──────────────────────────────
@@ -525,6 +528,7 @@ pub struct Reaction {
     pub user_id: Uuid,
     pub emoji: String,
     pub created_at: DateTime<Utc>,
+    pub sender_token: Option<String>,
 }
 
 /// Aggregated reaction info for a single emoji on a message.
@@ -666,14 +670,14 @@ pub enum WsServerMessage {
     ReactionAdded {
         message_id: Uuid,
         channel_id: Uuid,
-        user_id: Uuid,
+        sender_token: String,
         emoji: String,
     },
     /// A reaction was removed from a message
     ReactionRemoved {
         message_id: Uuid,
         channel_id: Uuid,
-        user_id: Uuid,
+        sender_token: String,
         emoji: String,
     },
     /// User presence change (online/offline)
@@ -770,6 +774,24 @@ pub struct RefreshToken {
     /// When true, this token has been rotated. If a revoked token is replayed,
     /// the entire family is invalidated (potential theft).
     pub revoked: bool,
+    /// Device/browser info from User-Agent header at login time.
+    pub device_name: Option<String>,
+    /// Client IP address at login time.
+    pub ip_address: Option<String>,
+    /// Last activity timestamp (updated on each token refresh).
+    pub last_activity: Option<DateTime<Utc>>,
+}
+
+/// Response for the session list endpoint.
+#[derive(Debug, Serialize)]
+pub struct SessionResponse {
+    pub id: Uuid,
+    pub family_id: Option<Uuid>,
+    pub device_name: Option<String>,
+    pub ip_address: Option<String>,
+    pub last_activity: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub is_current: bool,
 }
 
 // ─── Invites ──────────────────────────────────────────

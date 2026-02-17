@@ -1,4 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
 import { useChatStore } from "../store/chat.js";
@@ -16,6 +17,7 @@ interface DmMemberSidebarProps {
 const MAX_GROUP_MEMBERS = 10;
 
 export default function DmMemberSidebar({ channelId, channelType }: DmMemberSidebarProps) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const currentUser = useAuthStore((s) => s.user);
   const presenceStatuses = usePresenceStore((s) => s.statuses);
@@ -96,7 +98,7 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
       setShowAddMember(false);
       setAddSearch("");
     } catch (err: any) {
-      setAddError(err.message || "Failed to add member");
+      setAddError(err.message || t("dmMemberSidebar.failedAddMember"));
     }
   }
 
@@ -114,13 +116,13 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
     <aside className="member-sidebar dm-member-sidebar">
       <div className="member-sidebar-header">
         <span className="dm-member-sidebar-title">
-          Members — {members.length}
+          {t("dmMemberSidebar.membersTitle")} — {members.length}
         </span>
         {isGroup && canAddMore && (
           <button
             className="dm-add-member-btn"
             onClick={() => setShowAddMember(!showAddMember)}
-            title="Add Member"
+            title={t("dmMemberSidebar.addMemberTitle")}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
@@ -134,7 +136,7 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
           <input
             type="text"
             className="dm-add-member-search"
-            placeholder="Search friends..."
+            placeholder={t("dmMemberSidebar.searchFriendsPlaceholder")}
             value={addSearch}
             onChange={(e) => setAddSearch(e.target.value)}
             autoFocus
@@ -143,7 +145,7 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
           <div className="dm-add-member-list">
             {availableFriends.length === 0 ? (
               <div className="dm-add-member-empty">
-                {addSearch ? "No matches" : "No friends to add"}
+                {addSearch ? t("dmMemberSidebar.noMatches") : t("dmMemberSidebar.noFriendsToAdd")}
               </div>
             ) : (
               availableFriends.map((f) => (
@@ -195,7 +197,7 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
         {isGroup && (
           <div className="dm-member-sidebar-actions">
             <button className="btn-danger dm-leave-btn" onClick={() => setConfirmLeave(true)}>
-              Leave Group
+              {t("dmMemberSidebar.leaveGroup")}
             </button>
           </div>
         )}
@@ -213,9 +215,9 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
 
       {confirmLeave && (
         <ConfirmDialog
-          title="Leave Group"
-          message="Are you sure you want to leave this group DM?"
-          confirmLabel="Leave"
+          title={t("dmMemberSidebar.confirm.leaveTitle")}
+          message={t("dmMemberSidebar.confirm.leaveMessage")}
+          confirmLabel={t("dmMemberSidebar.confirm.leaveLabel")}
           danger
           onConfirm={() => { setConfirmLeave(false); handleLeaveGroup(); }}
           onCancel={() => setConfirmLeave(false)}
@@ -227,6 +229,7 @@ export default function DmMemberSidebar({ channelId, channelType }: DmMemberSide
 
 /** Inline profile card for 1-on-1 DM sidebar */
 function DmProfileCard({ userId }: { userId: string }) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const presenceStatus = usePresenceStore((s) => s.statuses[userId] ?? "offline");
   const statusConfig = STATUS_CONFIG[presenceStatus] ?? STATUS_CONFIG.offline;
@@ -249,11 +252,11 @@ function DmProfileCard({ userId }: { userId: string }) {
   }, [userId, api]);
 
   if (loading) {
-    return <div className="dm-profile-card-loading">Loading profile...</div>;
+    return <div className="dm-profile-card-loading">{t("dmMemberSidebar.profile.loadingProfile")}</div>;
   }
 
   if (!profile) {
-    return <div className="dm-profile-card-loading">Profile unavailable</div>;
+    return <div className="dm-profile-card-loading">{t("dmMemberSidebar.profile.profileUnavailable")}</div>;
   }
 
   const displayName = profile.display_name || profile.username;
@@ -305,7 +308,7 @@ function DmProfileCard({ userId }: { userId: string }) {
       {profile.about_me && (
         <>
           <div className="dm-profile-section">
-            <div className="dm-profile-section-label">ABOUT ME</div>
+            <div className="dm-profile-section-label">{t("dmMemberSidebar.profile.aboutMe")}</div>
             <div className="dm-profile-section-value">{profile.about_me}</div>
           </div>
           <div className="dm-profile-divider" />
@@ -314,7 +317,7 @@ function DmProfileCard({ userId }: { userId: string }) {
 
       {/* Member since */}
       <div className="dm-profile-section">
-        <div className="dm-profile-section-label">MEMBER SINCE</div>
+        <div className="dm-profile-section-label">{t("dmMemberSidebar.profile.memberSince")}</div>
         <div className="dm-profile-section-value">
           {new Date(profile.created_at).toLocaleDateString(undefined, {
             year: "numeric",
@@ -334,7 +337,7 @@ function DmProfileCard({ userId }: { userId: string }) {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="dm-profile-mutual-icon">
                   <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
                 </svg>
-                <span>{profile.mutual_server_count} Mutual Server{profile.mutual_server_count !== 1 ? "s" : ""}</span>
+                <span>{profile.mutual_server_count} {profile.mutual_server_count !== 1 ? t("dmMemberSidebar.profile.mutualServers") : t("dmMemberSidebar.profile.mutualServer")}</span>
               </div>
             )}
             {profile.mutual_friend_count > 0 && (
@@ -342,7 +345,7 @@ function DmProfileCard({ userId }: { userId: string }) {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="dm-profile-mutual-icon">
                   <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
                 </svg>
-                <span>{profile.mutual_friend_count} Mutual Friend{profile.mutual_friend_count !== 1 ? "s" : ""}</span>
+                <span>{profile.mutual_friend_count} {profile.mutual_friend_count !== 1 ? t("dmMemberSidebar.profile.mutualFriends") : t("dmMemberSidebar.profile.mutualFriend")}</span>
               </div>
             )}
           </div>

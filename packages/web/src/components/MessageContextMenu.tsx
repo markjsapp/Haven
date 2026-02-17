@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useChatStore, type DecryptedMessage } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { Permission } from "@haven/core";
@@ -26,6 +27,7 @@ export default function MessageContextMenu({
   onDelete,
   onReport,
 }: MessageContextMenuProps) {
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const startReply = useChatStore((s) => s.startReply);
   const startEditing = useChatStore((s) => s.startEditing);
@@ -70,7 +72,7 @@ export default function MessageContextMenu({
   };
 
   return (
-    <div className="message-context-menu" style={style} ref={ref} role="menu" aria-label="Message options" tabIndex={-1} onKeyDown={handleKeyDown}>
+    <div className="message-context-menu" style={style} ref={ref} role="menu" aria-label={t("messageContext.ariaLabel")} tabIndex={-1} onKeyDown={handleKeyDown}>
       <button
         type="button"
         role="menuitem"
@@ -78,7 +80,7 @@ export default function MessageContextMenu({
         className="context-menu-item"
         onClick={() => { startReply(message.id); onClose(); }}
       >
-        Reply
+        {t("messageContext.reply")}
       </button>
       <button
         type="button"
@@ -90,7 +92,7 @@ export default function MessageContextMenu({
           onClose();
         }}
       >
-        Copy Text
+        {t("messageContext.copyText")}
       </button>
       {canManageMessages && (
         <>
@@ -103,7 +105,7 @@ export default function MessageContextMenu({
               className="context-menu-item"
               onClick={() => { unpinMessage(message.id); onClose(); }}
             >
-              Unpin Message
+              {t("messageContext.unpinMessage")}
             </button>
           ) : (
             <button
@@ -113,7 +115,7 @@ export default function MessageContextMenu({
               className="context-menu-item"
               onClick={() => { pinMessage(message.id); onClose(); }}
             >
-              Pin Message
+              {t("messageContext.pinMessage")}
             </button>
           )}
         </>
@@ -128,7 +130,7 @@ export default function MessageContextMenu({
             className="context-menu-item"
             onClick={() => { startEditing(message.id); onClose(); }}
           >
-            Edit Message
+            {t("messageContext.editMessage")}
           </button>
           <button
             type="button"
@@ -137,7 +139,7 @@ export default function MessageContextMenu({
             className="context-menu-item context-menu-item-danger"
             onClick={() => { onDelete(); onClose(); }}
           >
-            Delete Message
+            {t("messageContext.deleteMessage")}
           </button>
         </>
       )}
@@ -152,7 +154,7 @@ export default function MessageContextMenu({
               className="context-menu-item context-menu-item-danger"
               onClick={() => { onDelete(); onClose(); }}
             >
-              Delete Message
+              {t("messageContext.deleteMessage")}
             </button>
           )}
           <button
@@ -162,7 +164,7 @@ export default function MessageContextMenu({
             className="context-menu-item context-menu-item-danger"
             onClick={() => { onReport(); onClose(); }}
           >
-            Report Message
+            {t("messageContext.reportMessage")}
           </button>
         </>
       )}

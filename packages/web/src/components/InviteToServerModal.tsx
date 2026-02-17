@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { getServerUrl } from "../lib/serverUrl";
 import { useAuthStore } from "../store/auth.js";
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export default function InviteToServerModal({ serverId: preSelectedServerId, targetUsername, onClose }: Props) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const servers = useChatStore((s) => s.servers);
   const getOrCreateDmChannel = useChatStore((s) => s.getOrCreateDmChannel);
@@ -56,7 +58,7 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
     api.createInvite(selectedServerId, { expires_in_hours: expiresInHours, max_uses: maxUses }).then((invite) => {
       setInviteCode(invite.code);
     }).catch((err) => {
-      setError(err.message || "Failed to create invite");
+      setError(err.message || t("inviteToServer.failed"));
     }).finally(() => {
       setLoading(false);
       inviteFetchRef.current = false;
@@ -125,19 +127,19 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
 
   return createPortal(
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-dialog invite-modal" ref={ref} role="dialog" aria-label="Invite to Server">
+      <div className="modal-dialog invite-modal" ref={ref} role="dialog" aria-label={t("inviteToServer.invite")}>
         {/* Server picker phase */}
         {!selectedServerId && (
           <>
             <div className="modal-dialog-header">
               <h3 className="invite-modal-title">
-                Invite {targetUsername ? <strong>{targetUsername}</strong> : "to Server"}
+                {targetUsername ? t("inviteToServer.titleWithUser", { username: targetUsername }) : t("inviteToServer.titleGeneric")}
               </h3>
-              <button className="modal-close-btn" onClick={onClose} aria-label="Close">
+              <button className="modal-close-btn" onClick={onClose} aria-label={t("inviteToServer.close")}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" /></svg>
               </button>
             </div>
-            <p className="invite-modal-desc">Select a server:</p>
+            <p className="invite-modal-desc">{t("inviteToServer.selectServer")}</p>
             <div className="invite-server-list">
               {servers.map((server) => (
                 <button
@@ -156,11 +158,11 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
                 </button>
               ))}
               {servers.length === 0 && (
-                <p className="invite-modal-desc">You haven't joined any servers yet.</p>
+                <p className="invite-modal-desc">{t("inviteToServer.noServers")}</p>
               )}
             </div>
             <div className="confirm-actions">
-              <button className="btn-ghost" onClick={onClose}>Cancel</button>
+              <button className="btn-ghost" onClick={onClose}>{t("inviteToServer.cancel")}</button>
             </div>
           </>
         )}
@@ -170,49 +172,49 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
           <>
             <div className="modal-dialog-header">
               <h3 className="invite-modal-title">
-                Invite friends to {selectedServerName}
+                {t("inviteToServer.inviteFriendsTo", { serverName: selectedServerName })}
               </h3>
-              <button className="modal-close-btn" onClick={onClose} aria-label="Close">
+              <button className="modal-close-btn" onClick={onClose} aria-label={t("inviteToServer.close")}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" /></svg>
               </button>
             </div>
-            <p className="invite-modal-subtitle">Recipients will land in #general</p>
+            <p className="invite-modal-subtitle">{t("inviteToServer.recipientsNote")}</p>
 
-            {loading && <p className="invite-modal-desc">Creating invite link...</p>}
+            {loading && <p className="invite-modal-desc">{t("inviteToServer.creatingLink")}</p>}
             {error && <p className="invite-modal-desc" style={{ color: "var(--red)" }}>{error}</p>}
 
             {/* Invite options */}
             <div className="invite-options-row">
               <label className="invite-option">
-                <span className="invite-option-label">Expire after</span>
+                <span className="invite-option-label">{t("inviteToServer.expireAfter")}</span>
                 <select
                   className="invite-option-select"
                   value={expiresInHours === undefined ? "" : String(expiresInHours)}
                   onChange={(e) => setExpiresInHours(e.target.value ? Number(e.target.value) : undefined)}
                 >
-                  <option value="0.5">30 minutes</option>
-                  <option value="1">1 hour</option>
-                  <option value="6">6 hours</option>
-                  <option value="12">12 hours</option>
-                  <option value="24">1 day</option>
-                  <option value="168">7 days</option>
-                  <option value="">Never</option>
+                  <option value="0.5">{t("inviteToServer.expire30m")}</option>
+                  <option value="1">{t("inviteToServer.expire1h")}</option>
+                  <option value="6">{t("inviteToServer.expire6h")}</option>
+                  <option value="12">{t("inviteToServer.expire12h")}</option>
+                  <option value="24">{t("inviteToServer.expire1d")}</option>
+                  <option value="168">{t("inviteToServer.expire7d")}</option>
+                  <option value="">{t("inviteToServer.expireNever")}</option>
                 </select>
               </label>
               <label className="invite-option">
-                <span className="invite-option-label">Max uses</span>
+                <span className="invite-option-label">{t("inviteToServer.maxUses")}</span>
                 <select
                   className="invite-option-select"
                   value={maxUses === undefined ? "" : String(maxUses)}
                   onChange={(e) => setMaxUses(e.target.value ? Number(e.target.value) : undefined)}
                 >
-                  <option value="">No limit</option>
-                  <option value="1">1 use</option>
-                  <option value="5">5 uses</option>
-                  <option value="10">10 uses</option>
-                  <option value="25">25 uses</option>
-                  <option value="50">50 uses</option>
-                  <option value="100">100 uses</option>
+                  <option value="">{t("inviteToServer.noLimit")}</option>
+                  <option value="1">{t("inviteToServer.uses1")}</option>
+                  <option value="5">{t("inviteToServer.uses5")}</option>
+                  <option value="10">{t("inviteToServer.uses10")}</option>
+                  <option value="25">{t("inviteToServer.uses25")}</option>
+                  <option value="50">{t("inviteToServer.uses50")}</option>
+                  <option value="100">{t("inviteToServer.uses100")}</option>
                 </select>
               </label>
             </div>
@@ -227,7 +229,7 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
                   <input
                     className="invite-search-input"
                     type="text"
-                    placeholder="Search for friends"
+                    placeholder={t("inviteToServer.searchPlaceholder")}
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     autoFocus
@@ -238,7 +240,7 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
                 <div className="invite-friend-list">
                   {filteredFriends.length === 0 && (
                     <div className="invite-friend-empty">
-                      {acceptedFriends.length === 0 ? "No friends to invite." : "No matching friends."}
+                      {acceptedFriends.length === 0 ? t("inviteToServer.noFriendsToInvite") : t("inviteToServer.noMatchingFriends")}
                     </div>
                   )}
                   {filteredFriends.map((friend) => {
@@ -259,7 +261,7 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
                           onClick={() => handleInviteFriend(friend.username)}
                           disabled={isSent || isSending}
                         >
-                          {isSent ? "Invited" : isSending ? "..." : "Invite"}
+                          {isSent ? t("inviteToServer.invited") : isSending ? "..." : t("inviteToServer.invite")}
                         </button>
                       </div>
                     );
@@ -268,7 +270,7 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
 
                 {/* Invite link */}
                 <div className="invite-link-section">
-                  <p className="invite-link-label">Or, send a server invite link to a friend</p>
+                  <p className="invite-link-label">{t("inviteToServer.linkLabel")}</p>
                   <div className="invite-code-row">
                     <input
                       className="invite-link-input"
@@ -277,7 +279,7 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
                       onFocus={(e) => e.target.select()}
                     />
                     <button className="invite-copy-btn" onClick={handleCopy}>
-                      {copied ? "Copied!" : "Copy"}
+                      {copied ? t("inviteToServer.copied") : t("inviteToServer.copy")}
                     </button>
                   </div>
                 </div>
@@ -286,7 +288,7 @@ export default function InviteToServerModal({ serverId: preSelectedServerId, tar
 
             {!preSelectedServerId && !loading && (
               <button className="btn-ghost invite-back-btn" onClick={() => { setSelectedServerId(null); setInviteCode(null); setError(""); }}>
-                Back
+                {t("inviteToServer.back")}
               </button>
             )}
           </>

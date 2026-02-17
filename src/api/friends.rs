@@ -228,6 +228,7 @@ pub async fn list_dm_requests(
             category_id: ch.category_id,
             dm_status: ch.dm_status,
             last_message_id: None,
+            is_private: false,
         })
         .collect();
     Ok(Json(responses))

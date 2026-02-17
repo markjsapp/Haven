@@ -15,8 +15,10 @@ import {
 } from "@haven/core";
 import { useAuthStore } from "./auth.js";
 import { usePresenceStore } from "./presence.js";
-import { decryptIncoming, encryptOutgoing, fetchSenderKeys, mapChannelToPeer } from "../lib/crypto.js";
+import { useUiStore } from "./ui.js";
+import { decryptIncoming, encryptOutgoing, fetchSenderKeys, invalidateSenderKey, mapChannelToPeer } from "../lib/crypto.js";
 import { cacheMessage, getCachedMessage, uncacheMessage } from "../lib/message-cache.js";
+import { initTabSync, isWsOwner, broadcastWsEvent, onRoleChange, onWsSend } from "../lib/tab-sync.js";
 import { unicodeBtoa, unicodeAtob } from "../lib/base64.js";
 import { sendNotification } from "../lib/notifications.js";
 
@@ -139,6 +141,7 @@ interface ChatState {
   toggleReaction(messageId: string, emoji: string): void;
   loadBlockedUsers(): Promise<void>;
   refreshPermissions(serverId: string): Promise<void>;
+  navigateUnread(direction: "up" | "down"): void;
 }
 
 const TYPING_EXPIRY_MS = 3000;
@@ -199,12 +202,65 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const token = api.currentAccessToken;
     if (!token) return;
 
+    // Initialize multi-tab coordination
+    initTabSync();
+
+    // Handle role changes: if we become leader later, connect WS
+    onRoleChange((newRole) => {
+      const { ws: existingWs } = get();
+      if (newRole === "leader" && !existingWs) {
+        // Became leader — need to establish WS connection
+        get().connect();
+      }
+    });
+
+    // If this tab is a follower, don't open a WS connection
+    if (!isWsOwner()) {
+      set({ wsState: "connected" }); // Followers piggyback on leader's connection
+      return;
+    }
+
     const ws = new HavenWs({
       baseUrl: getServerUrl(),
       token,
     });
 
-    ws.onConnect(() => set({ wsState: "connected" }));
+    // When leader receives WS sends from followers, relay them
+    onWsSend((data) => {
+      if (ws.isConnected) {
+        ws.send(data as Parameters<typeof ws.send>[0]);
+      }
+    });
+
+    // Broadcast all WS events to follower tabs
+    ws.on("*" as any, (msg: any) => {
+      broadcastWsEvent(msg);
+    });
+
+    let hasConnectedBefore = false;
+
+    ws.onConnect(() => {
+      const isReconnect = hasConnectedBefore;
+      hasConnectedBefore = true;
+      set({ wsState: "connected" });
+
+      if (isReconnect) {
+        // Re-subscribe all loaded channels on reconnect
+        const { channels, currentChannelId } = get();
+        const subscribedIds = new Set<string>();
+        for (const ch of channels) {
+          ws.subscribe(ch.id);
+          subscribedIds.add(ch.id);
+        }
+
+        // Re-fetch messages for current channel to catch anything missed
+        if (currentChannelId) {
+          const { api } = useAuthStore.getState();
+          api.getMessages(currentChannelId, { limit: 50 }).catch(() => {});
+        }
+      }
+    });
+
     ws.onDisconnect(() => set({ wsState: "disconnected" }));
 
     ws.on("NewMessage", (msg: Extract<WsServerMessage, { type: "NewMessage" }>) => {
@@ -273,28 +329,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
 
     ws.on("ReactionAdded", (msg: Extract<WsServerMessage, { type: "ReactionAdded" }>) => {
-      const { message_id, user_id, emoji } = msg.payload;
+      const { message_id, sender_token, emoji } = msg.payload;
       set((state) => {
         const groups = [...(state.reactions[message_id] ?? [])];
         const existing = groups.find((g) => g.emoji === emoji);
+        // Use sender_token as a placeholder user ID (real user IDs loaded via REST)
+        // Skip if we already optimistically added this (our own reaction)
         if (existing) {
-          if (!existing.userIds.includes(user_id)) {
-            existing.userIds = [...existing.userIds, user_id];
+          if (!existing.userIds.includes(sender_token)) {
+            existing.userIds = [...existing.userIds, sender_token];
           }
         } else {
-          groups.push({ emoji, userIds: [user_id] });
+          groups.push({ emoji, userIds: [sender_token] });
         }
         return { reactions: { ...state.reactions, [message_id]: groups } };
       });
     });
 
     ws.on("ReactionRemoved", (msg: Extract<WsServerMessage, { type: "ReactionRemoved" }>) => {
-      const { message_id, user_id, emoji } = msg.payload;
+      const { message_id, emoji } = msg.payload;
       set((state) => {
         const groups = (state.reactions[message_id] ?? [])
           .map((g) => {
             if (g.emoji !== emoji) return g;
-            return { ...g, userIds: g.userIds.filter((id) => id !== user_id) };
+            // Remove one entry (we don't know which user, so pop the last non-myId entry)
+            const myId = useAuthStore.getState().user?.id;
+            const idx = g.userIds.findIndex((id) => id !== myId);
+            if (idx >= 0) {
+              const newIds = [...g.userIds];
+              newIds.splice(idx, 1);
+              return { ...g, userIds: newIds };
+            }
+            return g;
           })
           .filter((g) => g.userIds.length > 0);
         return { reactions: { ...state.reactions, [message_id]: groups } };
@@ -1063,12 +1129,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
   addReaction(messageId: string, emoji: string) {
     const { ws } = get();
     if (!ws) return;
+    // Optimistic update with our real user_id
+    const myId = useAuthStore.getState().user?.id;
+    if (myId) {
+      set((state) => {
+        const groups = [...(state.reactions[messageId] ?? [])];
+        const existing = groups.find((g) => g.emoji === emoji);
+        if (existing) {
+          if (!existing.userIds.includes(myId)) {
+            existing.userIds = [...existing.userIds, myId];
+          }
+        } else {
+          groups.push({ emoji, userIds: [myId] });
+        }
+        return { reactions: { ...state.reactions, [messageId]: groups } };
+      });
+    }
     ws.addReaction(messageId, emoji);
   },
 
   removeReaction(messageId: string, emoji: string) {
     const { ws } = get();
     if (!ws) return;
+    // Optimistic update — remove our own user_id
+    const myId = useAuthStore.getState().user?.id;
+    if (myId) {
+      set((state) => {
+        const groups = (state.reactions[messageId] ?? [])
+          .map((g) => {
+            if (g.emoji !== emoji) return g;
+            return { ...g, userIds: g.userIds.filter((id) => id !== myId) };
+          })
+          .filter((g) => g.userIds.length > 0);
+        return { reactions: { ...state.reactions, [messageId]: groups } };
+      });
+    }
     ws.removeReaction(messageId, emoji);
   },
 
@@ -1222,6 +1317,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  navigateUnread(direction) {
+    const { channels, currentChannelId, unreadCounts } = get();
+    const selectedServerId = useUiStore.getState().selectedServerId;
+
+    // Filter to text channels in the current server (or DMs if no server selected)
+    const relevantChannels = channels.filter((ch) =>
+      selectedServerId
+        ? ch.server_id === selectedServerId && ch.channel_type !== "voice"
+        : ch.server_id === null,
+    );
+
+    if (relevantChannels.length === 0) return;
+
+    const currentIdx = relevantChannels.findIndex((ch) => ch.id === currentChannelId);
+
+    // Find channels with unreads
+    const unreadChannels = relevantChannels
+      .map((ch, idx) => ({ ch, idx }))
+      .filter(({ ch }) => (unreadCounts[ch.id] ?? 0) > 0);
+
+    if (unreadChannels.length === 0) return;
+
+    let target: typeof unreadChannels[0] | undefined;
+
+    if (direction === "down") {
+      // Find the next unread channel after current index
+      target = unreadChannels.find(({ idx }) => idx > currentIdx);
+      // Wrap around
+      if (!target) target = unreadChannels[0];
+    } else {
+      // Find the previous unread channel before current index
+      target = [...unreadChannels].reverse().find(({ idx }) => idx < currentIdx);
+      // Wrap around
+      if (!target) target = unreadChannels[unreadChannels.length - 1];
+    }
+
+    if (target) {
+      get().selectChannel(target.ch.id);
+    }
+  },
+
   async refreshPermissions(serverId) {
     const { api } = useAuthStore.getState();
     try {
@@ -1335,11 +1471,30 @@ async function handleIncomingMessage(raw: MessageResponse) {
           userNames: { ...state.userNames, [data.user_id]: data.username },
           memberListVersion: state.memberListVersion + 1,
         }));
+        // Invalidate sender keys for ALL channels in this server so we
+        // re-distribute to the new member on next send
+        const thisChannel = useChatStore.getState().channels.find((c: { id: string }) => c.id === raw.channel_id);
+        if (thisChannel?.server_id) {
+          for (const ch of useChatStore.getState().channels) {
+            if (ch.server_id === thisChannel.server_id) {
+              invalidateSenderKey(ch.id);
+            }
+          }
+        }
       }
       if (data.event === "member_left" || data.event === "member_kicked") {
         useChatStore.setState((state) => ({
           memberListVersion: state.memberListVersion + 1,
         }));
+        // Invalidate sender keys so we stop encrypting for the departed member
+        const depChannel = useChatStore.getState().channels.find((c: { id: string }) => c.id === raw.channel_id);
+        if (depChannel?.server_id) {
+          for (const ch of useChatStore.getState().channels) {
+            if (ch.server_id === depChannel.server_id) {
+              invalidateSenderKey(ch.id);
+            }
+          }
+        }
       }
     } catch { /* not valid JSON, ignore */ }
 

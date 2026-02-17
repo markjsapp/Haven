@@ -82,6 +82,43 @@ pub async fn get_channel_reactions(
     Ok(Json(result))
 }
 
+/// GET /api/v1/messages/:message_id/reactions — get who reacted to a message
+pub async fn get_message_reactions(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(message_id): Path<Uuid>,
+) -> AppResult<Json<Vec<ReactionGroup>>> {
+    // Find the message to verify access
+    let message = queries::find_message_by_id(state.db.read(), message_id)
+        .await?
+        .ok_or(AppError::NotFound("Message not found".into()))?;
+
+    // Verify membership in the channel
+    if !queries::can_access_channel(state.db.read(), message.channel_id, user_id).await? {
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
+    }
+
+    let reactions = queries::get_reactions_for_message(state.db.read(), message_id).await?;
+
+    // Group by emoji
+    let mut groups: std::collections::HashMap<String, Vec<Uuid>> = std::collections::HashMap::new();
+    for r in &reactions {
+        groups.entry(r.emoji.clone()).or_default().push(r.user_id);
+    }
+
+    let result: Vec<ReactionGroup> = groups
+        .into_iter()
+        .map(|(emoji, user_ids)| ReactionGroup {
+            message_id,
+            emoji,
+            count: user_ids.len() as i64,
+            user_ids,
+        })
+        .collect();
+
+    Ok(Json(result))
+}
+
 /// POST /api/v1/channels/:channel_id/messages
 /// REST fallback for sending messages (primary path is WebSocket).
 pub async fn send_message(

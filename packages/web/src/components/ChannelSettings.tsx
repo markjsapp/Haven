@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { parseChannelName } from "../lib/channel-utils.js";
@@ -23,6 +24,7 @@ export default function ChannelSettings({
   serverId,
   onClose,
 }: ChannelSettingsProps) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const channels = useChatStore((s) => s.channels);
   const channel = channels.find((c) => c.id === channelId);
@@ -57,7 +59,7 @@ export default function ChannelSettings({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Channel Settings"
+        aria-label={t("channelSettings.ariaLabel")}
         onClick={(e) => e.stopPropagation()}
       >
         <nav className="user-settings-sidebar">
@@ -69,19 +71,19 @@ export default function ChannelSettings({
             className={`user-settings-nav-item ${tab === "overview" ? "active" : ""}`}
             onClick={() => setTab("overview")}
           >
-            Overview
+            {t("channelSettings.tab.overview")}
           </button>
           <button
             className={`user-settings-nav-item ${tab === "permissions" ? "active" : ""}`}
             onClick={() => setTab("permissions")}
           >
-            Permissions
+            {t("channelSettings.tab.permissions")}
           </button>
           <div className="user-settings-sidebar-divider" />
           <button
             className="user-settings-nav-item danger"
             onClick={async () => {
-              if (confirm("Are you sure you want to delete this channel?")) {
+              if (confirm(t("channelSettings.deleteConfirm"))) {
                 try {
                   await api.deleteChannel(channelId);
                   useChatStore.getState().loadChannels();
@@ -90,19 +92,19 @@ export default function ChannelSettings({
               }
             }}
           >
-            Delete Channel
+            {t("channelSettings.deleteChannel")}
           </button>
         </nav>
         <div className="user-settings-content">
           <div className="user-settings-content-header">
-            <h2>{tab === "overview" ? "Overview" : "Permissions"}</h2>
-            <button className="settings-esc-close" onClick={onClose} aria-label="Close channel settings">
+            <h2>{tab === "overview" ? t("channelSettings.tab.overview") : t("channelSettings.tab.permissions")}</h2>
+            <button className="settings-esc-close" onClick={onClose} aria-label={t("channelSettings.closeAriaLabel")}>
               <div className="settings-esc-circle">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
                 </svg>
               </div>
-              <span className="settings-esc-label">ESC</span>
+              <span className="settings-esc-label">{t("channelSettings.escLabel")}</span>
             </button>
           </div>
           <div className="user-settings-content-body">
@@ -115,7 +117,7 @@ export default function ChannelSettings({
               />
             )}
             {tab === "permissions" && (
-              <Suspense fallback={<p>Loading...</p>}>
+              <Suspense fallback={<p>{t("channelSettings.loading")}</p>}>
                 <ChannelPermissionsEditor
                   channelId={channelId}
                   serverId={serverId}
@@ -131,7 +133,7 @@ export default function ChannelSettings({
   );
 }
 
-// ─── Overview Tab ──────────────────────────────────────
+// --- Overview Tab ---
 
 function OverviewTab({
   channelId,
@@ -144,6 +146,7 @@ function OverviewTab({
   currentTopic: string;
   encryptedMeta: string;
 }) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
 
   const [name, setName] = useState(currentName);
@@ -164,7 +167,7 @@ function OverviewTab({
 
   async function handleSave() {
     if (!name.trim()) {
-      setError("Channel name cannot be empty");
+      setError(t("channelSettings.overview.channelNameEmpty"));
       return;
     }
     setError("");
@@ -183,9 +186,9 @@ function OverviewTab({
         encrypted_meta: unicodeBtoa(JSON.stringify(meta)),
       });
       useChatStore.getState().loadChannels();
-      setSuccess("Channel updated");
+      setSuccess(t("channelSettings.overview.channelUpdated"));
     } catch (e: any) {
-      setError(e.message || "Failed to update channel");
+      setError(e.message || t("channelSettings.overview.failedUpdate"));
     } finally {
       setSaving(false);
     }
@@ -209,7 +212,7 @@ function OverviewTab({
 
   return (
     <div className="settings-section">
-      <div className="settings-section-title">Channel Name</div>
+      <div className="settings-section-title">{t("channelSettings.overview.channelName")}</div>
       <div className="channel-settings-name-row">
         <input
           ref={nameInputRef}
@@ -218,15 +221,15 @@ function OverviewTab({
           value={name}
           onChange={(e) => { setName(e.target.value); setError(""); }}
           maxLength={100}
-          placeholder="channel-name"
+          placeholder={t("channelSettings.overview.channelNamePlaceholder")}
         />
         <div className="channel-settings-emoji-wrap">
           <button
             type="button"
             className="btn-secondary channel-settings-emoji-btn"
             onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-            title="Add emoji to name"
-            aria-label="Add emoji to name"
+            title={t("channelSettings.overview.addEmojiTitle")}
+            aria-label={t("channelSettings.overview.addEmojiAriaLabel")}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
@@ -242,14 +245,14 @@ function OverviewTab({
         </div>
       </div>
 
-      <div className="settings-section-title" style={{ marginTop: 20 }}>Channel Topic</div>
+      <div className="settings-section-title" style={{ marginTop: 20 }}>{t("channelSettings.overview.channelTopic")}</div>
       <textarea
         className="settings-textarea channel-topic-textarea"
         value={topic}
         onChange={(e) => setTopic(e.target.value)}
         maxLength={125}
         rows={2}
-        placeholder="Describe what this channel is about"
+        placeholder={t("channelSettings.overview.topicPlaceholder")}
       />
       <span className="settings-char-count">{topic.length}/125</span>
 
@@ -261,7 +264,7 @@ function OverviewTab({
           onClick={handleSave}
           disabled={saving}
         >
-          {saving ? "Saving..." : "Save Changes"}
+          {saving ? t("channelSettings.overview.saving") : t("channelSettings.overview.saveChanges")}
         </button>
       )}
     </div>

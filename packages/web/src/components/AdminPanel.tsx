@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore, useIsAdmin } from "../store/auth.js";
 import type { AdminStats, AdminUserResponse } from "@haven/core";
 
 export default function AdminPanel({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const isAdmin = useIsAdmin();
   const currentUserId = useAuthStore((s) => s.user?.id);
@@ -19,7 +21,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       const s = await api.getAdminStats();
       setStats(s);
     } catch {
-      setError("Failed to load stats");
+      setError(t("adminPanel.errors.failedLoadStats"));
     }
   }, [api]);
 
@@ -28,7 +30,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       const u = await api.listAdminUsers(q || undefined, 50, 0);
       setUsers(u);
     } catch {
-      setError("Failed to load users");
+      setError(t("adminPanel.errors.failedLoadUsers"));
     }
   }, [api]);
 
@@ -51,19 +53,19 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
         )
       );
     } catch {
-      setError("Failed to update admin status");
+      setError(t("adminPanel.errors.failedUpdateAdmin"));
     }
   }, [api]);
 
   const deleteUser = useCallback(async (userId: string, username: string) => {
-    if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+    if (!confirm(t("adminPanel.users.deleteConfirm", { username }))) return;
     try {
       await api.adminDeleteUser(userId);
       setUsers((prev) => prev.filter((u) => u.id !== userId));
       // Refresh stats
       loadStats();
     } catch {
-      setError("Failed to delete user");
+      setError(t("adminPanel.errors.failedDeleteUser"));
     }
   }, [api, loadStats]);
 
@@ -73,8 +75,8 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="admin-panel" onClick={(e) => e.stopPropagation()}>
         <div className="admin-panel-header">
-          <h2>Instance Administration</h2>
-          <button className="admin-close-btn" onClick={onClose} aria-label="Close">
+          <h2>{t("adminPanel.title")}</h2>
+          <button className="admin-close-btn" onClick={onClose} aria-label={t("adminPanel.closeAriaLabel")}>
             &times;
           </button>
         </div>
@@ -84,41 +86,41 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
             className={`admin-tab ${tab === "stats" ? "active" : ""}`}
             onClick={() => setTab("stats")}
           >
-            Overview
+            {t("adminPanel.tab.overview")}
           </button>
           <button
             className={`admin-tab ${tab === "users" ? "active" : ""}`}
             onClick={() => setTab("users")}
           >
-            Users
+            {t("adminPanel.tab.users")}
           </button>
         </div>
 
         {error && <div className="settings-error" style={{ padding: "0 24px" }}>{error}</div>}
 
         {loading ? (
-          <div className="admin-loading">Loading...</div>
+          <div className="admin-loading">{t("adminPanel.loading")}</div>
         ) : tab === "stats" ? (
           <div className="admin-stats">
             <div className="admin-stat-card">
               <span className="admin-stat-value">{stats?.total_users ?? 0}</span>
-              <span className="admin-stat-label">Users</span>
+              <span className="admin-stat-label">{t("adminPanel.stats.users")}</span>
             </div>
             <div className="admin-stat-card">
               <span className="admin-stat-value">{stats?.total_servers ?? 0}</span>
-              <span className="admin-stat-label">Servers</span>
+              <span className="admin-stat-label">{t("adminPanel.stats.servers")}</span>
             </div>
             <div className="admin-stat-card">
               <span className="admin-stat-value">{stats?.total_channels ?? 0}</span>
-              <span className="admin-stat-label">Channels</span>
+              <span className="admin-stat-label">{t("adminPanel.stats.channels")}</span>
             </div>
             <div className="admin-stat-card">
               <span className="admin-stat-value">{stats?.total_messages ?? 0}</span>
-              <span className="admin-stat-label">Messages</span>
+              <span className="admin-stat-label">{t("adminPanel.stats.messages")}</span>
             </div>
             <div className="admin-stat-card">
               <span className="admin-stat-value">{stats?.active_connections ?? 0}</span>
-              <span className="admin-stat-label">Active Connections</span>
+              <span className="admin-stat-label">{t("adminPanel.stats.activeConnections")}</span>
             </div>
           </div>
         ) : (
@@ -127,12 +129,12 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
               <input
                 className="settings-input"
                 type="text"
-                placeholder="Search users..."
+                placeholder={t("adminPanel.users.searchPlaceholder")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               />
-              <button className="btn-primary" onClick={handleSearch}>Search</button>
+              <button className="btn-primary" onClick={handleSearch}>{t("adminPanel.users.search")}</button>
             </div>
             <div className="admin-user-list">
               {users.map((u) => (
@@ -148,10 +150,10 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
                     <div className="admin-user-details">
                       <span className="admin-user-name">
                         {u.display_name || u.username}
-                        {u.is_instance_admin && <span className="admin-badge">ADMIN</span>}
+                        {u.is_instance_admin && <span className="admin-badge">{t("adminPanel.users.adminBadge")}</span>}
                       </span>
                       <span className="admin-user-meta">
-                        @{u.username} &middot; {u.server_count} server{u.server_count !== 1 ? "s" : ""} &middot; Joined {new Date(u.created_at).toLocaleDateString()}
+                        @{u.username} &middot; {u.server_count} server{u.server_count !== 1 ? "s" : ""} &middot; {t("adminPanel.users.joined")} {new Date(u.created_at).toLocaleDateString()}
                       </span>
                     </div>
                   </div>
@@ -162,13 +164,13 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
                           className={`btn-small ${u.is_instance_admin ? "btn-danger-outline" : "btn-primary-outline"}`}
                           onClick={() => toggleAdmin(u.id, u.is_instance_admin)}
                         >
-                          {u.is_instance_admin ? "Revoke Admin" : "Grant Admin"}
+                          {u.is_instance_admin ? t("adminPanel.users.revokeAdmin") : t("adminPanel.users.grantAdmin")}
                         </button>
                         <button
                           className="btn-small btn-danger"
                           onClick={() => deleteUser(u.id, u.username)}
                         >
-                          Delete
+                          {t("adminPanel.users.delete")}
                         </button>
                       </>
                     )}
@@ -176,7 +178,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
                 </div>
               ))}
               {users.length === 0 && (
-                <div className="admin-empty">No users found</div>
+                <div className="admin-empty">{t("adminPanel.users.noUsersFound")}</div>
               )}
             </div>
           </div>

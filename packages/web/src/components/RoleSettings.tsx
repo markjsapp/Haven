@@ -1,34 +1,35 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { Permission, type RoleResponse } from "@haven/core";
 import ConfirmDialog from "./ConfirmDialog.js";
 
 const PRESET_COLORS = [
-  // Row 1 — bright
+  // Row 1 -- bright
   "#1abc9c", "#2ecc71", "#3498db", "#9b59b6", "#e91e63",
   "#e74c3c", "#f1c40f", "#e67e22", "#fd7e72", "#607d8b",
-  // Row 2 — dark
+  // Row 2 -- dark
   "#11806a", "#1f8b4c", "#206694", "#71368a", "#ad1457",
   "#992d22", "#c27c0e", "#a84300", "#c0392b", "#95a5a6",
 ];
 
-const PERM_LABELS: Array<{ key: keyof typeof Permission; label: string }> = [
-  { key: "ADMINISTRATOR", label: "Administrator" },
-  { key: "MANAGE_SERVER", label: "Manage Server" },
-  { key: "MANAGE_ROLES", label: "Manage Roles" },
-  { key: "MANAGE_CHANNELS", label: "Manage Channels" },
-  { key: "KICK_MEMBERS", label: "Kick Members" },
-  { key: "BAN_MEMBERS", label: "Ban Members" },
-  { key: "MANAGE_MESSAGES", label: "Manage Messages" },
-  { key: "VIEW_CHANNELS", label: "View Channels" },
-  { key: "SEND_MESSAGES", label: "Send Messages" },
-  { key: "CREATE_INVITES", label: "Create Invites" },
-  { key: "MANAGE_INVITES", label: "Manage Invites" },
-  { key: "ADD_REACTIONS", label: "Add Reactions" },
-  { key: "MENTION_EVERYONE", label: "Mention @everyone" },
-  { key: "ATTACH_FILES", label: "Attach Files" },
-  { key: "READ_MESSAGE_HISTORY", label: "Read Message History" },
+const PERM_LABEL_KEYS: Array<{ key: keyof typeof Permission; labelKey: string }> = [
+  { key: "ADMINISTRATOR", labelKey: "roleSettings.perm.administrator" },
+  { key: "MANAGE_SERVER", labelKey: "roleSettings.perm.manageServer" },
+  { key: "MANAGE_ROLES", labelKey: "roleSettings.perm.manageRoles" },
+  { key: "MANAGE_CHANNELS", labelKey: "roleSettings.perm.manageChannels" },
+  { key: "KICK_MEMBERS", labelKey: "roleSettings.perm.kickMembers" },
+  { key: "BAN_MEMBERS", labelKey: "roleSettings.perm.banMembers" },
+  { key: "MANAGE_MESSAGES", labelKey: "roleSettings.perm.manageMessages" },
+  { key: "VIEW_CHANNELS", labelKey: "roleSettings.perm.viewChannels" },
+  { key: "SEND_MESSAGES", labelKey: "roleSettings.perm.sendMessages" },
+  { key: "CREATE_INVITES", labelKey: "roleSettings.perm.createInvites" },
+  { key: "MANAGE_INVITES", labelKey: "roleSettings.perm.manageInvites" },
+  { key: "ADD_REACTIONS", labelKey: "roleSettings.perm.addReactions" },
+  { key: "MENTION_EVERYONE", labelKey: "roleSettings.perm.mentionEveryone" },
+  { key: "ATTACH_FILES", labelKey: "roleSettings.perm.attachFiles" },
+  { key: "READ_MESSAGE_HISTORY", labelKey: "roleSettings.perm.readMessageHistory" },
 ];
 
 interface Props {
@@ -36,6 +37,7 @@ interface Props {
 }
 
 export default function RoleSettings({ serverId }: Props) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const [roles, setRoles] = useState<RoleResponse[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
@@ -57,7 +59,7 @@ export default function RoleSettings({ serverId }: Props) {
       const r = await api.listRoles(serverId);
       setRoles(r);
     } catch (err: any) {
-      setError(err.message || "Failed to load roles");
+      setError(err.message || t("roleSettings.failedLoad"));
     }
   }
 
@@ -88,7 +90,7 @@ export default function RoleSettings({ serverId }: Props) {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err: any) {
-      setError(err.message || "Failed to update role");
+      setError(err.message || t("roleSettings.failedUpdate"));
     }
   }
 
@@ -104,7 +106,7 @@ export default function RoleSettings({ serverId }: Props) {
       setNewRoleName("");
       useChatStore.getState().loadChannels();
     } catch (err: any) {
-      setError(err.message || "Failed to create role");
+      setError(err.message || t("roleSettings.failedCreate"));
     }
   }
 
@@ -118,7 +120,7 @@ export default function RoleSettings({ serverId }: Props) {
       useChatStore.getState().refreshPermissions(serverId);
       useChatStore.getState().loadChannels();
     } catch (err: any) {
-      setError(err.message || "Failed to delete role");
+      setError(err.message || t("roleSettings.failedDelete"));
     }
   }
 
@@ -130,12 +132,12 @@ export default function RoleSettings({ serverId }: Props) {
         <div className="dm-input-row" style={{ padding: "0 0 8px 0" }}>
           <input
             type="text"
-            placeholder="New role..."
+            placeholder={t("roleSettings.newRolePlaceholder")}
             value={newRoleName}
             onChange={(e) => setNewRoleName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
           />
-          <button className="btn-small" onClick={handleCreate}>Create</button>
+          <button className="btn-small" onClick={handleCreate}>{t("roleSettings.create")}</button>
         </div>
 
         {roles.map((role) => (
@@ -159,7 +161,7 @@ export default function RoleSettings({ serverId }: Props) {
           <>
             <div className="role-edit-header">
               <label className="profile-edit-label">
-                Role Name
+                {t("roleSettings.roleName")}
                 <input
                   className="profile-edit-input"
                   value={editName}
@@ -170,15 +172,15 @@ export default function RoleSettings({ serverId }: Props) {
             </div>
 
             <div className="role-color-section">
-              <div className="role-color-title">Role color</div>
+              <div className="role-color-title">{t("roleSettings.roleColor")}</div>
               <p className="role-color-desc">
-                Members use the color of the highest role they have on the roles list.
+                {t("roleSettings.roleColorDesc")}
               </p>
               <div className="role-color-swatches">
                 <button
                   className={`role-color-swatch role-color-default ${!editColor ? "selected" : ""}`}
                   onClick={() => setEditColor("")}
-                  title="Default"
+                  title={t("roleSettings.defaultColor")}
                 >
                   {!editColor && (
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff">
@@ -190,7 +192,7 @@ export default function RoleSettings({ serverId }: Props) {
                   className={`role-color-swatch role-color-custom ${editColor && !PRESET_COLORS.includes(editColor) ? "selected" : ""}`}
                   onClick={() => colorInputRef.current?.click()}
                   style={editColor && !PRESET_COLORS.includes(editColor) ? { backgroundColor: editColor } : undefined}
-                  title="Custom color"
+                  title={t("roleSettings.customColor")}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff">
                     <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.33a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83z" />
@@ -222,7 +224,7 @@ export default function RoleSettings({ serverId }: Props) {
             </div>
 
             <div className="perm-grid">
-              {PERM_LABELS.map(({ key, label }) => {
+              {PERM_LABEL_KEYS.map(({ key, labelKey }) => {
                 const bit = Permission[key];
                 const checked = (editPerms & bit) !== BigInt(0);
                 return (
@@ -232,7 +234,7 @@ export default function RoleSettings({ serverId }: Props) {
                       checked={checked}
                       onChange={() => togglePerm(bit)}
                     />
-                    <span>{label}</span>
+                    <span>{t(labelKey)}</span>
                   </label>
                 );
               })}
@@ -244,26 +246,26 @@ export default function RoleSettings({ serverId }: Props) {
                   className="btn-danger"
                   onClick={() => setDeletingRoleId(selectedRole.id)}
                 >
-                  Delete
+                  {t("roleSettings.delete")}
                 </button>
               )}
               <button className={`btn-primary ${saved ? "btn-saved" : ""}`} onClick={handleSave}>
-                {saved ? "Saved!" : "Save Changes"}
+                {saved ? t("roleSettings.saved") : t("roleSettings.saveChanges")}
               </button>
             </div>
           </>
         ) : (
           <div style={{ color: "var(--text-muted)", padding: 16 }}>
-            Select a role to edit its permissions.
+            {t("roleSettings.selectRoleHint")}
           </div>
         )}
       </div>
 
       {deletingRoleId && (
         <ConfirmDialog
-          title="Delete Role"
-          message={`Delete the role "${roles.find((r) => r.id === deletingRoleId)?.name}"? Members will lose permissions from this role.`}
-          confirmLabel="Delete"
+          title={t("roleSettings.confirm.deleteTitle")}
+          message={t("roleSettings.confirm.deleteMessage", { name: roles.find((r) => r.id === deletingRoleId)?.name })}
+          confirmLabel={t("roleSettings.confirm.deleteLabel")}
           danger
           onConfirm={() => handleDelete(deletingRoleId)}
           onCancel={() => setDeletingRoleId(null)}

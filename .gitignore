@@ -45,7 +45,7 @@ docker-compose.override.yml
 client/src-tauri/gen/
 
 # Design docs and mockups (not versioned)
-docs/
+
 mockups/
 
 # Test storage (integration tests)
@@ -54,3 +54,4 @@ related-projects
 .claude/
 CLAUDE.md
 github_build_failure_log
+claude-generated-docs

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { Permission, type InviteResponse, type ServerMemberResponse, type CategoryResponse, type BanResponse, type ChannelResponse, type CustomEmojiResponse, type AuditLogEntry } from "@haven/core";
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export default function ServerSettings({ serverId, onClose }: Props) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const { can } = usePermissions(serverId);
 
@@ -118,7 +120,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       setAuditEntries(entries);
       setAuditHasMore(entries.length >= 50);
     }).catch(() => {
-      setError("Failed to load audit log");
+      setError(t("serverSettings.audit.failedLoad"));
     }).finally(() => setAuditLoading(false));
   }, [tab, serverId, canViewAuditLog]);
 
@@ -139,7 +141,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       setCategories(cats);
       setBans(b);
     } catch (err: any) {
-      setError(err.message || "Failed to load server data");
+      setError(err.message || t("serverSettings.failedLoadData"));
     }
   }
 
@@ -151,7 +153,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       setCreatedCode(invite.code);
       setInvites((prev) => [invite, ...prev]);
     } catch (err: any) {
-      setError(err.message || "Failed to create invite");
+      setError(err.message || t("serverSettings.invites.failedCreate"));
     }
   }
 
@@ -160,7 +162,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       await api.deleteInvite(serverId, inviteId);
       setInvites((prev) => prev.filter((i) => i.id !== inviteId));
     } catch (err: any) {
-      setError(err.message || "Failed to revoke invite");
+      setError(err.message || t("serverSettings.invites.failedRevoke"));
     }
   }
 
@@ -170,7 +172,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       setMembers((prev) => prev.filter((m) => m.user_id !== userId));
       setKickTarget(null);
     } catch (err: any) {
-      setError(err.message || "Failed to kick member");
+      setError(err.message || t("serverSettings.failedKick"));
     }
   }
 
@@ -179,7 +181,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       await api.revokeBan(serverId, userId);
       setBans((prev) => prev.filter((b) => b.user_id !== userId));
     } catch (err: any) {
-      setError(err.message || "Failed to revoke ban");
+      setError(err.message || t("serverSettings.bans.failedRevoke"));
     }
   }
 
@@ -195,7 +197,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       setNewCategoryName("");
       useChatStore.getState().loadChannels();
     } catch (err: any) {
-      setError(err.message || "Failed to create category");
+      setError(err.message || t("serverSettings.categories.failedCreate"));
     }
   }
 
@@ -208,7 +210,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       setEditingCatId(null);
       useChatStore.getState().loadChannels();
     } catch (err: any) {
-      setError(err.message || "Failed to rename category");
+      setError(err.message || t("serverSettings.categories.failedRename"));
     }
   }
 
@@ -220,7 +222,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       setDeleteCatTarget(null);
       useChatStore.getState().loadChannels();
     } catch (err: any) {
-      setError(err.message || "Failed to delete category");
+      setError(err.message || t("serverSettings.categories.failedDelete"));
     }
   }
 
@@ -229,29 +231,29 @@ export default function ServerSettings({ serverId, onClose }: Props) {
   return (
     <>
       <div className="user-settings-overlay" role="presentation">
-        <div className="user-settings-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Server Settings">
+        <div className="user-settings-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("serverSettings.ariaLabel")}>
           <nav className="user-settings-sidebar">
-            <div className="user-settings-sidebar-header">Server Settings</div>
+            <div className="user-settings-sidebar-header">{t("serverSettings.sidebarHeader")}</div>
             {canManageServer && (
               <button
                 className={`user-settings-nav-item ${tab === "overview" ? "active" : ""}`}
                 onClick={() => setTab("overview")}
               >
-                Overview
+                {t("serverSettings.tab.overview")}
               </button>
             )}
             <button
               className={`user-settings-nav-item ${tab === "members" ? "active" : ""}`}
               onClick={() => setTab("members")}
             >
-              Members
+              {t("serverSettings.tab.members")}
             </button>
             {(canManageInvites || canCreateInvites) && (
               <button
                 className={`user-settings-nav-item ${tab === "invites" ? "active" : ""}`}
                 onClick={() => setTab("invites")}
               >
-                Invites
+                {t("serverSettings.tab.invites")}
               </button>
             )}
             {canManageChannels && (
@@ -259,7 +261,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                 className={`user-settings-nav-item ${tab === "categories" ? "active" : ""}`}
                 onClick={() => setTab("categories")}
               >
-                Categories
+                {t("serverSettings.tab.categories")}
               </button>
             )}
             {canManageRoles && (
@@ -267,7 +269,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                 className={`user-settings-nav-item ${tab === "roles" ? "active" : ""}`}
                 onClick={() => setTab("roles")}
               >
-                Roles
+                {t("serverSettings.tab.roles")}
               </button>
             )}
             {canBanMembers && (
@@ -275,7 +277,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                 className={`user-settings-nav-item ${tab === "bans" ? "active" : ""}`}
                 onClick={() => setTab("bans")}
               >
-                Bans
+                {t("serverSettings.tab.bans")}
               </button>
             )}
             {canManageEmojis && (
@@ -283,7 +285,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                 className={`user-settings-nav-item ${tab === "emoji" ? "active" : ""}`}
                 onClick={() => setTab("emoji")}
               >
-                Emoji
+                {t("serverSettings.tab.emoji")}
               </button>
             )}
             {canViewAuditLog && (
@@ -291,28 +293,28 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                 className={`user-settings-nav-item ${tab === "audit" ? "active" : ""}`}
                 onClick={() => setTab("audit")}
               >
-                Audit Log
+                {t("serverSettings.tab.auditLog")}
               </button>
             )}
             <div className="user-settings-sidebar-divider" />
           </nav>
 
           <div className="user-settings-content">
-            <button className="settings-esc-close" onClick={onClose} aria-label="Close settings">
+            <button className="settings-esc-close" onClick={onClose} aria-label={t("serverSettings.closeAriaLabel")}>
               <div className="settings-esc-circle">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
                 </svg>
               </div>
-              <span className="settings-esc-label">ESC</span>
+              <span className="settings-esc-label">{t("serverSettings.escLabel")}</span>
             </button>
             {error && <div className="settings-error" style={{ marginBottom: 16 }}>{error}</div>}
 
             {tab === "overview" && canManageServer && (
               <div className="settings-section">
-                <div className="settings-section-title">Server Icon</div>
+                <div className="settings-section-title">{t("serverSettings.overview.serverIcon")}</div>
                 <p className="settings-description">
-                  Upload an image to use as the server icon.
+                  {t("serverSettings.overview.serverIconDesc")}
                 </p>
                 <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
                   <div
@@ -326,7 +328,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                         const file = input.files?.[0];
                         if (!file) return;
                         if (file.size > 2 * 1024 * 1024) {
-                          setError("Icon too large (max 2MB)");
+                          setError(t("serverSettings.overview.iconTooLarge"));
                           return;
                         }
                         setError("");
@@ -335,18 +337,18 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                           const buf = await file.arrayBuffer();
                           await api.uploadServerIcon(serverId, buf);
                           await useChatStore.getState().loadChannels();
-                          setSuccess("Server icon updated!");
+                          setSuccess(t("serverSettings.overview.serverIconUpdated"));
                           setTimeout(() => setSuccess(""), 3000);
                         } catch (err: any) {
-                          setError(err.message || "Failed to upload icon");
+                          setError(err.message || t("serverSettings.overview.failedUploadIcon"));
                         }
                       };
                       input.click();
                     }}
-                    title="Click to upload icon"
+                    title={t("serverSettings.overview.clickToUploadIcon")}
                   >
                     {server?.icon_url ? (
-                      <img src={server.icon_url} alt="Server icon" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
+                      <img src={server.icon_url} alt={t("serverSettings.overview.serverIconAlt")} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
                     ) : (
                       <span style={{ color: "var(--text-muted)" }}>+</span>
                     )}
@@ -360,11 +362,11 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                           await api.deleteServerIcon(serverId);
                           await useChatStore.getState().loadChannels();
                         } catch (err: any) {
-                          setError(err.message || "Failed to remove icon");
+                          setError(err.message || t("serverSettings.overview.failedRemoveIcon"));
                         }
                       }}
                     >
-                      Remove Icon
+                      {t("serverSettings.overview.removeIcon")}
                     </button>
                   )}
                 </div>
@@ -373,9 +375,9 @@ export default function ServerSettings({ serverId, onClose }: Props) {
             )}
             {tab === "overview" && canManageServer && (
               <div className="settings-section">
-                <div className="settings-section-title">System Messages Channel</div>
+                <div className="settings-section-title">{t("serverSettings.overview.systemMessagesChannel")}</div>
                 <p className="settings-description">
-                  New member join messages will be posted in this channel.
+                  {t("serverSettings.overview.systemMessagesDesc")}
                 </p>
                 <select
                   className="settings-input"
@@ -383,7 +385,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                   onChange={(e) => setSystemChannelId(e.target.value || null)}
                   style={{ marginBottom: 12 }}
                 >
-                  <option value="">None</option>
+                  <option value="">{t("serverSettings.overview.systemChannelNone")}</option>
                   {serverChannels.map((ch) => {
                     const display = parseChannelDisplay(ch.encrypted_meta, "");
                     return (
@@ -401,18 +403,18 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                       await api.updateServer(serverId, { system_channel_id: systemChannelId });
                       await useChatStore.getState().loadChannels();
                     } catch (err: any) {
-                      setError(err.message || "Failed to update server");
+                      setError(err.message || t("serverSettings.overview.failedUpdateServer"));
                     }
                   }}
                 >
-                  Save Changes
+                  {t("serverSettings.overview.saveChanges")}
                 </button>
               </div>
             )}
 
             {tab === "members" && (
               <div className="settings-section">
-                <div className="settings-section-title">Members ({members.length})</div>
+                <div className="settings-section-title">{t("serverSettings.members.title")} ({members.length})</div>
                 <div className="server-settings-member-list">
                   {members.map((m) => (
                     <div key={m.user_id} className="server-member-row">
@@ -434,7 +436,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                               className="btn-ghost server-roles-btn"
                               onClick={() => setEditRolesTarget({ userId: m.user_id, username: m.display_name || m.username })}
                             >
-                              Roles
+                              {t("serverSettings.members.roles")}
                             </button>
                           )}
                           {canKickMembers && (
@@ -442,7 +444,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                               className="btn-ghost server-kick-btn"
                               onClick={() => setKickTarget({ userId: m.user_id, username: m.display_name || m.username })}
                             >
-                              Kick
+                              {t("serverSettings.members.kick")}
                             </button>
                           )}
                           {canBanMembers && (
@@ -450,7 +452,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                               className="btn-ghost server-ban-btn"
                               onClick={() => setBanTarget({ userId: m.user_id, username: m.display_name || m.username })}
                             >
-                              Ban
+                              {t("serverSettings.members.ban")}
                             </button>
                           )}
                         </div>
@@ -463,20 +465,20 @@ export default function ServerSettings({ serverId, onClose }: Props) {
 
             {tab === "invites" && (canManageInvites || canCreateInvites) && (
               <div className="settings-section">
-                <div className="settings-section-title">Invites</div>
+                <div className="settings-section-title">{t("serverSettings.invites.title")}</div>
                 <div style={{ marginBottom: 16 }}>
                   <button className="btn-primary" onClick={handleCreateInvite}>
-                    Create Invite (24h)
+                    {t("serverSettings.invites.createInvite")}
                   </button>
                   {createdCode && (
                     <div className="invite-created" style={{ marginTop: 8 }}>
-                      Code: <strong>{createdCode}</strong>
+                      {t("serverSettings.invites.code")} <strong>{createdCode}</strong>
                       <button
                         className="btn-ghost"
                         onClick={() => navigator.clipboard.writeText(createdCode)}
                         style={{ marginLeft: 8 }}
                       >
-                        Copy
+                        {t("serverSettings.invites.copy")}
                       </button>
                     </div>
                   )}
@@ -486,9 +488,9 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                   <div key={inv.id} className="invite-row">
                     <div className="invite-code">{inv.code}</div>
                     <div className="invite-meta">
-                      Uses: {inv.use_count}{inv.max_uses ? `/${inv.max_uses}` : ""}
+                      {t("serverSettings.invites.uses")} {inv.use_count}{inv.max_uses ? `/${inv.max_uses}` : ""}
                       {inv.expires_at && (
-                        <span> | Expires: {new Date(inv.expires_at).toLocaleString()}</span>
+                        <span> | {t("serverSettings.invites.expires")} {new Date(inv.expires_at).toLocaleString()}</span>
                       )}
                     </div>
                     {canManageInvites && (
@@ -496,14 +498,14 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                         className="btn-ghost"
                         onClick={() => handleDeleteInvite(inv.id)}
                       >
-                        Revoke
+                        {t("serverSettings.invites.revoke")}
                       </button>
                     )}
                   </div>
                 ))}
                 {invites.length === 0 && (
                   <p className="settings-description">
-                    No invites yet. Create one to share with others.
+                    {t("serverSettings.invites.emptyMessage")}
                   </p>
                 )}
               </div>
@@ -511,17 +513,17 @@ export default function ServerSettings({ serverId, onClose }: Props) {
 
             {tab === "categories" && canManageChannels && (
               <div className="settings-section">
-                <div className="settings-section-title">Categories</div>
+                <div className="settings-section-title">{t("serverSettings.categories.title")}</div>
                 <div className="dm-input-row" style={{ marginBottom: 16 }}>
                   <input
                     className="settings-input"
                     type="text"
-                    placeholder="Category name..."
+                    placeholder={t("serverSettings.categories.placeholder")}
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleCreateCategory()}
                   />
-                  <button className="btn-primary" onClick={handleCreateCategory}>Create</button>
+                  <button className="btn-primary" onClick={handleCreateCategory}>{t("serverSettings.categories.create")}</button>
                 </div>
 
                 {categories.map((cat) => (
@@ -539,7 +541,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                           }}
                           autoFocus
                         />
-                        <button className="btn-primary" onClick={() => handleRenameCategory(cat.id)}>Save</button>
+                        <button className="btn-primary" onClick={() => handleRenameCategory(cat.id)}>{t("serverSettings.categories.save")}</button>
                       </div>
                     ) : (
                       <>
@@ -553,13 +555,13 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                             setEditingCatName(cat.name);
                           }}
                         >
-                          Rename
+                          {t("serverSettings.categories.rename")}
                         </button>
                         <button
                           className="btn-ghost server-kick-btn"
                           onClick={() => setDeleteCatTarget({ id: cat.id, name: cat.name })}
                         >
-                          Delete
+                          {t("serverSettings.categories.delete")}
                         </button>
                       </>
                     )}
@@ -567,7 +569,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                 ))}
                 {categories.length === 0 && (
                   <p className="settings-description">
-                    No categories yet. Create one to organize your channels.
+                    {t("serverSettings.categories.emptyMessage")}
                   </p>
                 )}
               </div>
@@ -575,7 +577,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
 
             {tab === "bans" && canBanMembers && (
               <div className="settings-section">
-                <div className="settings-section-title">Bans ({bans.length})</div>
+                <div className="settings-section-title">{t("serverSettings.bans.title")} ({bans.length})</div>
                 {bans.map((ban) => (
                   <div key={ban.id} className="server-member-row">
                     <div className="server-member-avatar" style={{ background: "var(--red)" }}>
@@ -584,22 +586,22 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                     <div className="server-member-info">
                       <span className="server-member-name">{ban.username}</span>
                       {ban.reason && (
-                        <span className="server-member-username">Reason: {ban.reason}</span>
+                        <span className="server-member-username">{t("serverSettings.bans.reason")} {ban.reason}</span>
                       )}
                       <span className="server-member-username">
-                        Banned {new Date(ban.created_at).toLocaleDateString()}
+                        {t("serverSettings.bans.banned")} {new Date(ban.created_at).toLocaleDateString()}
                       </span>
                     </div>
                     <button
                       className="btn-ghost"
                       onClick={() => handleRevokeBan(ban.user_id)}
                     >
-                      Revoke
+                      {t("serverSettings.bans.revoke")}
                     </button>
                   </div>
                 ))}
                 {bans.length === 0 && (
-                  <p className="settings-description">No banned users.</p>
+                  <p className="settings-description">{t("serverSettings.bans.emptyMessage")}</p>
                 )}
               </div>
             )}
@@ -610,10 +612,10 @@ export default function ServerSettings({ serverId, onClose }: Props) {
 
             {tab === "emoji" && canManageEmojis && (
               <div className="settings-section">
-                <div className="settings-section-title">Custom Emoji</div>
+                <div className="settings-section-title">{t("serverSettings.emoji.title")}</div>
                 <div className="emoji-slot-counters">
-                  <span>{staticCount}/25 static slots</span>
-                  <span>{animatedCount}/10 animated slots</span>
+                  <span>{staticCount}/25 {t("serverSettings.emoji.staticSlots")}</span>
+                  <span>{animatedCount}/10 {t("serverSettings.emoji.animatedSlots")}</span>
                 </div>
 
                 <input
@@ -626,7 +628,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                     if (!file) return;
                     if (emojiFileRef.current) emojiFileRef.current.value = "";
                     if (file.size > 256 * 1024) {
-                      setError("Emoji must be 256KB or smaller");
+                      setError(t("serverSettings.emoji.emojiTooLarge"));
                       return;
                     }
                     // Auto-derive name from filename
@@ -640,11 +642,11 @@ export default function ServerSettings({ serverId, onClose }: Props) {
 
                 {pendingEmoji ? (
                   <div className="emoji-pending-row">
-                    <img src={pendingEmoji.preview} alt="Preview" className="emoji-manage-img" />
+                    <img src={pendingEmoji.preview} alt={t("serverSettings.emoji.previewAlt")} className="emoji-manage-img" />
                     <input
                       className="settings-input"
                       type="text"
-                      placeholder="Emoji name (2+ chars, a-z 0-9 _)"
+                      placeholder={t("serverSettings.emoji.namePlaceholder")}
                       value={pendingEmoji.name}
                       onChange={(e) => { setPendingEmoji({ ...pendingEmoji, name: e.target.value }); setError(""); }}
                       style={{ flex: 1 }}
@@ -656,11 +658,11 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                         if (uploadingRef.current) return;
                         const name = pendingEmoji.name.trim();
                         if (!/^[a-zA-Z0-9_]{2,}$/.test(name)) {
-                          setError("Name must be 2+ characters (a-z, 0-9, _)");
+                          setError(t("serverSettings.emoji.nameValidation"));
                           return;
                         }
                         if (serverEmojis.some((e) => e.name === name)) {
-                          setError("An emoji with this name already exists");
+                          setError(t("serverSettings.emoji.nameExists"));
                           return;
                         }
                         setError("");
@@ -672,14 +674,14 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                           URL.revokeObjectURL(pendingEmoji.preview);
                           setPendingEmoji(null);
                         } catch (err: any) {
-                          setError(err.message || "Failed to upload emoji");
+                          setError(err.message || t("serverSettings.emoji.failedUpload"));
                         } finally {
                           setEmojiUploading(false);
                           uploadingRef.current = false;
                         }
                       }}
                     >
-                      {emojiUploading ? "Saving..." : "Save"}
+                      {emojiUploading ? t("serverSettings.emoji.saving") : t("serverSettings.emoji.save")}
                     </button>
                     <button
                       className="btn-ghost"
@@ -689,7 +691,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                         setError("");
                       }}
                     >
-                      Cancel
+                      {t("serverSettings.emoji.cancel")}
                     </button>
                   </div>
                 ) : (
@@ -699,7 +701,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                       disabled={emojiUploading}
                       onClick={() => emojiFileRef.current?.click()}
                     >
-                      Upload Emoji
+                      {t("serverSettings.emoji.uploadEmoji")}
                     </button>
                   </div>
                 )}
@@ -707,9 +709,9 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                 {serverEmojis.length > 0 ? (
                   <div className="emoji-manage-table">
                     <div className="emoji-manage-header emoji-manage-4col">
-                      <span>Image</span>
-                      <span>Name</span>
-                      <span>Uploaded By</span>
+                      <span>{t("serverSettings.emoji.tableImage")}</span>
+                      <span>{t("serverSettings.emoji.tableName")}</span>
+                      <span>{t("serverSettings.emoji.tableUploadedBy")}</span>
                       <span></span>
                     </div>
                     {serverEmojis.map((emoji) => (
@@ -722,24 +724,24 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                         <span className="emoji-manage-name">
                           :{emoji.name}:
                           {emoji.animated && (
-                            <span className="emoji-manage-badge">animated</span>
+                            <span className="emoji-manage-badge">{t("serverSettings.emoji.animated")}</span>
                           )}
                         </span>
                         <span className="emoji-manage-uploader">
-                          {emoji.uploaded_by ? (userNames[emoji.uploaded_by] ?? "Unknown") : "\u2014"}
+                          {emoji.uploaded_by ? (userNames[emoji.uploaded_by] ?? t("serverSettings.emoji.unknown")) : "\u2014"}
                         </span>
                         <button
                           className="btn-ghost server-kick-btn"
                           onClick={() => setDeleteEmojiTarget({ id: emoji.id, name: emoji.name })}
                         >
-                          Delete
+                          {t("serverSettings.categories.delete")}
                         </button>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <p className="settings-description" style={{ marginTop: 16 }}>
-                    No custom emojis yet. Upload one to get started.
+                    {t("serverSettings.emoji.emptyMessage")}
                   </p>
                 )}
               </div>
@@ -747,12 +749,12 @@ export default function ServerSettings({ serverId, onClose }: Props) {
 
             {tab === "audit" && canViewAuditLog && (
               <div className="settings-section">
-                <div className="settings-section-title">Audit Log</div>
+                <div className="settings-section-title">{t("serverSettings.audit.title")}</div>
                 {auditLoading && auditEntries.length === 0 && (
-                  <p className="settings-description">Loading...</p>
+                  <p className="settings-description">{t("serverSettings.audit.loading")}</p>
                 )}
                 {auditEntries.length === 0 && !auditLoading && (
-                  <p className="settings-description">No audit log entries yet.</p>
+                  <p className="settings-description">{t("serverSettings.audit.emptyMessage")}</p>
                 )}
                 <div className="audit-log-list">
                   {auditEntries.map((entry) => (
@@ -767,7 +769,7 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                         )}
                       </div>
                       {entry.reason && (
-                        <div className="audit-log-reason">Reason: {entry.reason}</div>
+                        <div className="audit-log-reason">{t("serverSettings.audit.reason")} {entry.reason}</div>
                       )}
                       {entry.changes && Object.keys(entry.changes).length > 0 && (
                         <div className="audit-log-changes">
@@ -797,13 +799,13 @@ export default function ServerSettings({ serverId, onClose }: Props) {
                         setAuditEntries((prev) => [...prev, ...more]);
                         setAuditHasMore(more.length >= 50);
                       } catch {
-                        setError("Failed to load more audit entries");
+                        setError(t("serverSettings.audit.failedLoadMore"));
                       } finally {
                         setAuditLoading(false);
                       }
                     }}
                   >
-                    {auditLoading ? "Loading..." : "Load More"}
+                    {auditLoading ? t("serverSettings.audit.loading") : t("serverSettings.audit.loadMore")}
                   </button>
                 )}
               </div>
@@ -815,9 +817,9 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       {/* Kick confirmation */}
       {kickTarget && (
         <ConfirmDialog
-          title="Kick Member"
-          message={`Are you sure you want to kick ${kickTarget.username} from this server?`}
-          confirmLabel="Kick"
+          title={t("serverSettings.confirm.kickTitle")}
+          message={t("serverSettings.confirm.kickMessage", { username: kickTarget.username })}
+          confirmLabel={t("serverSettings.confirm.kickLabel")}
           danger
           onConfirm={() => handleKick(kickTarget.userId)}
           onCancel={() => setKickTarget(null)}
@@ -851,9 +853,9 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       {/* Delete category confirmation */}
       {deleteCatTarget && (
         <ConfirmDialog
-          title="Delete Category"
-          message={`Delete "${deleteCatTarget.name}"? Channels in it will become uncategorized.`}
-          confirmLabel="Delete"
+          title={t("serverSettings.confirm.deleteCategoryTitle")}
+          message={t("serverSettings.confirm.deleteCategoryMessage", { name: deleteCatTarget.name })}
+          confirmLabel={t("serverSettings.confirm.deleteCategoryLabel")}
           danger
           onConfirm={() => handleDeleteCategory(deleteCatTarget.id)}
           onCancel={() => setDeleteCatTarget(null)}
@@ -863,16 +865,16 @@ export default function ServerSettings({ serverId, onClose }: Props) {
       {/* Delete emoji confirmation */}
       {deleteEmojiTarget && (
         <ConfirmDialog
-          title="Delete Emoji"
-          message={`Delete :${deleteEmojiTarget.name}:? Existing messages will show the text instead.`}
-          confirmLabel="Delete"
+          title={t("serverSettings.confirm.deleteEmojiTitle")}
+          message={t("serverSettings.confirm.deleteEmojiMessage", { name: deleteEmojiTarget.name })}
+          confirmLabel={t("serverSettings.confirm.deleteEmojiLabel")}
           danger
           onConfirm={async () => {
             try {
               await api.deleteEmoji(serverId, deleteEmojiTarget.id);
               setDeleteEmojiTarget(null);
             } catch (err: any) {
-              setError(err.message || "Failed to delete emoji");
+              setError(err.message || t("serverSettings.emoji.failedDelete"));
               setDeleteEmojiTarget(null);
             }
           }}

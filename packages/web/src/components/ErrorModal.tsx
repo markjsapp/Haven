@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 interface ErrorModalProps {
@@ -7,7 +8,8 @@ interface ErrorModalProps {
   onClose: () => void;
 }
 
-export default function ErrorModal({ title = "Something went wrong", message, onClose }: ErrorModalProps) {
+export default function ErrorModal({ title, message, onClose }: ErrorModalProps) {
+  const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef);
 
@@ -19,11 +21,11 @@ export default function ErrorModal({ title = "Something went wrong", message, on
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
           </svg>
         </div>
-        <h3 className="modal-title" id="error-modal-title">{title}</h3>
+        <h3 className="modal-title" id="error-modal-title">{title ?? t("errorModal.defaultTitle")}</h3>
         <p className="error-modal-message">{message}</p>
         <div className="modal-footer error-modal-footer">
           <button type="button" className="btn-primary modal-submit" onClick={onClose}>
-            OK
+            {t("errorModal.ok")}
           </button>
         </div>
       </div>

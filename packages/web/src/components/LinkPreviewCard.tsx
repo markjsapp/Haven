@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { LinkPreview } from "../store/chat.js";
 
 type EmbedType = "youtube" | "spotify" | "image" | "gif_service" | "default";
@@ -37,6 +38,7 @@ function detectEmbedType(url: string): { type: EmbedType; id?: string; subtype?:
 }
 
 export default function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
+  const { t } = useTranslation();
   const embed = detectEmbedType(preview.url);
   const [imgError, setImgError] = useState(false);
 
@@ -50,7 +52,7 @@ export default function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
           loading="lazy"
-          title="YouTube video"
+          title={t("linkPreview.youtubeTitle")}
         />
       </div>
     );
@@ -65,7 +67,7 @@ export default function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
           height={embed.subtype === "track" ? 80 : 152}
           allow="encrypted-media"
           loading="lazy"
-          title="Spotify embed"
+          title={t("linkPreview.spotifyTitle")}
         />
       </div>
     );

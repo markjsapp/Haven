@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
@@ -49,10 +50,11 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 export default function ChannelSidebar() {
+  const { t } = useTranslation();
   const selectedServerId = useUiStore((s) => s.selectedServerId);
 
   return (
-    <aside className="channel-sidebar" aria-label="Channels">
+    <aside className="channel-sidebar" aria-label={t("channelSidebar.ariaLabel")}>
       {selectedServerId === null ? <DmView /> : <ServerView serverId={selectedServerId} />}
       <UserPanel />
     </aside>
@@ -62,6 +64,7 @@ export default function ChannelSidebar() {
 // ─── DM View ────────────────────────────────────────
 
 function DmView() {
+  const { t } = useTranslation();
   const channels = useChatStore((s) => s.channels);
   const currentChannelId = useChatStore((s) => s.currentChannelId);
   const selectChannel = useChatStore((s) => s.selectChannel);
@@ -132,8 +135,8 @@ function DmView() {
           <input
             className="channel-sidebar-header-input"
             type="text"
-            placeholder="Find or start a conversation"
-            aria-label="Find or start a conversation"
+            placeholder={t("channelSidebar.dm.findOrStart")}
+            aria-label={t("channelSidebar.dm.findOrStart")}
             value={headerSearchValue}
             onChange={(e) => setHeaderSearchValue(e.target.value)}
             onKeyDown={(e) => {
@@ -160,7 +163,7 @@ function DmView() {
             className="channel-sidebar-header-btn"
             onClick={() => setHeaderSearch(true)}
           >
-            Find or start a conversation
+            {t("channelSidebar.dm.findOrStart")}
           </button>
         )}
       </div>
@@ -175,13 +178,13 @@ function DmView() {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
           </svg>
-          <span>Friends</span>
+          <span>{t("channelSidebar.dm.friends")}</span>
         </button>
 
         {/* Message Requests */}
         {pendingCount > 0 && (
           <div className="channel-category-header">
-            <span>Message Requests</span>
+            <span>{t("channelSidebar.dm.messageRequests")}</span>
             <span className="request-badge">{pendingCount}</span>
           </div>
         )}
@@ -209,12 +212,12 @@ function DmView() {
         )}
 
         <div className="channel-category-header">
-          <span>Direct Messages</span>
+          <span>{t("channelSidebar.dm.directMessages")}</span>
           <button
             className="btn-icon"
             onClick={() => setShowCreateDm(true)}
-            title="Create DM"
-            aria-label="Create DM"
+            title={t("channelSidebar.dm.createDmTitle")}
+            aria-label={t("channelSidebar.dm.createDmAriaLabel")}
           >
             +
           </button>
@@ -254,7 +257,7 @@ function DmView() {
                     <div className="dm-item-text">
                       <span className="dm-item-name">{gName}</span>
                       {memberCount > 0 && (
-                        <span className="dm-item-members">{memberCount} Members</span>
+                        <span className="dm-item-members">{memberCount} {t("channelSidebar.dm.members")}</span>
                       )}
                     </div>
                     {unread > 0 && <span className="unread-badge" aria-label={`${unread} unread messages`}>{unread}</span>}
@@ -304,7 +307,7 @@ function DmView() {
                 data-roving-item
                 tabIndex={-1}
               >
-                <span className="dm-item-name">Start DM with <strong>{headerSearchValue.trim()}</strong></span>
+                <span className="dm-item-name">{t("channelSidebar.dm.startDmWith")} <strong>{headerSearchValue.trim()}</strong></span>
               </button>
             </li>
           )}
@@ -338,6 +341,7 @@ function DmContextMenu({ channelId, channelType, x, y, onClose }: {
   y: number;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
   const ws = useChatStore((s) => s.ws);
   const api = useAuthStore((s) => s.api);
@@ -368,7 +372,7 @@ function DmContextMenu({ channelId, channelType, x, y, onClose }: {
   };
 
   return (
-    <div className="message-context-menu" style={style} ref={ref} role="menu" aria-label="DM options" tabIndex={-1} onKeyDown={handleKeyDown}>
+    <div className="message-context-menu" style={style} ref={ref} role="menu" aria-label={t("channelSidebar.dm.contextMenu.ariaLabel")} tabIndex={-1} onKeyDown={handleKeyDown}>
       <button
         type="button"
         role="menuitem"
@@ -384,7 +388,7 @@ function DmContextMenu({ channelId, channelType, x, y, onClose }: {
           onClose();
         }}
       >
-        Mark as Read
+        {t("channelSidebar.dm.contextMenu.markAsRead")}
       </button>
       <div className="context-menu-separator" role="separator" />
       <button
@@ -403,7 +407,7 @@ function DmContextMenu({ channelId, channelType, x, y, onClose }: {
           onClose();
         }}
       >
-        {channelType === "group" ? "Leave Group" : "Close DM"}
+        {channelType === "group" ? t("channelSidebar.dm.contextMenu.leaveGroup") : t("channelSidebar.dm.contextMenu.closeDm")}
       </button>
     </div>
   );
@@ -412,19 +416,19 @@ function DmContextMenu({ channelId, channelType, x, y, onClose }: {
 // ─── Channel Context Menu ─────────────────────────────
 
 const MUTE_DURATIONS = [
-  { label: "For 15 Minutes", ms: 15 * 60 * 1000 },
-  { label: "For 1 Hour", ms: 60 * 60 * 1000 },
-  { label: "For 3 Hours", ms: 3 * 60 * 60 * 1000 },
-  { label: "For 8 Hours", ms: 8 * 60 * 60 * 1000 },
-  { label: "For 24 Hours", ms: 24 * 60 * 60 * 1000 },
-  { label: "Until I turn it back on", ms: null as number | null },
+  { key: "15min", ms: 15 * 60 * 1000 },
+  { key: "1hour", ms: 60 * 60 * 1000 },
+  { key: "3hours", ms: 3 * 60 * 60 * 1000 },
+  { key: "8hours", ms: 8 * 60 * 60 * 1000 },
+  { key: "24hours", ms: 24 * 60 * 60 * 1000 },
+  { key: "untilTurnOff", ms: null as number | null },
 ];
 
-const NOTIFICATION_OPTIONS: { label: string; value: "default" | "all" | "mentions" | "nothing"; desc?: string }[] = [
-  { label: "Use Category Default", value: "default", desc: "All Messages" },
-  { label: "All Messages", value: "all" },
-  { label: "Only @mentions", value: "mentions" },
-  { label: "Nothing", value: "nothing" },
+const NOTIFICATION_OPTIONS: { key: string; value: "default" | "all" | "mentions" | "nothing"; descKey?: string }[] = [
+  { key: "useCategoryDefault", value: "default", descKey: "allMessages" },
+  { key: "allMessages", value: "all" },
+  { key: "onlyMentions", value: "mentions" },
+  { key: "nothing", value: "nothing" },
 ];
 
 function ChannelContextMenu({
@@ -448,6 +452,7 @@ function ChannelContextMenu({
   onShowSubmenu: (sub: "mute" | "notify" | undefined) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const muteChannel = useUiStore((s) => s.muteChannel);
   const unmuteChannel = useUiStore((s) => s.unmuteChannel);
   const isChannelMuted = useUiStore((s) => s.isChannelMuted);
@@ -460,7 +465,7 @@ function ChannelContextMenu({
   const currentNotify = channelNotifications[channelId] ?? "default";
 
   // Notification label for display
-  const notifyLabel = NOTIFICATION_OPTIONS.find((o) => o.value === currentNotify)?.label ?? "All Messages";
+  const notifyLabel = t(`channelSidebar.channel.notification.${NOTIFICATION_OPTIONS.find((o) => o.value === currentNotify)?.key ?? "allMessages"}`);
 
   return (
     <div
@@ -470,7 +475,7 @@ function ChannelContextMenu({
       onClick={(e) => e.stopPropagation()}
       onKeyDown={handleKeyDown}
       role="menu"
-      aria-label="Channel options"
+      aria-label={t("channelSidebar.channel.contextMenu.ariaLabel")}
       tabIndex={-1}
     >
       {/* Mute Channel */}
@@ -487,20 +492,20 @@ function ChannelContextMenu({
             onShowSubmenu(submenu === "mute" ? undefined : "mute");
           }
         }}>
-          {muted ? "Unmute Channel" : "Mute Channel"}
+          {muted ? t("channelSidebar.channel.contextMenu.unmuteChannel") : t("channelSidebar.channel.contextMenu.muteChannel")}
           {!muted && <span className="context-submenu-arrow">›</span>}
         </button>
         {submenu === "mute" && !muted && (
           <div className="context-submenu" onMouseLeave={() => onShowSubmenu(undefined)}>
             {MUTE_DURATIONS.map((d) => (
               <button
-                key={d.label}
+                key={d.key}
                 onClick={() => {
                   muteChannel(channelId, d.ms);
                   onClose();
                 }}
               >
-                {d.label}
+                {t(`channelSidebar.channel.muteDuration.${d.key}`)}
               </button>
             ))}
           </div>
@@ -517,7 +522,7 @@ function ChannelContextMenu({
           onShowSubmenu(submenu === "notify" ? undefined : "notify");
         }}>
           <span className="context-btn-with-sub">
-            <span>Notification Settings</span>
+            <span>{t("channelSidebar.channel.contextMenu.notificationSettings")}</span>
             <span className="context-sub-label">{notifyLabel}</span>
           </span>
           <span className="context-submenu-arrow">›</span>
@@ -534,8 +539,8 @@ function ChannelContextMenu({
                 }}
               >
                 <span className="context-btn-with-sub">
-                  <span>{opt.label}</span>
-                  {opt.desc && <span className="context-sub-label">{opt.desc}</span>}
+                  <span>{t(`channelSidebar.channel.notification.${opt.key}`)}</span>
+                  {opt.descKey && <span className="context-sub-label">{t(`channelSidebar.channel.notification.${opt.descKey}`)}</span>}
                 </span>
                 <span className={`context-radio ${currentNotify === opt.value ? "context-radio-active" : ""}`} />
               </button>
@@ -548,8 +553,8 @@ function ChannelContextMenu({
       {canManageChannels && (
         <>
           <div className="context-divider" role="separator" />
-          <button role="menuitem" tabIndex={-1} onClick={onPermissions}>Edit Channel</button>
-          <button role="menuitem" tabIndex={-1} className="danger" onClick={onDelete}>Delete Channel</button>
+          <button role="menuitem" tabIndex={-1} onClick={onPermissions}>{t("channelSidebar.channel.contextMenu.editChannel")}</button>
+          <button role="menuitem" tabIndex={-1} className="danger" onClick={onDelete}>{t("channelSidebar.channel.contextMenu.deleteChannel")}</button>
         </>
       )}
     </div>
@@ -572,6 +577,7 @@ function CategoryContextMenuPopup({
   onCreateCategory: () => void;
   onDeleteCategory: () => void;
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
 
@@ -581,21 +587,21 @@ function CategoryContextMenuPopup({
       className="channel-context-menu"
       style={{ top: y, left: x }}
       role="menu"
-      aria-label="Category options"
+      aria-label={t("channelSidebar.category.contextMenu.ariaLabel")}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
       <button role="menuitem" tabIndex={-1} onClick={onCreateChannel}>
-        Create Channel
+        {t("channelSidebar.category.contextMenu.createChannel")}
       </button>
       <button role="menuitem" tabIndex={-1} onClick={onRenameCategory}>
-        Rename Category
+        {t("channelSidebar.category.contextMenu.renameCategory")}
       </button>
       <button role="menuitem" tabIndex={-1} onClick={onCreateCategory}>
-        Create Category
+        {t("channelSidebar.category.contextMenu.createCategory")}
       </button>
       <button role="menuitem" tabIndex={-1} className="danger" onClick={onDeleteCategory}>
-        Delete Category
+        {t("channelSidebar.category.contextMenu.deleteCategory")}
       </button>
     </div>
   );
@@ -623,6 +629,7 @@ function ServerHeaderContextMenu({
   onInvite: () => void;
   onToggleHideMuted: () => void;
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
 
@@ -632,22 +639,22 @@ function ServerHeaderContextMenu({
       className="channel-context-menu"
       style={{ top: y, left: x }}
       role="menu"
-      aria-label="Server options"
+      aria-label={t("channelSidebar.server.contextMenu.ariaLabel")}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
       <button role="menuitem" tabIndex={-1} className="context-menu-toggle" onClick={onToggleHideMuted}>
-        Hide Muted Channels
+        {t("channelSidebar.server.contextMenu.hideMutedChannels")}
         <span className={`context-menu-check${hideMutedChannels ? " checked" : ""}`} />
       </button>
       {canManageChannels && (
         <>
           <div className="context-menu-separator" />
           <button role="menuitem" tabIndex={-1} onClick={onCreateChannel}>
-            Create Channel
+            {t("channelSidebar.server.contextMenu.createChannel")}
           </button>
           <button role="menuitem" tabIndex={-1} onClick={onCreateCategory}>
-            Create Category
+            {t("channelSidebar.server.contextMenu.createCategory")}
           </button>
         </>
       )}
@@ -655,7 +662,7 @@ function ServerHeaderContextMenu({
         <>
           <div className="context-menu-separator" />
           <button role="menuitem" tabIndex={-1} onClick={onInvite}>
-            Invite to Server
+            {t("channelSidebar.server.contextMenu.inviteToServer")}
           </button>
         </>
       )}
@@ -689,6 +696,7 @@ function ServerDropdownMenu({
   isOwner: boolean;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
 
@@ -720,18 +728,18 @@ function ServerDropdownMenu({
       className="channel-context-menu"
       style={{ top: anchorRect.bottom + 4, left: anchorRect.left }}
       role="menu"
-      aria-label="Server options"
+      aria-label={t("channelSidebar.server.contextMenu.ariaLabel")}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
       {canCreateInvites && (
         <button role="menuitem" tabIndex={-1} onClick={() => { onClose(); onInvite(); }}>
-          Invite People
+          {t("channelSidebar.server.dropdown.invitePeople")}
         </button>
       )}
       {canManageServer && (
         <button role="menuitem" tabIndex={-1} onClick={() => { onClose(); onSettings(); }}>
-          Server Settings
+          {t("channelSidebar.server.dropdown.serverSettings")}
         </button>
       )}
       {(canCreateInvites || canManageServer) && canManageChannels && (
@@ -739,17 +747,17 @@ function ServerDropdownMenu({
       )}
       {canManageChannels && (
         <button role="menuitem" tabIndex={-1} onClick={() => { onClose(); onCreateChannel(); }}>
-          Create Channel
+          {t("channelSidebar.server.dropdown.createChannel")}
         </button>
       )}
       {canManageChannels && (
         <button role="menuitem" tabIndex={-1} onClick={() => { onClose(); onCreateCategory(); }}>
-          Create Category
+          {t("channelSidebar.server.dropdown.createCategory")}
         </button>
       )}
       <div className="context-menu-divider" />
       <button role="menuitem" tabIndex={-1} className="context-menu-item-danger" onClick={() => { onClose(); onLeave(); }}>
-        Leave Server
+        {t("channelSidebar.server.dropdown.leaveServer")}
       </button>
     </div>
   );
@@ -795,6 +803,7 @@ function SortableChannelItem({
 // ─── Channel Item Content (shared between sortable items and drag overlay) ────
 
 function ChannelItemContent({ ch, isOverlay, onContextMenu }: { ch: ChannelResponse; isOverlay?: boolean; onContextMenu?: (e: React.MouseEvent, chId: string) => void }) {
+  const { t } = useTranslation();
   const currentChannelId = useChatStore((s) => s.currentChannelId);
   const selectChannel = useChatStore((s) => s.selectChannel);
   const unreadCounts = useChatStore((s) => s.unreadCounts);
@@ -841,6 +850,10 @@ function ChannelItemContent({ ch, isOverlay, onContextMenu }: { ch: ChannelRespo
             <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z" />
             <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
           </svg>
+        ) : ch.is_private ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="channel-type-icon" aria-label={t("channelSidebar.channel.privateAriaLabel")}>
+            <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z" />
+          </svg>
         ) : (
           <span className="channel-hash">#</span>
         )}
@@ -850,7 +863,7 @@ function ChannelItemContent({ ch, isOverlay, onContextMenu }: { ch: ChannelRespo
             <svg className="channel-muted-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M16.5 12A4.5 4.5 0 0 0 14 8.27V6.11l-4-4L8.59 3.52 20.48 15.41 21.89 14l-5.39-5.39V12zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.9 8.9 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
             </svg>
-            <span className="sr-only">Muted</span>
+            <span className="sr-only">{t("channelSidebar.channel.muted")}</span>
           </>
         )}
         {mentions > 0 && <span className="unread-badge" aria-label={`${mentions} unread messages`}>{mentions}</span>}
@@ -903,6 +916,7 @@ function SortableCategorySection({
   onChannelContextMenu: (e: React.MouseEvent, chId: string) => void;
   activeChannelId: string | null;
 }) {
+  const { t } = useTranslation();
   const {
     attributes,
     listeners,
@@ -955,7 +969,7 @@ function SortableCategorySection({
                 }}
                 autoFocus
               />
-              <button className="btn-small" onClick={() => onRenameCategory(cat.id)}>Save</button>
+              <button className="btn-small" onClick={() => onRenameCategory(cat.id)}>{t("channelSidebar.server.save")}</button>
             </div>
           ) : (
             <>
@@ -983,7 +997,7 @@ function SortableCategorySection({
                   className="btn-icon"
                   onClick={() => onCreateChannel(cat.id, cat.name)}
                   title={`Create Channel in ${cat.name}`}
-                  aria-label="Create Channel"
+                  aria-label={t("channelSidebar.server.createChannelAriaLabel")}
                 >
                   +
                 </button>
@@ -1009,7 +1023,7 @@ function SortableCategorySection({
                         }}
                         autoFocus
                       />
-                      <button className="btn-small" onClick={() => onRenameChannel(ch.id)}>Save</button>
+                      <button className="btn-small" onClick={() => onRenameChannel(ch.id)}>{t("channelSidebar.server.save")}</button>
                     </div>
                   </li>
                 );
@@ -1047,6 +1061,7 @@ function DroppableZone({ id, children }: { id: string; children: React.ReactNode
 // ─── Server View ────────────────────────────────────
 
 function ServerView({ serverId }: { serverId: string }) {
+  const { t } = useTranslation();
   const channels = useChatStore((s) => s.channels);
   const servers = useChatStore((s) => s.servers);
   const serverCategories = useChatStore((s) => s.categories[serverId]) ?? [];
@@ -1495,7 +1510,7 @@ function ServerView({ serverId }: { serverId: string }) {
           ref={headerBtnRef}
           className="server-name-header"
           onClick={() => setShowServerDropdown((v) => !v)}
-          title="Server options"
+          title={t("channelSidebar.server.serverOptions")}
         >
           <span>{serverName}</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className={`server-name-chevron${showServerDropdown ? " server-name-chevron-open" : ""}`}>
@@ -1526,10 +1541,10 @@ function ServerView({ serverId }: { serverId: string }) {
               const first = channelListRef.current?.querySelector(".channel-item.unread");
               first?.scrollIntoView({ behavior: "smooth", block: "center" });
             }}
-            aria-label="Unread channels above"
+            aria-label={t("channelSidebar.server.unreadAboveAriaLabel")}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
-            New
+            {t("channelSidebar.server.new")}
           </button>
         )}
         {chUnreadBelow && (
@@ -1539,9 +1554,9 @@ function ServerView({ serverId }: { serverId: string }) {
               const items = channelListRef.current?.querySelectorAll(".channel-item.unread");
               items?.[items.length - 1]?.scrollIntoView({ behavior: "smooth", block: "center" });
             }}
-            aria-label="Unread channels below"
+            aria-label={t("channelSidebar.server.unreadBelowAriaLabel")}
           >
-            New
+            {t("channelSidebar.server.new")}
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
           </button>
         )}
@@ -1561,13 +1576,13 @@ function ServerView({ serverId }: { serverId: string }) {
           {(uncategorized.length > 0 || serverCategories.length === 0) && (
             <DroppableZone id="uncategorized">
               <div className="channel-category-header">
-                <span>Text Channels</span>
+                <span>{t("channelSidebar.server.textChannels")}</span>
                 {canManageChannels && (
                   <button
                     className="btn-icon"
                     onClick={() => setCreateModal({ categoryId: null })}
-                    title="Create Channel"
-                    aria-label="Create Channel"
+                    title={t("channelSidebar.server.createChannelTitle")}
+                    aria-label={t("channelSidebar.server.createChannelAriaLabel")}
                   >
                     +
                   </button>
@@ -1591,7 +1606,7 @@ function ServerView({ serverId }: { serverId: string }) {
                               }}
                               autoFocus
                             />
-                            <button className="btn-small" onClick={() => handleRename(ch.id)}>Save</button>
+                            <button className="btn-small" onClick={() => handleRename(ch.id)}>{t("channelSidebar.server.save")}</button>
                           </div>
                         </li>
                       );
@@ -1601,7 +1616,7 @@ function ServerView({ serverId }: { serverId: string }) {
                     );
                   })}
                   {uncategorized.length === 0 && serverCategories.length === 0 && (
-                    <li className="channel-empty">No channels yet</li>
+                    <li className="channel-empty">{t("channelSidebar.server.noChannelsYet")}</li>
                   )}
                 </ul>
               </SortableContext>
@@ -1734,11 +1749,11 @@ function ServerView({ serverId }: { serverId: string }) {
       {showCreateCategory && (
         <div className="modal-overlay" onClick={() => setShowCreateCategory(false)}>
           <div className="modal-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            <h3>Create Category</h3>
+            <h3>{t("channelSidebar.createCategory.title")}</h3>
             <input
               type="text"
               className="modal-input"
-              placeholder="Category name"
+              placeholder={t("channelSidebar.createCategory.placeholder")}
               value={newCategoryName}
               onChange={(e) => setNewCategoryName(e.target.value)}
               onKeyDown={(e) => {
@@ -1748,8 +1763,8 @@ function ServerView({ serverId }: { serverId: string }) {
               autoFocus
             />
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowCreateCategory(false)}>Cancel</button>
-              <button className="btn-primary" onClick={handleCreateCategory} disabled={!newCategoryName.trim()}>Create</button>
+              <button className="btn-secondary" onClick={() => setShowCreateCategory(false)}>{t("channelSidebar.createCategory.cancel")}</button>
+              <button className="btn-primary" onClick={handleCreateCategory} disabled={!newCategoryName.trim()}>{t("channelSidebar.createCategory.create")}</button>
             </div>
           </div>
         </div>
@@ -1768,9 +1783,9 @@ function ServerView({ serverId }: { serverId: string }) {
       {/* Delete Channel Confirmation */}
       {confirmDeleteChannel && (
         <ConfirmDialog
-          title="Delete Channel"
-          message="Are you sure you want to delete this channel? All messages will be lost."
-          confirmLabel="Delete Channel"
+          title={t("channelSidebar.confirm.deleteChannel.title")}
+          message={t("channelSidebar.confirm.deleteChannel.message")}
+          confirmLabel={t("channelSidebar.confirm.deleteChannel.label")}
           danger
           onConfirm={() => {
             handleDelete(confirmDeleteChannel);
@@ -1783,9 +1798,9 @@ function ServerView({ serverId }: { serverId: string }) {
       {/* Delete Category Confirmation */}
       {confirmDeleteCategory && (
         <ConfirmDialog
-          title="Delete Category"
-          message="Are you sure you want to delete this category? Channels in it will become uncategorized."
-          confirmLabel="Delete Category"
+          title={t("channelSidebar.confirm.deleteCategory.title")}
+          message={t("channelSidebar.confirm.deleteCategory.message")}
+          confirmLabel={t("channelSidebar.confirm.deleteCategory.label")}
           danger
           onConfirm={() => {
             handleDeleteCategory(confirmDeleteCategory);
@@ -1821,9 +1836,9 @@ function ServerView({ serverId }: { serverId: string }) {
 
       {confirmLeaveServer && (
         <ConfirmDialog
-          title="Leave Server"
-          message={`Are you sure you want to leave ${serverName}? You won't be able to rejoin unless you receive a new invite.`}
-          confirmLabel="Leave Server"
+          title={t("channelSidebar.confirm.leaveServer.title")}
+          message={t("channelSidebar.confirm.leaveServer.message", { serverName })}
+          confirmLabel={t("channelSidebar.confirm.leaveServer.label")}
           danger
           onConfirm={() => {
             handleLeaveServer();

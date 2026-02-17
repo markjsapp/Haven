@@ -100,6 +100,7 @@ impl TestApp {
             expired_invite_cleanup: true,
             registration_invite_only: false,
             registration_invites_per_user: 3,
+            giphy_api_key: String::new(),
         };
 
         std::fs::create_dir_all(&config.storage_dir).ok();

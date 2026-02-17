@@ -955,19 +955,22 @@ async fn handle_add_reaction(
         }
     }
 
+    // Generate a random sender token for sealed sender
+    let sender_token = Uuid::new_v4().to_string();
+
     // Persist the reaction
-    if let Err(e) = queries::add_reaction(state.db.write(), message_id, user_id, emoji).await {
+    if let Err(e) = queries::add_reaction(state.db.write(), message_id, user_id, emoji, Some(&sender_token)).await {
         let _ = reply_tx.send(WsServerMessage::Error {
             message: format!("Failed to add reaction: {}", e),
         });
         return;
     }
 
-    // Broadcast to all channel subscribers
+    // Broadcast to all channel subscribers (sender_token instead of user_id)
     let react_msg = WsServerMessage::ReactionAdded {
         message_id,
         channel_id: message.channel_id,
-        user_id,
+        sender_token,
         emoji: emoji.to_string(),
     };
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {
@@ -1013,11 +1016,12 @@ async fn handle_remove_reaction(
         Ok(true) => {}
     }
 
-    // Broadcast to all channel subscribers
+    // Broadcast to all channel subscribers (sender_token instead of user_id)
+    let sender_token = Uuid::new_v4().to_string();
     let unreact_msg = WsServerMessage::ReactionRemoved {
         message_id,
         channel_id: message.channel_id,
-        user_id,
+        sender_token,
         emoji: emoji.to_string(),
     };
     if let Some(broadcaster) = state.channel_broadcasts.get(&message.channel_id) {

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { generateRecoveryKey } from "@haven/core";
 import { uploadBackup, cacheSecurityPhrase } from "../lib/backup.js";
 import { useAuthStore } from "../store/auth.js";
@@ -7,6 +8,7 @@ import { useFocusTrap } from "../hooks/useFocusTrap.js";
 type Step = "choose" | "custom" | "generated" | "saving";
 
 export default function SecurityPhraseSetup() {
+  const { t } = useTranslation();
   const completeBackupSetup = useAuthStore((s) => s.completeBackupSetup);
 
   const [step, setStep] = useState<Step>("choose");
@@ -33,23 +35,23 @@ export default function SecurityPhraseSetup() {
       cacheSecurityPhrase(phrase);
       completeBackupSetup();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to upload backup");
+      setError(e instanceof Error ? e.message : t("securityPhraseSetup.failedUpload"));
       setStep("custom"); // go back so user can retry
       setSaving(false);
     }
-  }, [completeBackupSetup]);
+  }, [completeBackupSetup, t]);
 
   const handleCustomSubmit = useCallback(() => {
     if (customPhrase.length < 8) {
-      setError("Security phrase must be at least 8 characters");
+      setError(t("securityPhraseSetup.custom.phraseMinLength"));
       return;
     }
     if (customPhrase !== confirmPhrase) {
-      setError("Phrases do not match");
+      setError(t("securityPhraseSetup.custom.phrasesDoNotMatch"));
       return;
     }
     handleSave(customPhrase);
-  }, [customPhrase, confirmPhrase, handleSave]);
+  }, [customPhrase, confirmPhrase, handleSave, t]);
 
   const handleSkip = useCallback(() => {
     completeBackupSetup();
@@ -60,10 +62,9 @@ export default function SecurityPhraseSetup() {
       <div className="modal-dialog" style={{ maxWidth: 460 }} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="security-setup-title">
         {step === "choose" && (
           <>
-            <h2 style={{ marginBottom: 8 }} id="security-setup-title">Set Up Key Backup</h2>
+            <h2 style={{ marginBottom: 8 }} id="security-setup-title">{t("securityPhraseSetup.title")}</h2>
             <p className="security-phrase-desc">
-              Protect your encrypted messages by creating a security phrase.
-              You'll need this to restore your messages if you log in on a new device.
+              {t("securityPhraseSetup.desc")}
             </p>
             <div className="security-phrase-options">
               <button
@@ -71,23 +72,23 @@ export default function SecurityPhraseSetup() {
                 onClick={() => setStep("custom")}
                 style={{ marginBottom: 8 }}
               >
-                Create a Security Phrase
+                {t("securityPhraseSetup.createPhrase")}
               </button>
               <button
                 className="btn-primary"
                 onClick={handleGenerateKey}
                 style={{ marginBottom: 8 }}
               >
-                Generate a Recovery Key
+                {t("securityPhraseSetup.generateKey")}
               </button>
               <button
                 className="security-phrase-skip"
                 onClick={handleSkip}
               >
-                Skip for now
+                {t("securityPhraseSetup.skipForNow")}
               </button>
               <p className="security-phrase-warning">
-                Without a security phrase, you won't be able to read your messages on other devices.
+                {t("securityPhraseSetup.skipWarning")}
               </p>
             </div>
           </>
@@ -95,37 +96,37 @@ export default function SecurityPhraseSetup() {
 
         {step === "custom" && (
           <>
-            <h2 style={{ marginBottom: 8 }}>Create Security Phrase</h2>
+            <h2 style={{ marginBottom: 8 }}>{t("securityPhraseSetup.custom.title")}</h2>
             <p className="security-phrase-desc">
-              Choose a strong phrase you'll remember. You'll need it to restore your keys on other devices.
+              {t("securityPhraseSetup.custom.desc")}
             </p>
-            <label className="security-phrase-label">Security Phrase</label>
+            <label className="security-phrase-label">{t("securityPhraseSetup.custom.phraseLabel")}</label>
             <input
               type="password"
               className="modal-input"
-              placeholder="Enter a security phrase..."
+              placeholder={t("securityPhraseSetup.custom.phrasePlaceholder")}
               value={customPhrase}
               onChange={(e) => { setCustomPhrase(e.target.value); setError(""); }}
               autoFocus
             />
-            <label className="security-phrase-label" style={{ marginTop: 12 }}>Confirm Phrase</label>
+            <label className="security-phrase-label" style={{ marginTop: 12 }}>{t("securityPhraseSetup.custom.confirmLabel")}</label>
             <input
               type="password"
               className="modal-input"
-              placeholder="Confirm your security phrase..."
+              placeholder={t("securityPhraseSetup.custom.confirmPlaceholder")}
               value={confirmPhrase}
               onChange={(e) => { setConfirmPhrase(e.target.value); setError(""); }}
               onKeyDown={(e) => e.key === "Enter" && handleCustomSubmit()}
             />
             {error && <p className="modal-error">{error}</p>}
             <div className="security-phrase-actions">
-              <button className="btn-secondary" onClick={() => setStep("choose")}>Back</button>
+              <button className="btn-secondary" onClick={() => setStep("choose")}>{t("securityPhraseSetup.custom.back")}</button>
               <button
                 className="btn-primary"
                 onClick={handleCustomSubmit}
                 disabled={saving || !customPhrase || !confirmPhrase}
               >
-                Save Backup
+                {t("securityPhraseSetup.custom.saveBackup")}
               </button>
             </div>
           </>
@@ -133,9 +134,9 @@ export default function SecurityPhraseSetup() {
 
         {step === "generated" && (
           <>
-            <h2 style={{ marginBottom: 8 }}>Your Recovery Key</h2>
+            <h2 style={{ marginBottom: 8 }}>{t("securityPhraseSetup.generated.title")}</h2>
             <p className="security-phrase-desc">
-              Copy this key and store it somewhere safe. You'll need it to restore your messages on other devices.
+              {t("securityPhraseSetup.generated.desc")}
             </p>
             <div className="recovery-key-display">
               <code>{recoveryKey}</code>
@@ -145,7 +146,7 @@ export default function SecurityPhraseSetup() {
               style={{ width: "100%", marginBottom: 12 }}
               onClick={() => navigator.clipboard.writeText(recoveryKey)}
             >
-              Copy to Clipboard
+              {t("securityPhraseSetup.generated.copyToClipboard")}
             </button>
             <label className="security-phrase-confirm-label">
               <input
@@ -153,17 +154,17 @@ export default function SecurityPhraseSetup() {
                 checked={confirmed}
                 onChange={(e) => setConfirmed(e.target.checked)}
               />
-              I have saved my recovery key
+              {t("securityPhraseSetup.generated.savedConfirm")}
             </label>
             {error && <p className="modal-error">{error}</p>}
             <div className="security-phrase-actions">
-              <button className="btn-secondary" onClick={() => setStep("choose")}>Back</button>
+              <button className="btn-secondary" onClick={() => setStep("choose")}>{t("securityPhraseSetup.generated.back")}</button>
               <button
                 className="btn-primary"
                 onClick={() => handleSave(recoveryKey)}
                 disabled={!confirmed || saving}
               >
-                Save Backup
+                {t("securityPhraseSetup.generated.saveBackup")}
               </button>
             </div>
           </>
@@ -171,7 +172,7 @@ export default function SecurityPhraseSetup() {
 
         {step === "saving" && (
           <div style={{ textAlign: "center", padding: "24px 0" }}>
-            <p>Encrypting and uploading backup...</p>
+            <p>{t("securityPhraseSetup.saving")}</p>
           </div>
         )}
       </div>

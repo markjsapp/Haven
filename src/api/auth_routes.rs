@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, http::{HeaderMap, StatusCode}, Json};
 use chrono::{Duration, Utc};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -11,6 +11,50 @@ use crate::middleware::AuthUser;
 use crate::models::*;
 use crate::storage;
 use crate::AppState;
+
+/// Parse a User-Agent header into a short device name like "Chrome on macOS".
+fn parse_device_name(ua: &str) -> String {
+    let browser = if ua.contains("Firefox") {
+        "Firefox"
+    } else if ua.contains("Edg/") {
+        "Edge"
+    } else if ua.contains("Chrome") {
+        "Chrome"
+    } else if ua.contains("Safari") {
+        "Safari"
+    } else {
+        "Unknown Browser"
+    };
+    let os = if ua.contains("Windows") {
+        "Windows"
+    } else if ua.contains("Mac OS") || ua.contains("Macintosh") {
+        "macOS"
+    } else if ua.contains("Linux") {
+        "Linux"
+    } else if ua.contains("Android") {
+        "Android"
+    } else if ua.contains("iPhone") || ua.contains("iPad") {
+        "iOS"
+    } else {
+        "Unknown OS"
+    };
+    format!("{} on {}", browser, os)
+}
+
+/// Extract client IP from headers (X-Forwarded-For or X-Real-IP).
+fn extract_ip_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        })
+}
 
 /// Number of leading zero bits required for PoW (20 ≈ ~1M hashes, sub-second on modern hardware)
 const POW_DIFFICULTY: u32 = 20;
@@ -71,6 +115,7 @@ fn verify_pow(challenge: &str, nonce: &str, difficulty: u32) -> bool {
 /// POST /api/v1/auth/register
 pub async fn register(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<RegisterRequest>,
 ) -> AppResult<Json<AuthResponse>> {
     // Validate request
@@ -223,9 +268,12 @@ pub async fn register(
     let refresh_token = auth::generate_refresh_token();
     let refresh_hash = auth::hash_refresh_token(&refresh_token);
 
+    let device = headers.get("user-agent").and_then(|v| v.to_str().ok()).map(parse_device_name);
+    let ip = extract_ip_from_headers(&headers);
     let expiry = Utc::now() + Duration::days(state.config.refresh_token_expiry_days);
-    queries::store_refresh_token_with_family(
+    queries::store_refresh_token_with_metadata(
         state.db.write(), user.id, &refresh_hash, expiry, Some(family_id),
+        device.as_deref(), ip.as_deref(),
     ).await?;
 
     Ok(Json(AuthResponse {
@@ -238,6 +286,7 @@ pub async fn register(
 /// POST /api/v1/auth/login
 pub async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> AppResult<Json<AuthResponse>> {
     // Find user
@@ -267,9 +316,12 @@ pub async fn login(
     let refresh_token = auth::generate_refresh_token();
     let refresh_hash = auth::hash_refresh_token(&refresh_token);
 
+    let device = headers.get("user-agent").and_then(|v| v.to_str().ok()).map(parse_device_name);
+    let ip = extract_ip_from_headers(&headers);
     let expiry = Utc::now() + Duration::days(state.config.refresh_token_expiry_days);
-    queries::store_refresh_token_with_family(
+    queries::store_refresh_token_with_metadata(
         state.db.write(), user.id, &refresh_hash, expiry, Some(family_id),
+        device.as_deref(), ip.as_deref(),
     ).await?;
 
     Ok(Json(AuthResponse {
@@ -330,6 +382,11 @@ pub async fn refresh_token(
         state.db.write(), user.id, &new_refresh_hash, expiry, stored_token.family_id,
     ).await?;
 
+    // Update last_activity for the session family
+    if let Some(family_id) = stored_token.family_id {
+        let _ = queries::update_session_activity(state.db.write(), family_id).await;
+    }
+
     Ok(Json(AuthResponse {
         access_token,
         refresh_token: new_refresh_token,
@@ -350,6 +407,56 @@ pub async fn logout(
     crate::api::voice::cleanup_voice_state(&state, user_id).await;
 
     Ok(Json(serde_json::json!({ "message": "Logged out" })))
+}
+
+/// GET /api/v1/auth/sessions — list active sessions for current user
+pub async fn list_sessions(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+) -> AppResult<Json<Vec<SessionResponse>>> {
+    let tokens = queries::list_user_sessions(state.db.read(), user_id).await?;
+
+    // Determine current session by looking at the most recently created token
+    // (the one from the latest refresh for the current request is "current").
+    // We approximate by just marking the most recently active session.
+    let sessions: Vec<SessionResponse> = tokens
+        .into_iter()
+        .map(|t| SessionResponse {
+            id: t.id,
+            family_id: t.family_id,
+            device_name: t.device_name,
+            ip_address: t.ip_address.map(|ip| mask_ip(&ip)),
+            last_activity: t.last_activity,
+            created_at: t.created_at,
+            is_current: false, // Will be determined client-side or via a cookie
+        })
+        .collect();
+
+    Ok(Json(sessions))
+}
+
+/// DELETE /api/v1/auth/sessions/:family_id — revoke a specific session
+pub async fn revoke_session(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    axum::extract::Path(family_id): axum::extract::Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let deleted = queries::revoke_session(state.db.write(), user_id, family_id).await?;
+    if deleted == 0 {
+        return Err(AppError::NotFound("Session not found".into()));
+    }
+    Ok(Json(serde_json::json!({ "message": "Session revoked" })))
+}
+
+/// Partially mask an IP address for privacy (show first two octets).
+fn mask_ip(ip: &str) -> String {
+    let parts: Vec<&str> = ip.split('.').collect();
+    if parts.len() == 4 {
+        format!("{}.{}.x.x", parts[0], parts[1])
+    } else {
+        // IPv6 or other — just show first segment
+        ip.split(':').next().unwrap_or("*").to_string() + ":***"
+    }
 }
 
 /// POST /api/v1/auth/totp/setup

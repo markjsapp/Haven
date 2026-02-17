@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { setStoredServerUrl } from "../lib/serverUrl";
 
 /**
@@ -28,6 +29,7 @@ async function probeServer(serverUrl: string): Promise<void> {
 }
 
 export default function ServerConnect() {
+  const { t } = useTranslation();
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,7 +41,7 @@ export default function ServerConnect() {
 
     const input = url.trim();
     if (!input) {
-      setError("Please enter a server URL.");
+      setError(t("serverConnect.emptyUrl"));
       setLoading(false);
       return;
     }
@@ -52,7 +54,7 @@ export default function ServerConnect() {
       window.location.href = "/login";
     } catch {
       setError(
-        "Could not connect. Check the URL and ensure the server is running.",
+        t("serverConnect.connectionFailed"),
       );
     } finally {
       setLoading(false);
@@ -62,18 +64,18 @@ export default function ServerConnect() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>Haven</h1>
-        <p className="auth-subtitle">Connect to a server</p>
+        <h1>{t("serverConnect.appName")}</h1>
+        <p className="auth-subtitle">{t("serverConnect.subtitle")}</p>
 
         <form onSubmit={handleSubmit}>
           <div className="field">
-            <label htmlFor="server-url">Server URL</label>
+            <label htmlFor="server-url">{t("serverConnect.urlLabel")}</label>
             <input
               id="server-url"
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="192.168.1.5:8080 or chat.example.com"
+              placeholder={t("serverConnect.urlPlaceholder")}
               required
               autoFocus
             />
@@ -82,7 +84,7 @@ export default function ServerConnect() {
           {error && <div className="error">{error}</div>}
 
           <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? "Connecting..." : "Connect"}
+            {loading ? t("serverConnect.submitLoading") : t("serverConnect.submit")}
           </button>
         </form>
       </div>

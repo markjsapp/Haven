@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
 import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
+import { getSessionAD } from "../lib/crypto.js";
+import { computeSafetyNumber } from "../lib/safety-number.js";
 import Avatar from "./Avatar.js";
 import EmojiPicker from "./EmojiPicker.js";
 import ConfirmDialog from "./ConfirmDialog.js";
@@ -16,6 +19,7 @@ interface ProfilePopupProps {
 }
 
 export default function ProfilePopup({ userId, serverId, position, onClose }: ProfilePopupProps) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const currentUser = useAuthStore((s) => s.user);
   const presenceStatus = usePresenceStore((s) => s.statuses[userId] ?? "offline");
@@ -44,6 +48,20 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
 
   const isOwnProfile = currentUser?.id === userId;
   const statusConfig = STATUS_CONFIG[presenceStatus] ?? STATUS_CONFIG.offline;
+
+  // Safety number for DM identity verification
+  const safetyNumber = useMemo(() => {
+    if (isOwnProfile) return null;
+    const ad = getSessionAD(userId);
+    if (!ad || ad.length !== 64) return null;
+    try {
+      const keyA = ad.slice(0, 32);
+      const keyB = ad.slice(32, 64);
+      return computeSafetyNumber(keyA, keyB);
+    } catch {
+      return null;
+    }
+  }, [userId, isOwnProfile]);
 
   // Fetch profile
   useEffect(() => {
@@ -206,7 +224,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
   if (loading) {
     return (
       <div className="profile-popup" ref={popupRef} style={style}>
-        <div className="profile-popup-loading">Loading...</div>
+        <div className="profile-popup-loading">{t("profile.loading")}</div>
       </div>
     );
   }
@@ -214,7 +232,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
   if (!profile) {
     return (
       <div className="profile-popup" ref={popupRef} style={style}>
-        <div className="profile-popup-loading">User not found</div>
+        <div className="profile-popup-loading">{t("profile.userNotFound")}</div>
       </div>
     );
   }
@@ -222,16 +240,16 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
   const displayName = profile.display_name || profile.username;
 
   // Friend button state
-  let friendBtnTitle = "Send Friend Request";
+  let friendBtnTitle = t("profile.sendFriendRequest");
   let friendBtnDisabled = false;
   if (profile.is_friend) {
-    friendBtnTitle = "Already friends";
+    friendBtnTitle = t("profile.alreadyFriends");
     friendBtnDisabled = true;
   } else if (profile.friend_request_status === "pending_outgoing") {
-    friendBtnTitle = "Friend Request Sent";
+    friendBtnTitle = t("profile.friendRequestSent");
     friendBtnDisabled = true;
   } else if (profile.friend_request_status === "pending_incoming") {
-    friendBtnTitle = "Accept Friend Request";
+    friendBtnTitle = t("profile.acceptFriendRequest");
   }
 
   return (
@@ -258,8 +276,8 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
               <button
                 className="profile-header-btn"
                 onClick={() => setShowMoreMenu(!showMoreMenu)}
-                title="More"
-                aria-label="More options"
+                title={t("profile.more")}
+                aria-label={t("profile.moreOptions")}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <circle cx="12" cy="5" r="2" />
@@ -268,14 +286,14 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
                 </svg>
               </button>
               {showMoreMenu && (
-                <div className="profile-more-menu" role="menu" aria-label="More options">
+                <div className="profile-more-menu" role="menu" aria-label={t("profile.moreOptions")}>
                   {profile.is_friend && profile.friendship_id && (
                     <button className="profile-more-item profile-more-danger" onClick={() => { setConfirmUnfriend(true); setShowMoreMenu(false); }} disabled={actionLoading}>
-                      Remove Friend
+                      {t("profile.removeFriend")}
                     </button>
                   )}
                   <button className="profile-more-item profile-more-danger" onClick={handleBlock} disabled={actionLoading}>
-                    {profile.is_blocked ? "Unblock" : "Block"}
+                    {profile.is_blocked ? t("profile.unblock") : t("profile.block")}
                   </button>
                 </div>
               )}
@@ -305,7 +323,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
         {editing ? (
           <div className="profile-popup-edit">
             <label className="profile-edit-label">
-              Display Name
+              {t("profile.displayNameLabel")}
               <input
                 className="profile-edit-input"
                 value={editForm.display_name}
@@ -315,29 +333,29 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
               />
             </label>
             <label className="profile-edit-label">
-              About Me
+              {t("profile.aboutMeLabel")}
               <textarea
                 className="profile-edit-textarea"
                 value={editForm.about_me}
                 onChange={(e) => setEditForm({ ...editForm, about_me: e.target.value })}
                 maxLength={190}
                 rows={3}
-                placeholder="Tell us about yourself"
+                placeholder={t("profile.aboutMePlaceholder")}
               />
             </label>
             <label className="profile-edit-label">
-              Status
+              {t("profile.statusLabel")}
               <input
                 className="profile-edit-input"
                 value={editForm.custom_status}
                 onChange={(e) => setEditForm({ ...editForm, custom_status: e.target.value })}
                 maxLength={128}
-                placeholder="What's happening?"
+                placeholder={t("profile.statusPlaceholder")}
               />
             </label>
             <div className="profile-edit-actions">
-              <button className="btn-secondary" onClick={() => setEditing(false)}>Cancel</button>
-              <button className="btn-primary" onClick={handleSaveProfile}>Save</button>
+              <button className="btn-secondary" onClick={() => setEditing(false)}>{t("profile.cancel")}</button>
+              <button className="btn-primary" onClick={handleSaveProfile}>{t("profile.save")}</button>
             </div>
           </div>
         ) : (
@@ -352,10 +370,10 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
             {!isOwnProfile && profile.friend_request_status === "pending_incoming" && (
               <div className="profile-popup-friend-actions">
                 <button className="btn-primary btn-sm" onClick={handleFriendAction} disabled={actionLoading}>
-                  Accept
+                  {t("profile.accept")}
                 </button>
                 <button className="btn-secondary btn-sm" onClick={handleDeclineFriend} disabled={actionLoading}>
-                  Ignore
+                  {t("profile.ignore")}
                 </button>
               </div>
             )}
@@ -378,11 +396,11 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
                 )}
                 <span className="profile-popup-mutual-text">
                   {profile.mutual_friend_count > 0 && (
-                    <>{profile.mutual_friend_count} Mutual Friend{profile.mutual_friend_count !== 1 ? "s" : ""}</>
+                    <>{profile.mutual_friend_count === 1 ? t("profile.mutualFriend", { count: profile.mutual_friend_count }) : t("profile.mutualFriends", { count: profile.mutual_friend_count })}</>
                   )}
                   {profile.mutual_friend_count > 0 && profile.mutual_server_count > 0 && " • "}
                   {profile.mutual_server_count > 0 && (
-                    <>{profile.mutual_server_count} Mutual Server{profile.mutual_server_count !== 1 ? "s" : ""}</>
+                    <>{profile.mutual_server_count === 1 ? t("profile.mutualServer", { count: profile.mutual_server_count }) : t("profile.mutualServers", { count: profile.mutual_server_count })}</>
                   )}
                 </span>
               </div>
@@ -401,7 +419,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
             {/* About me */}
             {profile.about_me && (
               <div className="profile-popup-section">
-                <div className="profile-popup-section-label">ABOUT ME</div>
+                <div className="profile-popup-section-label">{t("profile.sectionAboutMe")}</div>
                 <div className="profile-popup-about">{profile.about_me}</div>
               </div>
             )}
@@ -409,7 +427,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
             {/* Roles (only when viewing in a server context) */}
             {profile.roles && profile.roles.length > 0 && (
               <div className="profile-popup-section">
-                <div className="profile-popup-section-label">ROLES</div>
+                <div className="profile-popup-section-label">{t("profile.sectionRoles")}</div>
                 <div className="profile-popup-roles">
                   {profile.roles.filter((r) => !r.is_default).map((role) => (
                     <span key={role.id} className="profile-popup-role-pill">
@@ -426,7 +444,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
 
             {/* Member since */}
             <div className="profile-popup-section">
-              <div className="profile-popup-section-label">MEMBER SINCE</div>
+              <div className="profile-popup-section-label">{t("profile.sectionMemberSince")}</div>
               <div className="profile-popup-date">
                 {new Date(profile.created_at).toLocaleDateString(undefined, {
                   year: "numeric",
@@ -436,11 +454,39 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
               </div>
             </div>
 
+            {/* Safety number for DM identity verification */}
+            {safetyNumber && (
+              <div className="profile-popup-section">
+                <div className="profile-popup-section-label">{t("profile.sectionVerifyIdentity")}</div>
+                <div className="safety-number-grid">
+                  {safetyNumber.groups.map((group, i) => (
+                    <span key={i} className="safety-number-group">{group}</span>
+                  ))}
+                </div>
+                <div className="safety-number-fingerprint">
+                  {Array.from(safetyNumber.hashBytes).map((byte, i) => (
+                    <span
+                      key={i}
+                      className="safety-number-dot"
+                      style={{ backgroundColor: `hsl(${(byte * 360) / 256}, 65%, 55%)` }}
+                    />
+                  ))}
+                </div>
+                <button
+                  className="btn-ghost safety-number-copy"
+                  onClick={() => navigator.clipboard.writeText(safetyNumber.groups.join(" "))}
+                  title={t("profile.copyNumberTooltip")}
+                >
+                  {t("profile.copyNumber")}
+                </button>
+              </div>
+            )}
+
             {/* Own profile: Edit button */}
             {isOwnProfile && (
               <div className="profile-popup-actions">
                 <button className="btn-secondary profile-popup-btn" onClick={() => setEditing(true)}>
-                  Edit Profile
+                  {t("profile.editProfile")}
                 </button>
               </div>
             )}
@@ -451,7 +497,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
                 <input
                   ref={dmInputRef}
                   className="profile-popup-message-input"
-                  placeholder={`Message @${profile.username}`}
+                  placeholder={t("profile.messagePlaceholder", { username: profile.username })}
                   value={dmText}
                   onChange={(e) => setDmText(e.target.value)}
                   onKeyDown={(e) => {
@@ -465,8 +511,8 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
                   className="profile-popup-emoji-btn"
                   onClick={() => setShowEmoji(!showEmoji)}
                   type="button"
-                  title="Emoji"
-                  aria-label="Emoji"
+                  title={t("profile.emoji")}
+                  aria-label={t("profile.emoji")}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
@@ -492,9 +538,9 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
 
       {confirmUnfriend && profile && (
         <ConfirmDialog
-          title="Remove Friend"
-          message={`Are you sure you want to remove ${profile.display_name || profile.username} as a friend?`}
-          confirmLabel="Remove Friend"
+          title={t("profile.confirmRemoveFriendTitle")}
+          message={t("profile.confirmRemoveFriendMessage", { name: profile.display_name || profile.username })}
+          confirmLabel={t("profile.confirmRemoveFriendLabel")}
           danger
           onConfirm={() => {
             setConfirmUnfriend(false);

@@ -1,4 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
 import { useChatStore } from "../store/chat.js";
@@ -11,6 +12,7 @@ import Avatar from "./Avatar.js";
 import type { ServerMemberResponse, RoleResponse } from "@haven/core";
 
 export default function MemberSidebar({ serverId }: { serverId: string }) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const presenceStatuses = usePresenceStore((s) => s.statuses);
   const fetchPresence = usePresenceStore((s) => s.fetchPresence);
@@ -86,11 +88,11 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
     }
   }
   // Add status groups for roleless online members
-  if (statusBuckets.online.length > 0) roleGroups.push({ key: "online", label: "ONLINE", members: statusBuckets.online });
-  if (statusBuckets.idle.length > 0) roleGroups.push({ key: "idle", label: "IDLE", members: statusBuckets.idle });
-  if (statusBuckets.dnd.length > 0) roleGroups.push({ key: "dnd", label: "DO NOT DISTURB", members: statusBuckets.dnd });
+  if (statusBuckets.online.length > 0) roleGroups.push({ key: "online", label: t("memberSidebar.groupOnline"), members: statusBuckets.online });
+  if (statusBuckets.idle.length > 0) roleGroups.push({ key: "idle", label: t("memberSidebar.groupIdle"), members: statusBuckets.idle });
+  if (statusBuckets.dnd.length > 0) roleGroups.push({ key: "dnd", label: t("memberSidebar.groupDnd"), members: statusBuckets.dnd });
   // Add offline bucket last
-  if (offlineBucket.length > 0) roleGroups.push({ key: "offline", label: "OFFLINE", members: offlineBucket });
+  if (offlineBucket.length > 0) roleGroups.push({ key: "offline", label: t("memberSidebar.groupOffline"), members: offlineBucket });
 
   const statusGroups = roleGroups;
 
@@ -111,18 +113,18 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
   };
 
   return (
-    <aside className="member-sidebar" aria-label="Server members">
+    <aside className="member-sidebar" aria-label={t("memberSidebar.ariaLabel")}>
       <div className="member-sidebar-header">
         <button
           className={`search-input-wrapper search-trigger-btn${searchPanelOpen ? " active" : ""}`}
           onClick={toggleSearchPanel}
-          aria-label="Search Messages"
-          title="Search Messages"
+          aria-label={t("memberSidebar.searchAriaLabel")}
+          title={t("memberSidebar.searchTitle")}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="search-icon" aria-hidden="true">
             <path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
           </svg>
-          <span className="search-trigger-text">Search</span>
+          <span className="search-trigger-text">{t("memberSidebar.searchText")}</span>
         </button>
       </div>
       <div className="member-sidebar-content">
@@ -144,7 +146,7 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
       ))}
       {filtered.length === 0 && !loading && (
         <div className="member-group-header">
-          MEMBERS — 0
+          {t("memberSidebar.members")} — 0
         </div>
       )}
       </div>
@@ -208,17 +210,18 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
       {nicknameTarget && (
         <div className="modal-overlay" onClick={() => setNicknameTarget(null)} role="presentation">
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="nickname-title">
-            <h2 className="modal-title" id="nickname-title">Change Nickname</h2>
+            <h2 className="modal-title" id="nickname-title">{t("memberSidebar.nickname.title")}</h2>
             <p className="modal-subtitle">
               {nicknameTarget.userId === currentUserId
-                ? "Set a nickname for yourself in this server."
-                : "Set a nickname for this member."}
+                ? t("memberSidebar.nickname.selfDesc")
+                : t("memberSidebar.nickname.otherDesc")}
             </p>
-            <label className="modal-label">NICKNAME</label>
+            <label className="modal-label" htmlFor="nickname-input">{t("memberSidebar.nickname.label")}</label>
             <input
+              id="nickname-input"
               className="modal-input"
               type="text"
-              placeholder="Enter a nickname (leave empty to clear)"
+              placeholder={t("memberSidebar.nickname.placeholder")}
               value={nicknameInput}
               onChange={(e) => setNicknameInput(e.target.value)}
               onKeyDown={(e) => {
@@ -238,7 +241,7 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
               autoFocus
             />
             <div className="modal-footer">
-              <button className="btn-ghost" onClick={() => setNicknameTarget(null)}>Cancel</button>
+              <button className="btn-ghost" onClick={() => setNicknameTarget(null)}>{t("memberSidebar.nickname.cancel")}</button>
               <button
                 className="btn-primary modal-submit"
                 onClick={() => {
@@ -253,7 +256,7 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
                   }).catch(() => {});
                 }}
               >
-                Save
+                {t("memberSidebar.nickname.save")}
               </button>
             </div>
           </div>
@@ -278,6 +281,7 @@ function MemberItem({
   onClick: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   const displayName = member.nickname || member.display_name || member.username;
   const showUsername = !!member.nickname;
   const isOffline = status === "offline";
@@ -295,7 +299,7 @@ function MemberItem({
           name={displayName}
           size={32}
         />
-        <span className="member-avatar-status" style={{ backgroundColor: statusColor }} aria-label={status === "online" ? "Online" : status === "idle" ? "Idle" : status === "dnd" ? "Do Not Disturb" : "Offline"} />
+        <span className="member-avatar-status" style={{ backgroundColor: statusColor }} aria-label={status === "online" ? t("memberSidebar.statusOnline") : status === "idle" ? t("memberSidebar.statusIdle") : status === "dnd" ? t("memberSidebar.statusDnd") : t("memberSidebar.statusOffline")} />
       </div>
       <div className="member-info">
         <span className="member-name" style={topRole?.color ? { color: topRole.color } : undefined}>
@@ -306,7 +310,7 @@ function MemberItem({
         )}
       </div>
       {isOwner && (
-        <span title="Server Owner">
+        <span title={t("memberSidebar.serverOwner")}>
           <svg className="member-owner-crown" width="16" height="16" viewBox="0 0 16 16" fill="#f0b232" aria-hidden="true">
             <path d="M2 11l2-6 4 3 4-3 2 6H2zm6-9l2.5 4L8 8 5.5 6 8 2z" />
           </svg>

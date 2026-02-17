@@ -1,4 +1,5 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
@@ -15,7 +16,7 @@ import { Subtext } from "../lib/tiptap-subtext.js";
 import { MaskedLink } from "../lib/tiptap-masked-link.js";
 import { CustomEmojiNode } from "../lib/tiptap-custom-emoji.js";
 import EmojiPicker from "./EmojiPicker.js";
-import GifPicker from "./GifPicker.js";
+const GifPicker = lazy(() => import("./GifPicker.js"));
 import { saveDraft, loadDraft, clearDraft } from "../lib/draft-store.js";
 import { createMentionExtension, suggestionActiveRef, type MemberItem } from "../lib/tiptap-mention.js";
 import { createChannelMentionExtension, type ChannelItem } from "../lib/tiptap-channel-mention.js";
@@ -63,7 +64,9 @@ const MentionExtension = createMentionExtension(() => memberListRef.current);
 const ChannelMentionExtension = createChannelMentionExtension(() => channelListRef.current);
 const EmojiSuggestExtension = createEmojiSuggestExtension(() => customEmojiListRef.current);
 
-export default function MessageInput({ placeholder = "Type a message..." }: MessageInputProps) {
+export default function MessageInput({ placeholder }: MessageInputProps) {
+  const { t } = useTranslation();
+  const resolvedPlaceholder = placeholder ?? t("messageInput.placeholder");
   const [sending, setSending] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
@@ -107,8 +110,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
   customEmojiListRef.current = selectedServerId ? (customEmojis[selectedServerId] ?? []) : [];
 
   // Store placeholder in a ref so TipTap's placeholder function always reads the latest
-  const placeholderRef = useRef(placeholder);
-  placeholderRef.current = placeholder;
+  const placeholderRef = useRef(resolvedPlaceholder);
+  placeholderRef.current = resolvedPlaceholder;
 
   const editor = useEditor({
     extensions: [
@@ -168,9 +171,11 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
         const html = event.clipboardData?.getData("text/html");
         const text = event.clipboardData?.getData("text/plain");
         if (html && text) {
+          // Check for rich formatting using DOM parsing
           const tmp = document.createElement("div");
-          tmp.innerHTML = html;
-          const hasRichFormatting = tmp.querySelector(
+          tmp.textContent = html;
+          const parsed = new DOMParser().parseFromString(html, "text/html");
+          const hasRichFormatting = parsed.querySelector(
             "strong, em, b, i, u, s, code, pre, a[href], h1, h2, h3, h4, h5, h6, ul, ol, blockquote, table, img"
           );
           if (!hasRichFormatting) {
@@ -224,7 +229,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
     if (!editor) return;
     // Force TipTap to re-render the placeholder by triggering an update
     editor.view.dispatch(editor.state.tr);
-  }, [editor, placeholder]);
+  }, [editor, resolvedPlaceholder]);
 
   // Draft save/restore on channel switch
   const prevChannelRef = useRef<string | null>(null);
@@ -387,20 +392,20 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
             <path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
           </svg>
           <span>
-            Replying to <strong>{replyingSenderName ?? "..."}</strong>
+            {t("messageInput.replyingTo")} <strong>{replyingSenderName ?? "..."}</strong>
           </span>
           <button
             type="button"
             className="btn-ghost"
             onClick={cancelReply}
           >
-            Cancel
+            {t("messageInput.cancel")}
           </button>
         </div>
       )}
       {editingMessageId && (
         <div className="editing-banner">
-          <span>Editing message</span>
+          <span>{t("messageInput.editingMessage")}</span>
           <button
             type="button"
             className="btn-ghost"
@@ -409,7 +414,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               editor?.commands.clearContent();
             }}
           >
-            Cancel
+            {t("messageInput.cancel")}
           </button>
         </div>
       )}
@@ -431,7 +436,7 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
                   </div>
                 )}
                 {upload.spoiler && isImage && (
-                  <div className="upload-spoiler-label">SPOILER</div>
+                  <div className="upload-spoiler-label">{t("messageInput.upload.spoilerLabel")}</div>
                 )}
                 <div className="pending-upload-info">
                   <span className="pending-upload-name" title={upload.file.name}>
@@ -445,20 +450,20 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
                       <div className="upload-progress-fill" style={{ width: `${upload.progress}%` }} />
                     </div>
                     <span className="pending-upload-status">
-                      {upload.progress === 0 ? "Encrypting..." : `Uploading ${upload.progress}%`}
+                      {upload.progress === 0 ? t("messageInput.upload.encrypting") : t("messageInput.upload.uploading", { progress: upload.progress })}
                     </span>
                   </>
                 )}
                 {upload.status === "error" && (
-                  <span className="pending-upload-status error">Failed</span>
+                  <span className="pending-upload-status error">{t("messageInput.upload.failed")}</span>
                 )}
                 {isImage && (
                   <button
                     type="button"
                     className={`pending-upload-spoiler${upload.spoiler ? " active" : ""}`}
                     onClick={() => togglePendingUploadSpoiler(i)}
-                    title={upload.spoiler ? "Remove spoiler" : "Mark as spoiler"}
-                    aria-label={upload.spoiler ? "Remove spoiler" : "Mark as spoiler"}
+                    title={upload.spoiler ? t("messageInput.upload.removeSpoiler") : t("messageInput.upload.markAsSpoiler")}
+                    aria-label={upload.spoiler ? t("messageInput.upload.removeSpoiler") : t("messageInput.upload.markAsSpoiler")}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
@@ -470,8 +475,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
                   type="button"
                   className="pending-upload-remove"
                   onClick={() => removePendingUpload(i)}
-                  title="Remove"
-                  aria-label="Remove"
+                  title={t("messageInput.upload.removeTitle")}
+                  aria-label={t("messageInput.upload.removeAriaLabel")}
                 >
                   &times;
                 </button>
@@ -485,8 +490,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
           type="button"
           className="attach-btn"
           onClick={handleFileSelect}
-          title="Attach file"
-          aria-label="Attach file"
+          title={t("messageInput.attachFileTitle")}
+          aria-label={t("messageInput.attachFileAriaLabel")}
         >
           +
         </button>
@@ -497,27 +502,29 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
           style={{ display: "none" }}
           onChange={handleFileChange}
         />
-        <EditorContent editor={editor} className="tiptap-editor" aria-label="Message editor" />
+        <EditorContent editor={editor} className="tiptap-editor" aria-label={t("messageInput.editorAriaLabel")} />
         <div className="gif-trigger-wrap">
           <button
             type="button"
             className="gif-trigger-btn"
             onClick={() => { setGifOpen(!gifOpen); if (!gifOpen) setEmojiOpen(false); }}
-            title="GIF"
-            aria-label="GIF"
+            title={t("messageInput.gifTitle")}
+            aria-label={t("messageInput.gifAriaLabel")}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M11.5 9H13v6h-1.5zM9 9H6c-.6 0-1 .5-1 1v4c0 .5.4 1 1 1h3c.6 0 1-.5 1-1v-2H8.5v1.5h-2v-3H10V10c0-.5-.4-1-1-1zm10 1.5V9h-4.5v6H16v-2h2v-1.5h-2v-1z" />
             </svg>
           </button>
           {gifOpen && (
-            <GifPicker
-              onSelect={(gifUrl) => {
-                sendMessage(gifUrl);
-                setGifOpen(false);
-              }}
-              onClose={() => setGifOpen(false)}
-            />
+            <Suspense fallback={null}>
+              <GifPicker
+                onSelect={(gifUrl) => {
+                  sendMessage(gifUrl);
+                  setGifOpen(false);
+                }}
+                onClose={() => setGifOpen(false)}
+              />
+            </Suspense>
           )}
         </div>
         <div className="emoji-trigger-wrap">
@@ -525,8 +532,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
             type="button"
             className="emoji-trigger-btn"
             onClick={() => { setEmojiOpen(!emojiOpen); if (!emojiOpen) setGifOpen(false); }}
-            title="Emoji"
-            aria-label="Emoji"
+            title={t("messageInput.emojiTitle")}
+            aria-label={t("messageInput.emojiAriaLabel")}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
@@ -545,8 +552,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
             type="button"
             className="send-btn"
             onClick={() => document.dispatchEvent(new CustomEvent("haven:send"))}
-            title="Send message"
-            aria-label="Send message"
+            title={t("messageInput.sendTitle")}
+            aria-label={t("messageInput.sendAriaLabel")}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
           </button>
@@ -563,8 +570,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               type="button"
               onClick={() => editor.chain().focus().toggleBold().run()}
               className={editor.isActive("bold") ? "active" : ""}
-              title="Bold"
-              aria-label="Bold"
+              title={t("messageInput.bubble.boldTitle")}
+              aria-label={t("messageInput.bubble.boldAriaLabel")}
             >
               B
             </button>
@@ -572,8 +579,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               type="button"
               onClick={() => editor.chain().focus().toggleItalic().run()}
               className={editor.isActive("italic") ? "active" : ""}
-              title="Italic"
-              aria-label="Italic"
+              title={t("messageInput.bubble.italicTitle")}
+              aria-label={t("messageInput.bubble.italicAriaLabel")}
             >
               <em>I</em>
             </button>
@@ -581,8 +588,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               type="button"
               onClick={() => editor.chain().focus().toggleUnderline().run()}
               className={editor.isActive("underline") ? "active" : ""}
-              title="Underline"
-              aria-label="Underline"
+              title={t("messageInput.bubble.underlineTitle")}
+              aria-label={t("messageInput.bubble.underlineAriaLabel")}
             >
               <u>U</u>
             </button>
@@ -590,8 +597,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               type="button"
               onClick={() => editor.chain().focus().toggleStrike().run()}
               className={editor.isActive("strike") ? "active" : ""}
-              title="Strikethrough"
-              aria-label="Strikethrough"
+              title={t("messageInput.bubble.strikethroughTitle")}
+              aria-label={t("messageInput.bubble.strikethroughAriaLabel")}
             >
               <s>S</s>
             </button>
@@ -599,8 +606,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               type="button"
               onClick={() => editor.chain().focus().toggleCode().run()}
               className={editor.isActive("code") ? "active" : ""}
-              title="Inline Code"
-              aria-label="Inline Code"
+              title={t("messageInput.bubble.inlineCodeTitle")}
+              aria-label={t("messageInput.bubble.inlineCodeAriaLabel")}
             >
               {"<>"}
             </button>
@@ -608,8 +615,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               type="button"
               onClick={() => editor.chain().focus().toggleCodeBlock().run()}
               className={editor.isActive("codeBlock") ? "active" : ""}
-              title="Code Block"
-              aria-label="Code Block"
+              title={t("messageInput.bubble.codeBlockTitle")}
+              aria-label={t("messageInput.bubble.codeBlockAriaLabel")}
             >
               {"```"}
             </button>
@@ -617,8 +624,8 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
               type="button"
               onClick={() => editor.chain().focus().toggleMark("spoiler").run()}
               className={editor.isActive("spoiler") ? "active" : ""}
-              title="Spoiler"
-              aria-label="Spoiler"
+              title={t("messageInput.bubble.spoilerTitle")}
+              aria-label={t("messageInput.bubble.spoilerAriaLabel")}
             >
               {"||"}
             </button>
@@ -636,27 +643,27 @@ export default function MessageInput({ placeholder = "Type a message..." }: Mess
           className="message-context-menu input-context-menu"
           style={{ position: "fixed", top: Math.min(inputCtx.y, window.innerHeight - 220), left: Math.min(inputCtx.x, window.innerWidth - 200), zIndex: 1000 }}
           role="menu"
-          aria-label="Input options"
+          aria-label={t("messageInput.contextMenu.ariaLabel")}
         >
           <button type="button" role="menuitem" className="context-menu-item context-menu-toggle" onClick={() => { setShowSendButton(!showSendButton); setInputCtx(null); }}>
-            Send Message Button
+            {t("messageInput.contextMenu.sendMessageButton")}
             <span className={`context-menu-check ${showSendButton ? "checked" : ""}`} />
           </button>
           <button type="button" role="menuitem" className="context-menu-item context-menu-toggle" onClick={() => { setSpellcheck(!spellcheck); setInputCtx(null); }}>
-            Spellcheck
+            {t("messageInput.contextMenu.spellcheck")}
             <span className={`context-menu-check ${spellcheck ? "checked" : ""}`} />
           </button>
           <div className="context-menu-separator" role="separator" />
           <button type="button" role="menuitem" className="context-menu-item" onClick={() => { document.execCommand("cut"); setInputCtx(null); }}>
-            Cut
+            {t("messageInput.contextMenu.cut")}
             <span className="context-menu-shortcut">{navigator.platform.includes("Mac") ? "\u2318X" : "Ctrl+X"}</span>
           </button>
           <button type="button" role="menuitem" className="context-menu-item" onClick={() => { document.execCommand("copy"); setInputCtx(null); }}>
-            Copy
+            {t("messageInput.contextMenu.copy")}
             <span className="context-menu-shortcut">{navigator.platform.includes("Mac") ? "\u2318C" : "Ctrl+C"}</span>
           </button>
-          <button type="button" role="menuitem" className="context-menu-item" onClick={() => { navigator.clipboard.readText().then((t) => editor?.commands.insertContent(t)); setInputCtx(null); }}>
-            Paste
+          <button type="button" role="menuitem" className="context-menu-item" onClick={() => { navigator.clipboard.readText().then((clipText) => editor?.commands.insertContent(clipText)); setInputCtx(null); }}>
+            {t("messageInput.contextMenu.paste")}
             <span className="context-menu-shortcut">{navigator.platform.includes("Mac") ? "\u2318V" : "Ctrl+V"}</span>
           </button>
         </div>

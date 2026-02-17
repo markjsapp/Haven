@@ -171,5 +171,6 @@ pub async fn set_channel_category(
         category_id: updated.category_id,
         dm_status: updated.dm_status,
         last_message_id: None,
+        is_private: updated.is_private,
     }))
 }
