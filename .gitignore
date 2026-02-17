@@ -9,6 +9,7 @@ client/src-tauri/target/
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Node
 node_modules/
