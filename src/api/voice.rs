@@ -94,7 +94,7 @@ pub async fn join_voice(
 
     Ok(Json(VoiceTokenResponse {
         token,
-        url: state.config.livekit_url.clone(),
+        url: state.config.livekit_url_for_client().to_string(),
         channel_id,
     }))
 }

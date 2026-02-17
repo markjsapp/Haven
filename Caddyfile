@@ -7,9 +7,10 @@ discordsucks.org {
     @ws path /api/v1/ws
     reverse_proxy @ws haven:8080
 
-    # LiveKit signaling (WebSocket)
-    @lk path /livekit/*
-    reverse_proxy @lk livekit:7880
+    # LiveKit signaling (WebSocket) — strip /livekit prefix before forwarding
+    handle_path /livekit/* {
+        reverse_proxy livekit:7880
+    }
 
     # All other traffic → Haven backend (serves API + embedded frontend)
     reverse_proxy haven:8080 {

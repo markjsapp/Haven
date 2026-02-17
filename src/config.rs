@@ -82,6 +82,8 @@ pub struct ConfigFile {
     #[serde(default)]
     pub livekit_url: String,
     #[serde(default)]
+    pub livekit_client_url: String,
+    #[serde(default)]
     pub livekit_api_key: String,
     #[serde(default)]
     pub livekit_api_secret: String,
@@ -225,6 +227,7 @@ pub struct AppConfig {
 
     // LiveKit (voice channels) — all optional, voice disabled if empty
     pub livekit_url: String,
+    pub livekit_client_url: String, // URL returned to browsers (external); falls back to livekit_url
     pub livekit_api_key: String,
     pub livekit_api_secret: String,
     pub livekit_bundled: bool,
@@ -256,6 +259,16 @@ impl AppConfig {
         !self.livekit_url.is_empty()
             && !self.livekit_api_key.is_empty()
             && !self.livekit_api_secret.is_empty()
+    }
+
+    /// Returns the LiveKit URL to send to browser clients.
+    /// Prefers `livekit_client_url` (external), falls back to `livekit_url` (for local dev).
+    pub fn livekit_url_for_client(&self) -> &str {
+        if self.livekit_client_url.is_empty() {
+            &self.livekit_url
+        } else {
+            &self.livekit_client_url
+        }
     }
 
     /// Config with test-appropriate defaults (no env vars needed).
@@ -291,6 +304,7 @@ impl AppConfig {
             cdn_base_url: String::new(),
             cdn_presign_expiry_secs: 3600,
             livekit_url: String::new(),
+            livekit_client_url: String::new(),
             livekit_api_key: String::new(),
             livekit_api_secret: String::new(),
             livekit_bundled: false,
@@ -392,6 +406,7 @@ impl AppConfig {
                 .unwrap_or(3600),
 
             livekit_url: env::var("LIVEKIT_URL").unwrap_or_default(),
+            livekit_client_url: env::var("LIVEKIT_CLIENT_URL").unwrap_or_default(),
             livekit_api_key: env::var("LIVEKIT_API_KEY").unwrap_or_default(),
             livekit_api_secret: env::var("LIVEKIT_API_SECRET").unwrap_or_default(),
             livekit_bundled: env::var("LIVEKIT_BUNDLED")
@@ -496,6 +511,7 @@ impl AppConfig {
             cdn_base_url: file.cdn_base_url,
             cdn_presign_expiry_secs: file.cdn_presign_expiry_secs,
             livekit_url: file.livekit_url,
+            livekit_client_url: file.livekit_client_url,
             livekit_api_key: file.livekit_api_key,
             livekit_api_secret: file.livekit_api_secret,
             livekit_bundled: file.livekit_bundled,
@@ -563,6 +579,7 @@ impl AppConfig {
             cdn_base_url: String::new(),
             cdn_presign_expiry_secs: default_cdn_presign_expiry_secs(),
             livekit_url: String::new(),
+            livekit_client_url: String::new(),
             livekit_api_key: String::new(),
             livekit_api_secret: String::new(),
             livekit_bundled: default_livekit_bundled(),
@@ -619,6 +636,7 @@ impl AppConfig {
             cdn_base_url: file.cdn_base_url,
             cdn_presign_expiry_secs: file.cdn_presign_expiry_secs,
             livekit_url: file.livekit_url,
+            livekit_client_url: file.livekit_client_url,
             livekit_api_key: file.livekit_api_key,
             livekit_api_secret: file.livekit_api_secret,
             livekit_bundled: file.livekit_bundled,

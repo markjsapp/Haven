@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  LiveKitRoom,
-  RoomAudioRenderer,
   VideoTrack,
   useLocalParticipant,
   useRemoteParticipants,
-  useIsSpeaking,
   useTracks,
 } from "@livekit/components-react";
 import { Track, ScreenSharePresets, VideoPreset } from "livekit-client";
@@ -34,106 +31,44 @@ interface VoiceRoomProps {
   serverId: string;
 }
 
+/**
+ * Voice channel UI. The actual LiveKit connection is maintained by
+ * VoiceConnection (rendered at the Chat layout level) so navigating
+ * between channels doesn't tear down the connection.
+ */
 export default function VoiceRoom({ channelId, channelName, serverId }: VoiceRoomProps) {
   const { t } = useTranslation();
   const {
     connectionState,
     currentChannelId,
-    livekitToken,
-    livekitUrl,
     isMuted,
     isDeafened,
-    inputDeviceId,
-    outputDeviceId,
-    echoCancellation,
-    noiseSuppression,
     joinVoice,
-    leaveVoice,
-    setConnectionState,
     participants,
   } = useVoiceStore();
 
   const isThisChannel = currentChannelId === channelId;
-  const isConnected = isThisChannel && (connectionState === "connected" || connectionState === "connecting");
+  const isConnected = isThisChannel && connectionState === "connected";
+  const isJoining = connectionState === "connecting" && isThisChannel;
 
-  // Debounce disconnects to handle React StrictMode double-mount.
-  // StrictMode unmounts then remounts, causing a stale LiveKit disconnect
-  // from the first instance. By delaying, we give the remounted instance
-  // time to connect and cancel the pending leave.
-  const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleConnected = useCallback(() => {
-    if (disconnectTimerRef.current) {
-      clearTimeout(disconnectTimerRef.current!);
-      disconnectTimerRef.current = null;
-    }
-    setConnectionState("connected");
-  }, [setConnectionState]);
-
-  const handleDisconnected = useCallback(() => {
-    disconnectTimerRef.current = setTimeout(() => {
-      const { connectionState: cs } = useVoiceStore.getState();
-      if (cs === "disconnected") return; // Already handled (explicit leave)
-      leaveVoice();
-    }, 2000);
-  }, [leaveVoice]);
-
-  // Clean up disconnect timer on unmount
-  useEffect(() => {
-    return () => {
-      if (disconnectTimerRef.current) clearTimeout(disconnectTimerRef.current);
-    };
-  }, []);
-
-  // Auto-disconnect voice when window/tab is closed or page is navigated away
-  useEffect(() => {
-    if (!isConnected) return;
-    const handler = () => { leaveVoice(); };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [isConnected, leaveVoice]);
-
-  // If we have a token and URL, render LiveKitRoom
-  if (livekitToken && livekitUrl && isConnected) {
+  // When connected to this voice channel, render UI inside the LiveKit context
+  // (VoiceConnection provides the LiveKitRoom ancestor)
+  if (isConnected) {
     return (
       <div className="voice-room">
-        <LiveKitRoom
-          token={livekitToken}
-          serverUrl={livekitUrl}
-          connect={true}
-          audio={!isMuted}
-          video={false}
-          options={{
-            dynacast: true,
-            adaptiveStream: true,
-            audioCaptureDefaults: {
-              deviceId: inputDeviceId || undefined,
-              echoCancellation,
-              noiseSuppression,
-            },
-            audioOutput: {
-              deviceId: outputDeviceId || undefined,
-            },
-          }}
-          onConnected={handleConnected}
-          onDisconnected={handleDisconnected}
-        >
-          <RoomContent
-            channelName={channelName}
-            channelId={channelId!}
-            serverId={serverId}
-            isMuted={isMuted}
-            isDeafened={isDeafened}
-          />
-          <RoomAudioRenderer />
-        </LiveKitRoom>
+        <RoomContent
+          channelName={channelName}
+          channelId={channelId}
+          serverId={serverId}
+          isMuted={isMuted}
+          isDeafened={isDeafened}
+        />
       </div>
     );
   }
 
   // Not connected — show join prompt
   const channelParticipants = participants[channelId] ?? [];
-  const isJoining = connectionState === "connecting" && isThisChannel;
   return (
     <div className="voice-room">
       <div className="voice-room-header">
