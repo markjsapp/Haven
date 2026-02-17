@@ -22,6 +22,7 @@ services:
 
   # ─── Haven Backend (API + embedded frontend) ──────────
   haven:
+    image: ghcr.io/markjsapp/haven:latest
     build:
       context: .
       dockerfile: Dockerfile
