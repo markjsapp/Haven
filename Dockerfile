@@ -12,7 +12,6 @@ RUN cd packages/haven-core && npm ci && npm run build
 COPY packages/web/package.json packages/web/package-lock.json packages/web/tsconfig.json packages/web/vite.config.ts packages/web/index.html packages/web/
 COPY packages/web/.npmrc packages/web/
 COPY packages/web/src packages/web/src
-COPY packages/web/public packages/web/public
 RUN cd packages/web && npm ci && npm run build
 
 # ─── Stage 2: Rust Build ───────────────────────────────
