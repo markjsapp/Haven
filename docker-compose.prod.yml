@@ -93,7 +93,7 @@ services:
       - "7881:7881"       # WebRTC TCP
       - "7882:7882/udp"   # WebRTC UDP
     environment:
-      - LIVEKIT_KEYS=${LIVEKIT_API_KEY}:${LIVEKIT_API_SECRET}
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
     command: --config /etc/livekit.yaml
