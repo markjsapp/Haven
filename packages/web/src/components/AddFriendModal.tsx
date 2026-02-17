@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useFriendsStore } from "../store/friends.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export default function AddFriendModal({ onClose }: Props) {
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -26,10 +28,10 @@ export default function AddFriendModal({ onClose }: Props) {
     setSuccess("");
     try {
       await useFriendsStore.getState().sendRequest(username.trim());
-      setSuccess(`Friend request sent to ${username.trim()}!`);
+      setSuccess(t("addFriend.success", { username: username.trim() }));
       setUsername("");
     } catch (err: any) {
-      setError(err.message || "Failed to send friend request");
+      setError(err.message || t("addFriend.failed"));
     } finally {
       setLoading(false);
     }
@@ -38,9 +40,9 @@ export default function AddFriendModal({ onClose }: Props) {
   return (
     <div className="modal-overlay" onClick={onClose} role="presentation">
       <div className="modal-dialog" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-friend-title">
-        <h3 className="modal-title" id="add-friend-title">Add Friend</h3>
+        <h3 className="modal-title" id="add-friend-title">{t("addFriend.title")}</h3>
         <p className="modal-subtitle">
-          Enter a username to send a friend request.
+          {t("addFriend.subtitle")}
         </p>
 
         <div className="add-friend-input-row">
@@ -48,7 +50,7 @@ export default function AddFriendModal({ onClose }: Props) {
             ref={inputRef}
             type="text"
             className="add-friend-input"
-            placeholder="Enter a username..."
+            placeholder={t("addFriend.placeholder")}
             value={username}
             onChange={(e) => { setUsername(e.target.value); setError(""); setSuccess(""); }}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
@@ -60,7 +62,7 @@ export default function AddFriendModal({ onClose }: Props) {
 
         <div className="modal-footer">
           <button type="button" className="btn-ghost" onClick={onClose}>
-            Cancel
+            {t("addFriend.cancel")}
           </button>
           <button
             type="button"
@@ -68,7 +70,7 @@ export default function AddFriendModal({ onClose }: Props) {
             onClick={handleSend}
             disabled={loading || !username.trim()}
           >
-            {loading ? "Sending..." : "Send Request"}
+            {loading ? t("addFriend.submitLoading") : t("addFriend.submit")}
           </button>
         </div>
       </div>

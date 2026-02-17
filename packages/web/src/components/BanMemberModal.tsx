@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function BanMemberModal({ serverId, userId, username, onBanned, onClose }: Props) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef);
@@ -26,7 +28,7 @@ export default function BanMemberModal({ serverId, userId, username, onBanned, o
       onBanned(userId);
       onClose();
     } catch (err: any) {
-      setError(err.message || "Failed to ban member");
+      setError(err.message || t("banMember.failed"));
     } finally {
       setLoading(false);
     }
@@ -35,19 +37,19 @@ export default function BanMemberModal({ serverId, userId, username, onBanned, o
   return (
     <div className="modal-overlay" onClick={onClose} role="presentation">
       <div className="modal-dialog ban-modal" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="ban-modal-title">
-        <h3 className="modal-title" id="ban-modal-title">Ban {username}</h3>
+        <h3 className="modal-title" id="ban-modal-title">{t("banMember.title", { username })}</h3>
         <p className="ban-modal-subtitle">
           Are you sure you want to ban <strong>{username}</strong> from this server?
           They will be kicked and unable to rejoin.
         </p>
 
         <label className="ban-modal-label">
-          Reason (optional)
+          {t("banMember.reasonLabel")}
           <textarea
             className="ban-modal-textarea"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Enter a reason for the ban..."
+            placeholder={t("banMember.reasonPlaceholder")}
             maxLength={512}
             rows={3}
           />
@@ -57,7 +59,7 @@ export default function BanMemberModal({ serverId, userId, username, onBanned, o
 
         <div className="modal-footer">
           <button type="button" className="btn-ghost" onClick={onClose}>
-            Cancel
+            {t("banMember.cancel")}
           </button>
           <button
             type="button"
@@ -65,7 +67,7 @@ export default function BanMemberModal({ serverId, userId, username, onBanned, o
             onClick={handleBan}
             disabled={loading}
           >
-            {loading ? "Banning..." : "Ban"}
+            {loading ? t("banMember.submitLoading") : t("banMember.submit")}
           </button>
         </div>
       </div>

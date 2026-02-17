@@ -4,6 +4,7 @@ import { needsServerUrl } from "./lib/serverUrl";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
 import { sanitizeCss } from "./lib/sanitize-css.js";
+import "./i18n/index.js";
 import Login from "./pages/Login.js";
 import Register from "./pages/Register.js";
 import ServerConnect from "./pages/ServerConnect.js";

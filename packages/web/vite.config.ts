@@ -32,6 +32,28 @@ export default defineConfig({
     target: "esnext",
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_DEBUG,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom", "react-router-dom"],
+          "vendor-tiptap": [
+            "@tiptap/react",
+            "@tiptap/starter-kit",
+            "@tiptap/extension-mention",
+            "@tiptap/extension-link",
+            "@tiptap/extension-placeholder",
+            "@tiptap/extension-code-block-lowlight",
+            "@tiptap/extension-underline",
+            "@tiptap/pm",
+            "@tiptap/suggestion",
+            "@tiptap/html",
+          ],
+          "vendor-dnd": ["@dnd-kit/core", "@dnd-kit/sortable"],
+          "vendor-livekit": ["@livekit/components-react", "livekit-client"],
+          "vendor-crypto": ["libsodium-wrappers-sumo"],
+        },
+      },
+    },
   },
   server: {
     host: "0.0.0.0",

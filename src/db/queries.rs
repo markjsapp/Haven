@@ -232,10 +232,22 @@ pub async fn store_refresh_token_with_family(
     expires_at: DateTime<Utc>,
     family_id: Option<Uuid>,
 ) -> AppResult<()> {
+    store_refresh_token_with_metadata(pool, user_id, token_hash, expires_at, family_id, None, None).await
+}
+
+pub async fn store_refresh_token_with_metadata(
+    pool: &Pool,
+    user_id: Uuid,
+    token_hash: &str,
+    expires_at: DateTime<Utc>,
+    family_id: Option<Uuid>,
+    device_name: Option<&str>,
+    ip_address: Option<&str>,
+) -> AppResult<()> {
     sqlx::query(
         r#"
-        INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at, family_id, revoked)
-        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, false)
+        INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at, family_id, revoked, device_name, ip_address, last_activity)
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, false, $6, $7, CURRENT_TIMESTAMP)
         "#,
     )
     .bind(Uuid::new_v4())
@@ -243,6 +255,8 @@ pub async fn store_refresh_token_with_family(
     .bind(token_hash)
     .bind(expires_at)
     .bind(family_id)
+    .bind(device_name)
+    .bind(ip_address)
     .execute(pool)
     .await?;
     Ok(())
@@ -290,6 +304,45 @@ pub async fn purge_expired_refresh_tokens(pool: &Pool) -> AppResult<u64> {
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
+}
+
+/// List active sessions for a user (one per token family, most recent token per family).
+pub async fn list_user_sessions(pool: &Pool, user_id: Uuid) -> AppResult<Vec<RefreshToken>> {
+    let tokens = sqlx::query_as::<_, RefreshToken>(
+        r#"
+        SELECT DISTINCT ON (family_id) *
+        FROM refresh_tokens
+        WHERE user_id = $1 AND NOT revoked AND expires_at > CURRENT_TIMESTAMP AND family_id IS NOT NULL
+        ORDER BY family_id, created_at DESC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(tokens)
+}
+
+/// Revoke a single session by family_id (only if it belongs to user_id).
+pub async fn revoke_session(pool: &Pool, user_id: Uuid, family_id: Uuid) -> AppResult<u64> {
+    let result = sqlx::query(
+        "DELETE FROM refresh_tokens WHERE user_id = $1 AND family_id = $2",
+    )
+    .bind(user_id)
+    .bind(family_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Update last_activity for a token family.
+pub async fn update_session_activity(pool: &Pool, family_id: Uuid) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE refresh_tokens SET last_activity = CURRENT_TIMESTAMP WHERE family_id = $1 AND NOT revoked",
+    )
+    .bind(family_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 // ─── Servers ───────────────────────────────────────────
@@ -445,11 +498,12 @@ pub async fn create_channel(
     channel_type: &str,
     position: i32,
     category_id: Option<Uuid>,
+    is_private: bool,
 ) -> AppResult<Channel> {
     let channel = sqlx::query_as::<_, Channel>(
         r#"
-        INSERT INTO channels (id, server_id, encrypted_meta, channel_type, position, category_id, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+        INSERT INTO channels (id, server_id, encrypted_meta, channel_type, position, category_id, is_private, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
@@ -459,6 +513,7 @@ pub async fn create_channel(
     .bind(channel_type)
     .bind(position)
     .bind(category_id)
+    .bind(is_private)
     .fetch_one(pool)
     .await?;
     Ok(channel)
@@ -1101,11 +1156,12 @@ pub async fn add_reaction(
     message_id: Uuid,
     user_id: Uuid,
     emoji: &str,
+    sender_token: Option<&str>,
 ) -> AppResult<Reaction> {
     let reaction = sqlx::query_as::<_, Reaction>(
         r#"
-        INSERT INTO reactions (message_id, user_id, emoji)
-        VALUES ($1, $2, $3)
+        INSERT INTO reactions (message_id, user_id, emoji, sender_token)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (message_id, user_id, emoji) DO UPDATE SET created_at = reactions.created_at
         RETURNING *
         "#,
@@ -1113,6 +1169,7 @@ pub async fn add_reaction(
     .bind(message_id)
     .bind(user_id)
     .bind(emoji)
+    .bind(sender_token)
     .fetch_one(pool)
     .await?;
     Ok(reaction)
@@ -1168,6 +1225,20 @@ pub async fn get_reactions_for_messages(
         query.fetch_all(pool).await?
     };
 
+    Ok(reactions)
+}
+
+/// Get all reactions for a specific message (for resolving who reacted).
+pub async fn get_reactions_for_message(
+    pool: &Pool,
+    message_id: Uuid,
+) -> AppResult<Vec<Reaction>> {
+    let reactions = sqlx::query_as::<_, Reaction>(
+        "SELECT * FROM reactions WHERE message_id = $1 ORDER BY created_at ASC",
+    )
+    .bind(message_id)
+    .fetch_all(pool)
+    .await?;
     Ok(reactions)
 }
 

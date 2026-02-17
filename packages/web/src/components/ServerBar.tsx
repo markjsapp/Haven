@@ -1,11 +1,14 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
+import { useFriendsStore } from "../store/friends.js";
 import { parseServerName } from "../lib/channel-utils.js";
 import { unicodeBtoa } from "../lib/base64.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
 import { useRovingTabindex } from "../hooks/useRovingTabindex.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import {
   DndContext,
   DragOverlay,
@@ -24,6 +27,13 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+
+/** Small wrapper that calls useFocusTrap on its child div */
+function FocusTrapDiv({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  const ref = useRef<HTMLDivElement>(null);
+  useFocusTrap(ref);
+  return <div ref={ref} {...props}>{children}</div>;
+}
 
 const SERVER_ORDER_KEY = "haven:server-order";
 const SERVER_FOLDERS_KEY = "haven:server-folders";
@@ -62,7 +72,15 @@ const FOLDER_COLORS = [
   "#FF8C00", "#9B59B6", "#1ABC9C", "#E91E63", "#607D8B",
 ];
 
+const COLOR_NAMES: Record<string, string> = {
+  "#5865F2": "Blurple", "#57F287": "Green", "#FEE75C": "Yellow",
+  "#EB459E": "Pink", "#ED4245": "Red", "#FF8C00": "Orange",
+  "#9B59B6": "Purple", "#1ABC9C": "Teal", "#E91E63": "Rose",
+  "#607D8B": "Grey",
+};
+
 export default function ServerBar() {
+  const { t } = useTranslation();
   const servers = useChatStore((s) => s.servers);
   const channels = useChatStore((s) => s.channels);
   const loadChannels = useChatStore((s) => s.loadChannels);
@@ -338,6 +356,13 @@ export default function ServerBar() {
     return total;
   }, [channels, unreadCounts]);
 
+  // Count incoming friend requests for notification badge
+  const friends = useFriendsStore((s) => s.friends);
+  const incomingFriendRequests = useMemo(
+    () => friends.filter((f) => f.status === "pending" && f.is_incoming).length,
+    [friends],
+  );
+
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [serverName, setServerName] = useState("");
@@ -447,6 +472,21 @@ export default function ServerBar() {
     }
   }
 
+  // Escape key handler for all inline modals
+  useEffect(() => {
+    function handleEscapeKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (editingFolder) { setEditingFolder(null); e.stopPropagation(); }
+      else if (confirmAction) { setConfirmAction(null); e.stopPropagation(); }
+      else if (showCreate) { setShowCreate(false); if (iconPreview) URL.revokeObjectURL(iconPreview); setIconFile(null); setIconPreview(null); e.stopPropagation(); }
+      else if (showJoin) { setShowJoin(false); e.stopPropagation(); }
+    }
+    const anyOpen = !!editingFolder || !!confirmAction || showCreate || showJoin;
+    if (!anyOpen) return;
+    document.addEventListener("keydown", handleEscapeKey);
+    return () => document.removeEventListener("keydown", handleEscapeKey);
+  }, [editingFolder, confirmAction, showCreate, showJoin, iconPreview]);
+
   async function handleJoin() {
     if (!inviteCode.trim()) return;
     setError("");
@@ -470,8 +510,8 @@ export default function ServerBar() {
           <button
             className={`server-icon home-icon ${selectedServerId === null ? "active" : ""}`}
             onClick={() => selectServer(null)}
-            title="Direct Messages"
-            aria-label="Direct Messages"
+            title={t("serverBar.directMessages")}
+            aria-label={t("serverBar.directMessages")}
             data-roving-item
             tabIndex={selectedServerId === null ? 0 : -1}
           >
@@ -479,7 +519,7 @@ export default function ServerBar() {
               <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
               <path d="M7 9h10v2H7zm0-3h10v2H7z" />
             </svg>
-            {dmUnread > 0 && <span className="server-unread-dot" />}
+            {(dmUnread > 0 || incomingFriendRequests > 0) && <span className="server-unread-dot" />}
           </button>
         </div>
 
@@ -603,8 +643,8 @@ export default function ServerBar() {
           <button
             className={`server-icon add-server-icon ${showCreate ? "active" : ""}`}
             onClick={() => { setShowCreate(!showCreate); setShowJoin(false); setError(""); }}
-            title="Add a Server"
-            aria-label="Add a Server"
+            title={t("serverBar.addServer")}
+            aria-label={t("serverBar.addServer")}
             data-roving-item
             tabIndex={-1}
           >
@@ -619,8 +659,8 @@ export default function ServerBar() {
           <button
             className={`server-icon join-server-icon ${showJoin ? "active" : ""}`}
             onClick={() => { setShowJoin(!showJoin); setShowCreate(false); setError(""); }}
-            title="Join a Server"
-            aria-label="Join a Server"
+            title={t("serverBar.joinServer")}
+            aria-label={t("serverBar.joinServer")}
             data-roving-item
             tabIndex={-1}
           >
@@ -642,7 +682,7 @@ export default function ServerBar() {
               }
             }
           }}
-          aria-label="Unread servers above"
+          aria-label={t("serverBar.unreadAboveAriaLabel")}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
         </button>
@@ -658,7 +698,7 @@ export default function ServerBar() {
               }
             }
           }}
-          aria-label="Unread servers below"
+          aria-label={t("serverBar.unreadBelowAriaLabel")}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
         </button>
@@ -720,10 +760,11 @@ export default function ServerBar() {
       {/* Edit folder modal */}
       {editingFolder && (
         <div className="modal-overlay" onClick={() => setEditingFolder(null)} role="presentation">
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="edit-folder-title">
-            <h2 className="modal-title" id="edit-folder-title">Edit Folder</h2>
-            <label className="modal-label">FOLDER NAME</label>
+          <FocusTrapDiv className="modal-dialog" onClick={(e: React.MouseEvent) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="edit-folder-title">
+            <h2 className="modal-title" id="edit-folder-title">{t("serverBar.editFolder.title")}</h2>
+            <label className="modal-label" htmlFor="folder-name-input">{t("serverBar.editFolder.folderNameLabel")}</label>
             <input
+              id="folder-name-input"
               className="modal-input"
               type="text"
               value={editingFolder.name}
@@ -737,7 +778,8 @@ export default function ServerBar() {
               autoFocus
               maxLength={32}
             />
-            <label className="modal-label" style={{ marginTop: 12 }}>COLOR</label>
+            <fieldset className="modal-fieldset" style={{ marginTop: 12 }}>
+            <legend className="modal-label">{t("serverBar.editFolder.colorLabel")}</legend>
             <div className="folder-color-picker">
               {FOLDER_COLORS.map((c) => (
                 <button
@@ -745,12 +787,14 @@ export default function ServerBar() {
                   className={`folder-color-swatch ${editingFolder.color === c ? "active" : ""}`}
                   style={{ backgroundColor: c }}
                   onClick={() => setEditingFolder({ ...editingFolder, color: c })}
-                  aria-label={c}
+                  aria-label={COLOR_NAMES[c] ?? c}
+                  aria-pressed={editingFolder.color === c}
                 />
               ))}
             </div>
+            </fieldset>
             <div className="modal-footer">
-              <button className="btn-ghost" onClick={() => setEditingFolder(null)}>Cancel</button>
+              <button className="btn-ghost" onClick={() => setEditingFolder(null)}>{t("serverBar.editFolder.cancel")}</button>
               <button
                 className="btn-primary modal-submit"
                 onClick={() => {
@@ -758,28 +802,28 @@ export default function ServerBar() {
                   setEditingFolder(null);
                 }}
               >
-                Save
+                {t("serverBar.editFolder.save")}
               </button>
             </div>
-          </div>
+          </FocusTrapDiv>
         </div>
       )}
 
       {/* Confirm leave/delete dialog */}
       {confirmAction && (
         <div className="modal-overlay" onClick={() => setConfirmAction(null)} role="presentation">
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="server-confirm-title">
+          <FocusTrapDiv className="modal-dialog" onClick={(e: React.MouseEvent) => e.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="server-confirm-title">
             <h2 className="modal-title" id="server-confirm-title">
-              {confirmAction.type === "delete" ? "Delete Server" : "Leave Server"}
+              {confirmAction.type === "delete" ? t("serverBar.confirmDelete.title") : t("serverBar.confirmLeave.title")}
             </h2>
             <p className="modal-subtitle">
               {confirmAction.type === "delete"
-                ? `Are you sure you want to delete "${confirmAction.serverName}"? This action cannot be undone and all channels, messages, and roles will be permanently deleted.`
-                : `Are you sure you want to leave "${confirmAction.serverName}"? If you are the sole member, the server will be deleted.`}
+                ? t("serverBar.confirmDelete.message", { serverName: confirmAction.serverName })
+                : t("serverBar.confirmLeave.message", { serverName: confirmAction.serverName })}
             </p>
             <div className="modal-footer">
               <button className="btn-ghost" onClick={() => setConfirmAction(null)}>
-                Cancel
+                {t("serverBar.confirmLeave.cancel")}
               </button>
               <button
                 className="btn-danger"
@@ -789,19 +833,19 @@ export default function ServerBar() {
                     : handleLeaveServer(confirmAction.serverId)
                 }
               >
-                {confirmAction.type === "delete" ? "Delete Server" : "Leave Server"}
+                {confirmAction.type === "delete" ? t("serverBar.confirmDelete.deleteServerBtn") : t("serverBar.confirmLeave.leaveServerBtn")}
               </button>
             </div>
-          </div>
+          </FocusTrapDiv>
         </div>
       )}
 
       {/* Create server modal */}
       {showCreate && (
         <div className="modal-overlay" onClick={() => { setShowCreate(false); if (iconPreview) URL.revokeObjectURL(iconPreview); setIconFile(null); setIconPreview(null); }} role="presentation">
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="create-server-title">
-            <h2 className="modal-title" id="create-server-title">Create a Server</h2>
-            <p className="modal-subtitle">Give your new server a name and icon.</p>
+          <FocusTrapDiv className="modal-dialog" onClick={(e: React.MouseEvent) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="create-server-title">
+            <h2 className="modal-title" id="create-server-title">{t("serverBar.createServer.title")}</h2>
+            <p className="modal-subtitle">{t("serverBar.createServer.subtitle")}</p>
             <input
               ref={iconInputRef}
               type="file"
@@ -811,64 +855,66 @@ export default function ServerBar() {
                 const file = e.target.files?.[0];
                 if (iconInputRef.current) iconInputRef.current.value = "";
                 if (!file) return;
-                if (file.size > 2 * 1024 * 1024) { setError("Icon too large (max 2MB)"); return; }
+                if (file.size > 2 * 1024 * 1024) { setError(t("serverBar.createServer.iconTooLarge")); return; }
                 if (iconPreview) URL.revokeObjectURL(iconPreview);
                 setIconFile(file);
                 setIconPreview(URL.createObjectURL(file));
                 setError("");
               }}
             />
-            <div className="create-server-icon-wrap" onClick={() => iconInputRef.current?.click()} role="button" tabIndex={0} aria-label="Upload server icon" onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); iconInputRef.current?.click(); } }}>
+            <div className="create-server-icon-wrap" onClick={() => iconInputRef.current?.click()} role="button" tabIndex={0} aria-label={t("serverBar.createServer.uploadAriaLabel")} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); iconInputRef.current?.click(); } }}>
               {iconPreview ? (
-                <img src={iconPreview} alt="Server icon preview" className="create-server-icon-preview" />
+                <img src={iconPreview} alt={t("serverBar.createServer.serverIconPreviewAlt")} className="create-server-icon-preview" />
               ) : (
                 <div className="create-server-icon-placeholder">
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
-                  <span>Upload</span>
+                  <span>{t("serverBar.createServer.upload")}</span>
                 </div>
               )}
             </div>
-            <label className="modal-label">SERVER NAME</label>
+            <label className="modal-label" htmlFor="server-name-input">{t("serverBar.createServer.serverNameLabel")}</label>
             <input
+              id="server-name-input"
               className="modal-input"
               type="text"
-              placeholder="My Awesome Server"
+              placeholder={t("serverBar.createServer.serverNamePlaceholder")}
               value={serverName}
               onChange={(e) => setServerName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               autoFocus
             />
-            {error && <span className="modal-error">{error}</span>}
+            {error && <span className="modal-error" role="alert">{error}</span>}
             <div className="modal-footer">
-              <button className="btn-ghost" onClick={() => { setShowCreate(false); if (iconPreview) URL.revokeObjectURL(iconPreview); setIconFile(null); setIconPreview(null); }}>Cancel</button>
-              <button className="btn-primary modal-submit" onClick={handleCreate}>Create</button>
+              <button className="btn-ghost" onClick={() => { setShowCreate(false); if (iconPreview) URL.revokeObjectURL(iconPreview); setIconFile(null); setIconPreview(null); }}>{t("serverBar.createServer.cancel")}</button>
+              <button className="btn-primary modal-submit" onClick={handleCreate}>{t("serverBar.createServer.create")}</button>
             </div>
-          </div>
+          </FocusTrapDiv>
         </div>
       )}
 
       {/* Join server modal */}
       {showJoin && (
         <div className="modal-overlay" onClick={() => setShowJoin(false)} role="presentation">
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="join-server-title">
-            <h2 className="modal-title" id="join-server-title">Join a Server</h2>
-            <p className="modal-subtitle">Enter an invite code to join an existing server.</p>
-            <label className="modal-label">INVITE CODE</label>
+          <FocusTrapDiv className="modal-dialog" onClick={(e: React.MouseEvent) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="join-server-title">
+            <h2 className="modal-title" id="join-server-title">{t("serverBar.joinServer.title")}</h2>
+            <p className="modal-subtitle">{t("serverBar.joinServer.subtitle")}</p>
+            <label className="modal-label" htmlFor="invite-code-input">{t("serverBar.joinServer.inviteCodeLabel")}</label>
             <input
+              id="invite-code-input"
               className="modal-input"
               type="text"
-              placeholder="AbC123"
+              placeholder={t("serverBar.joinServer.inviteCodePlaceholder")}
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleJoin()}
               autoFocus
             />
-            {error && <span className="modal-error">{error}</span>}
+            {error && <span className="modal-error" role="alert">{error}</span>}
             <div className="modal-footer">
-              <button className="btn-ghost" onClick={() => setShowJoin(false)}>Cancel</button>
-              <button className="btn-primary modal-submit" onClick={handleJoin}>Join</button>
+              <button className="btn-ghost" onClick={() => setShowJoin(false)}>{t("serverBar.joinServer.cancel")}</button>
+              <button className="btn-primary modal-submit" onClick={handleJoin}>{t("serverBar.joinServer.join")}</button>
             </div>
-          </div>
+          </FocusTrapDiv>
         </div>
       )}
     </>
@@ -961,6 +1007,7 @@ function ServerBarContextMenu({
   onAddToFolder: (folderId: string) => void;
   onRemoveFromFolder: () => void;
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
 
@@ -970,18 +1017,18 @@ function ServerBarContextMenu({
       className="channel-context-menu"
       style={{ top: y, left: x }}
       role="menu"
-      aria-label="Server options"
+      aria-label={t("serverBar.contextMenu.ariaLabel")}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
       {currentFolderId ? (
         <button role="menuitem" tabIndex={-1} className="context-menu-item" onClick={onRemoveFromFolder}>
-          Remove from Folder
+          {t("serverBar.contextMenu.removeFromFolder")}
         </button>
       ) : (
         <>
           <button role="menuitem" tabIndex={-1} className="context-menu-item" onClick={onCreateFolder}>
-            Create Folder
+            {t("serverBar.contextMenu.createFolder")}
           </button>
           {folders.length > 0 && (
             <>
@@ -989,7 +1036,7 @@ function ServerBarContextMenu({
               {folders.map((f) => (
                 <button key={f.id} role="menuitem" tabIndex={-1} className="context-menu-item" onClick={() => onAddToFolder(f.id)}>
                   <span className="folder-menu-dot" style={{ backgroundColor: f.color }} />
-                  Add to {f.name}
+                  {t("serverBar.contextMenu.addTo", { folderName: f.name })}
                 </button>
               ))}
             </>
@@ -1003,7 +1050,7 @@ function ServerBarContextMenu({
         className="context-menu-item-danger"
         onClick={onLeave}
       >
-        Leave Server
+        {t("serverBar.contextMenu.leaveServer")}
       </button>
       {isOwner && (
         <button
@@ -1012,7 +1059,7 @@ function ServerBarContextMenu({
           className="context-menu-item-danger"
           onClick={onDelete}
         >
-          Delete Server
+          {t("serverBar.contextMenu.deleteServer")}
         </button>
       )}
     </div>
@@ -1109,6 +1156,7 @@ function FolderContextMenu({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
 
@@ -1118,15 +1166,15 @@ function FolderContextMenu({
       className="channel-context-menu"
       style={{ top: y, left: x }}
       role="menu"
-      aria-label="Folder options"
+      aria-label={t("serverBar.folderContextMenu.ariaLabel")}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
       <button role="menuitem" tabIndex={-1} className="context-menu-item" onClick={onEdit}>
-        Edit Folder
+        {t("serverBar.folderContextMenu.editFolder")}
       </button>
       <button role="menuitem" tabIndex={-1} className="context-menu-item-danger" onClick={onDelete}>
-        Delete Folder
+        {t("serverBar.folderContextMenu.deleteFolder")}
       </button>
     </div>
   );

@@ -3,6 +3,7 @@ name = "haven-backend"
 version = "0.1.0"
 edition = "2021"
 description = "Haven — Privacy-first communication platform backend"
+license = "AGPL-3.0-or-later"
 
 [features]
 default = ["postgres", "embed-ui"]

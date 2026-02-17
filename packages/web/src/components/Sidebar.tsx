@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { usePresenceStore } from "../store/presence.js";
@@ -62,6 +63,7 @@ function parseServerName(encryptedMeta: string): string {
 }
 
 export default function Sidebar() {
+  const { t } = useTranslation();
   const channels = useChatStore((s) => s.channels);
   const currentChannelId = useChatStore((s) => s.currentChannelId);
   const selectChannel = useChatStore((s) => s.selectChannel);
@@ -142,24 +144,24 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <h1>Haven</h1>
+        <h1>{t("sidebar.appName")}</h1>
       </div>
 
       <div className="sidebar-section">
         <div className="sidebar-section-header">
-          <span>Servers</span>
+          <span>{t("sidebar.servers")}</span>
           <div style={{ display: "flex", gap: 2 }}>
             <button
               className="btn-icon"
               onClick={() => { setShowCreateServer(!showCreateServer); setShowJoinServer(false); }}
-              title="Create Server"
+              title={t("sidebar.createServer")}
             >
               +
             </button>
             <button
               className="btn-icon"
               onClick={() => { setShowJoinServer(!showJoinServer); setShowCreateServer(false); }}
-              title="Join Server"
+              title={t("sidebar.joinServer")}
             >
               &rarr;
             </button>
@@ -170,13 +172,13 @@ export default function Sidebar() {
           <div className="dm-input-row">
             <input
               type="text"
-              placeholder="Server name..."
+              placeholder={t("sidebar.serverNamePlaceholder")}
               value={serverName}
               onChange={(e) => setServerName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreateServer()}
             />
             <button className="btn-small" onClick={handleCreateServer}>
-              Create
+              {t("sidebar.create")}
             </button>
             {createServerError && <div className="error-small">{createServerError}</div>}
           </div>
@@ -186,13 +188,13 @@ export default function Sidebar() {
           <div className="dm-input-row">
             <input
               type="text"
-              placeholder="Invite code..."
+              placeholder={t("sidebar.inviteCodePlaceholder")}
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleJoinServer()}
             />
             <button className="btn-small" onClick={handleJoinServer}>
-              Join
+              {t("sidebar.join")}
             </button>
             {joinError && <div className="error-small">{joinError}</div>}
           </div>
@@ -210,18 +212,18 @@ export default function Sidebar() {
             </li>
           ))}
           {serverChannels.length === 0 && (
-            <li className="channel-empty">No channels yet</li>
+            <li className="channel-empty">{t("sidebar.noChannels")}</li>
           )}
         </ul>
       </div>
 
       <div className="sidebar-section">
         <div className="sidebar-section-header">
-          <span>Direct Messages</span>
+          <span>{t("sidebar.directMessages")}</span>
           <button
             className="btn-icon"
             onClick={() => setShowDmInput(!showDmInput)}
-            title="New DM"
+            title={t("sidebar.newDm")}
           >
             +
           </button>
@@ -231,13 +233,13 @@ export default function Sidebar() {
           <div className="dm-input-row">
             <input
               type="text"
-              placeholder="Username..."
+              placeholder={t("sidebar.usernamePlaceholder")}
               value={dmTarget}
               onChange={(e) => setDmTarget(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleStartDm()}
             />
             <button className="btn-small" onClick={handleStartDm}>
-              Go
+              {t("sidebar.go")}
             </button>
             {dmError && <div className="error-small">{dmError}</div>}
           </div>

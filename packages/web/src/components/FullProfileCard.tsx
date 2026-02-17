@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export default function FullProfileCard({ userId, serverId, onClose }: Props) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const currentUser = useAuthStore((s) => s.user);
   const presenceStatus = usePresenceStore((s) => s.statuses[userId] ?? "offline");
@@ -106,8 +108,8 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
   if (loading) {
     return (
       <div className="modal-overlay" onClick={onClose} role="presentation">
-        <div className="full-profile-card" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-label="User profile">
-          <div className="full-profile-loading">Loading...</div>
+        <div className="full-profile-card" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("fullProfile.ariaLabel")}>
+          <div className="full-profile-loading">{t("fullProfile.loading")}</div>
         </div>
       </div>
     );
@@ -116,8 +118,8 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
   if (!profile) {
     return (
       <div className="modal-overlay" onClick={onClose} role="presentation">
-        <div className="full-profile-card" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-label="User profile">
-          <div className="full-profile-loading">User not found</div>
+        <div className="full-profile-card" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("fullProfile.ariaLabel")}>
+          <div className="full-profile-loading">{t("fullProfile.userNotFound")}</div>
         </div>
       </div>
     );
@@ -133,7 +135,7 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
   return (
     <div className="modal-overlay" onClick={onClose} role="presentation">
       <div className="full-profile-card" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="full-profile-title">
-        <button className="modal-close-btn full-profile-close" onClick={onClose} aria-label="Close">
+        <button className="modal-close-btn full-profile-close" onClick={onClose} aria-label={t("fullProfile.close")}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
           </svg>
@@ -181,21 +183,21 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
               {/* About Me */}
               {profile.about_me && (
                 <div className="full-profile-section">
-                  <div className="full-profile-section-label">About Me</div>
+                  <div className="full-profile-section-label">{t("fullProfile.aboutMe")}</div>
                   <div className="full-profile-about">{profile.about_me}</div>
                 </div>
               )}
 
               {/* Member Since */}
               <div className="full-profile-section">
-                <div className="full-profile-section-label">Member Since</div>
+                <div className="full-profile-section-label">{t("fullProfile.memberSince")}</div>
                 <div className="full-profile-date">{joinDate}</div>
               </div>
 
               {/* Roles */}
               {profile.roles && profile.roles.filter((r) => !r.is_default).length > 0 && (
                 <div className="full-profile-section">
-                  <div className="full-profile-section-label">Roles</div>
+                  <div className="full-profile-section-label">{t("fullProfile.roles")}</div>
                   <div className="full-profile-roles">
                     {profile.roles.filter((r) => !r.is_default).map((role) => (
                       <span key={role.id} className="profile-popup-role-pill">
@@ -214,7 +216,7 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
               {!isOwnProfile && (
                 <div className="full-profile-actions">
                   <button className="btn-primary full-profile-msg-btn" onClick={handleMessage}>
-                    Message
+                    {t("fullProfile.message")}
                   </button>
                   {!profile.is_friend && !profile.friend_request_status && (
                     <button
@@ -222,12 +224,12 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
                       onClick={handleFriendAction}
                       disabled={actionLoading}
                     >
-                      Add Friend
+                      {t("fullProfile.addFriend")}
                     </button>
                   )}
                   {profile.friend_request_status === "pending_outgoing" && (
                     <button className="btn-secondary" disabled>
-                      Request Sent
+                      {t("fullProfile.requestSent")}
                     </button>
                   )}
                   {profile.friend_request_status === "pending_incoming" && (
@@ -236,7 +238,7 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
                       onClick={handleFriendAction}
                       disabled={actionLoading}
                     >
-                      Accept Request
+                      {t("fullProfile.acceptRequest")}
                     </button>
                   )}
                   {profile.is_friend && profile.friendship_id && (
@@ -245,7 +247,7 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
                       onClick={() => setConfirmUnfriend(true)}
                       disabled={actionLoading}
                     >
-                      Remove Friend
+                      {t("fullProfile.removeFriend")}
                     </button>
                   )}
                   <button
@@ -253,7 +255,7 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
                     onClick={handleBlock}
                     disabled={actionLoading}
                   >
-                    {profile.is_blocked ? "Unblock" : "Block"}
+                    {profile.is_blocked ? t("fullProfile.unblock") : t("fullProfile.block")}
                   </button>
                 </div>
               )}
@@ -267,7 +269,7 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
                 {profile.mutual_friend_count > 0 && (
                   <div className="full-profile-section">
                     <div className="full-profile-section-label">
-                      {profile.mutual_friend_count} Mutual Friend{profile.mutual_friend_count !== 1 ? "s" : ""}
+                      {profile.mutual_friend_count === 1 ? t("fullProfile.mutualFriend", { count: profile.mutual_friend_count }) : t("fullProfile.mutualFriends", { count: profile.mutual_friend_count })}
                     </div>
                     <div className="full-profile-mutual-list">
                       {profile.mutual_friends.map((mf) => (
@@ -289,14 +291,14 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
                 {profile.mutual_server_count > 0 && (
                   <div className="full-profile-section">
                     <div className="full-profile-section-label">
-                      {profile.mutual_server_count} Mutual Server{profile.mutual_server_count !== 1 ? "s" : ""}
+                      {profile.mutual_server_count === 1 ? t("fullProfile.mutualServer", { count: profile.mutual_server_count }) : t("fullProfile.mutualServers", { count: profile.mutual_server_count })}
                     </div>
                   </div>
                 )}
               </>
             ) : (
               <div className="full-profile-empty-right">
-                <p>No mutual friends or servers</p>
+                <p>{t("fullProfile.noMutuals")}</p>
               </div>
             )}
           </div>
@@ -304,9 +306,9 @@ export default function FullProfileCard({ userId, serverId, onClose }: Props) {
 
         {confirmUnfriend && profile && (
           <ConfirmDialog
-            title="Remove Friend"
-            message={`Are you sure you want to remove ${displayName} as a friend?`}
-            confirmLabel="Remove Friend"
+            title={t("fullProfile.confirmRemoveFriendTitle")}
+            message={t("fullProfile.confirmRemoveFriendMessage", { name: displayName })}
+            confirmLabel={t("fullProfile.confirmRemoveFriendLabel")}
             danger
             onConfirm={() => {
               setConfirmUnfriend(false);

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export default function UserContextMenu({ userId, serverId, position, onClose, onOpenProfile, onManageRoles, onChangeNickname }: Props) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const currentUser = useAuthStore((s) => s.user);
   const startDm = useChatStore((s) => s.startDm);
@@ -153,20 +155,20 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
   }
 
   return (
-    <div className="user-context-menu" ref={ref} style={style} role="menu" aria-label="User options" tabIndex={-1} onKeyDown={handleKeyDown}>
+    <div className="user-context-menu" ref={ref} style={style} role="menu" aria-label={t("userContext.ariaLabel")} tabIndex={-1} onKeyDown={handleKeyDown}>
       <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => { onOpenProfile(); onClose(); }}>
-        Profile
+        {t("userContext.profile")}
       </button>
 
       {!isSelf && (
         <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={handleMessage}>
-          Message
+          {t("userContext.message")}
         </button>
       )}
 
       {!isSelf && servers.length > 0 && (
         <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => setShowInviteModal(true)}>
-          Invite to Server
+          {t("userContext.inviteToServer")}
         </button>
       )}
 
@@ -174,14 +176,14 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
         <>
           <div className="user-context-divider" role="separator" />
           <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => { onManageRoles(); onClose(); }}>
-            Manage Roles
+            {t("userContext.manageRoles")}
           </button>
         </>
       )}
 
       {serverId && onChangeNickname && (isSelf || canManageServer) && (
         <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => { onChangeNickname(userId); onClose(); }}>
-          {isSelf ? "Change Nickname" : "Change Nickname"}
+          {t("userContext.changeNickname")}
         </button>
       )}
 
@@ -202,8 +204,8 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
               }
             }}
           >
-            {existingNote ? "Edit Note" : "Add Note"}
-            <span className="user-context-hint">Only visible to you</span>
+            {existingNote ? t("userContext.editNote") : t("userContext.addNote")}
+            <span className="user-context-hint">{t("userContext.noteHint")}</span>
           </button>
           {noteOpen && (
             <div className="context-note-input" onMouseDown={(e) => e.stopPropagation()}>
@@ -211,7 +213,7 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
                 className="context-note-textarea"
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
-                placeholder="Click to add a note..."
+                placeholder={t("userContext.notePlaceholder")}
                 rows={3}
                 autoFocus
                 onKeyDown={(e) => {
@@ -234,15 +236,15 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
 
           {profile.is_friend ? (
             <button className="user-context-item user-context-danger" role="menuitem" tabIndex={-1} onClick={handleRemoveFriend}>
-              Remove Friend
+              {t("userContext.removeFriend")}
             </button>
           ) : !profile.friend_request_status ? (
             <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={handleAddFriend}>
-              Add Friend
+              {t("userContext.addFriend")}
             </button>
           ) : (
             <button className="user-context-item" role="menuitem" tabIndex={-1} disabled>
-              {profile.friend_request_status === "pending_outgoing" ? "Request Sent" : "Request Pending"}
+              {profile.friend_request_status === "pending_outgoing" ? t("userContext.requestSent") : t("userContext.requestPending")}
             </button>
           )}
 
@@ -257,29 +259,29 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
                     tabIndex={-1}
                     onClick={() => setTimeoutOpen(!timeoutOpen)}
                   >
-                    Timeout
+                    {t("userContext.timeout")}
                   </button>
                   {timeoutOpen && (
                     <div className="context-timeout-options">
-                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(60)}>60 seconds</button>
-                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(300)}>5 minutes</button>
-                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(600)}>10 minutes</button>
-                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(3600)}>1 hour</button>
-                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(86400)}>1 day</button>
-                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(604800)}>1 week</button>
-                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={handleRemoveTimeout}>Remove Timeout</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(60)}>{t("userContext.timeout60s")}</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(300)}>{t("userContext.timeout5m")}</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(600)}>{t("userContext.timeout10m")}</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(3600)}>{t("userContext.timeout1h")}</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(86400)}>{t("userContext.timeout1d")}</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={() => handleTimeout(604800)}>{t("userContext.timeout1w")}</button>
+                      <button className="user-context-item" role="menuitem" tabIndex={-1} onClick={handleRemoveTimeout}>{t("userContext.removeTimeout")}</button>
                     </div>
                   )}
                 </>
               )}
               {canKick && (
                 <button className="user-context-item user-context-danger" role="menuitem" tabIndex={-1} onClick={handleKick}>
-                  Kick
+                  {t("userContext.kick")}
                 </button>
               )}
               {canBan && (
                 <button className="user-context-item user-context-danger" role="menuitem" tabIndex={-1} onClick={handleBan}>
-                  Ban
+                  {t("userContext.ban")}
                 </button>
               )}
             </>
@@ -287,7 +289,7 @@ export default function UserContextMenu({ userId, serverId, position, onClose, o
 
           <div className="user-context-divider" role="separator" />
           <button className="user-context-item user-context-danger" role="menuitem" tabIndex={-1} onClick={handleBlock}>
-            {profile?.is_blocked ? "Unblock" : "Block"}
+            {profile?.is_blocked ? t("userContext.unblock") : t("userContext.block")}
           </button>
         </>
       )}

@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { Permission, type RoleResponse, type OverwriteResponse } from "@haven/core";
 
-const CHANNEL_PERMS: Array<{ key: keyof typeof Permission; label: string }> = [
-  { key: "VIEW_CHANNELS", label: "View Channel" },
-  { key: "SEND_MESSAGES", label: "Send Messages" },
-  { key: "MANAGE_MESSAGES", label: "Manage Messages" },
-  { key: "ADD_REACTIONS", label: "Add Reactions" },
-  { key: "ATTACH_FILES", label: "Attach Files" },
-  { key: "READ_MESSAGE_HISTORY", label: "Read Message History" },
-  { key: "MENTION_EVERYONE", label: "Mention @everyone" },
+const CHANNEL_PERM_KEYS: Array<{ key: keyof typeof Permission; labelKey: string }> = [
+  { key: "VIEW_CHANNELS", labelKey: "channelPermissions.perm.viewChannel" },
+  { key: "SEND_MESSAGES", labelKey: "channelPermissions.perm.sendMessages" },
+  { key: "MANAGE_MESSAGES", labelKey: "channelPermissions.perm.manageMessages" },
+  { key: "ADD_REACTIONS", labelKey: "channelPermissions.perm.addReactions" },
+  { key: "ATTACH_FILES", labelKey: "channelPermissions.perm.attachFiles" },
+  { key: "READ_MESSAGE_HISTORY", labelKey: "channelPermissions.perm.readMessageHistory" },
+  { key: "MENTION_EVERYONE", labelKey: "channelPermissions.perm.mentionEveryone" },
 ];
 
 type TriState = "inherit" | "allow" | "deny";
@@ -23,6 +24,7 @@ interface Props {
 }
 
 export default function ChannelPermissionsEditor({ channelId, serverId, onClose, embedded }: Props) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const [roles, setRoles] = useState<RoleResponse[]>([]);
   const [overwrites, setOverwrites] = useState<OverwriteResponse[]>([]);
@@ -51,7 +53,7 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose,
       for (const role of r) {
         const overwrite = ow.find((o) => o.target_type === "role" && o.target_id === role.id);
         const perms: Record<string, TriState> = {};
-        for (const { key } of CHANNEL_PERMS) {
+        for (const { key } of CHANNEL_PERM_KEYS) {
           const bit = Permission[key];
           if (overwrite) {
             const allow = BigInt(overwrite.allow_bits);
@@ -68,7 +70,7 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose,
       setEditState(state);
       if (r.length > 0 && !selectedRoleId) setSelectedRoleId(r[0].id);
     } catch (err: any) {
-      setError(err.message || "Failed to load permissions");
+      setError(err.message || t("channelPermissions.failedLoad"));
     }
   }
 
@@ -88,7 +90,7 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose,
 
     let allowBits = BigInt(0);
     let denyBits = BigInt(0);
-    for (const { key } of CHANNEL_PERMS) {
+    for (const { key } of CHANNEL_PERM_KEYS) {
       const bit = Permission[key];
       if (perms[key] === "allow") allowBits |= bit;
       else if (perms[key] === "deny") denyBits |= bit;
@@ -122,7 +124,7 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose,
         });
       }
     } catch (err: any) {
-      setError(err.message || "Failed to save permissions");
+      setError(err.message || t("channelPermissions.failedSave"));
     } finally {
       setSaving(false);
     }
@@ -158,22 +160,22 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose,
         {selectedRole && selectedPerms ? (
           <>
             <div style={{ marginBottom: 12, fontSize: 13, color: "var(--text-muted)" }}>
-              Set permission overwrites for <strong>{selectedRole.name}</strong> in this channel.
-              Click a cell to cycle: Inherit &rarr; Allow &rarr; Deny.
+              {t("channelPermissions.hint", { roleName: selectedRole.name })}
+              {" "}{t("channelPermissions.cycleHint")}
             </div>
 
             <div className="perm-grid">
-              {CHANNEL_PERMS.map(({ key, label }) => {
+              {CHANNEL_PERM_KEYS.map(({ key, labelKey }) => {
                 const state = selectedPerms[key] || "inherit";
                 return (
                   <div key={key} className="perm-overwrite-row">
-                    <span className="perm-overwrite-label">{label}</span>
+                    <span className="perm-overwrite-label">{t(labelKey)}</span>
                     <button
                       type="button"
                       className={`perm-tri-btn perm-tri-${state}`}
                       onClick={() => cyclePerm(selectedRole.id, key)}
                     >
-                      {state === "allow" ? "Allow" : state === "deny" ? "Deny" : "—"}
+                      {state === "allow" ? t("channelPermissions.allow") : state === "deny" ? t("channelPermissions.deny") : "\u2014"}
                     </button>
                   </div>
                 );
@@ -186,13 +188,13 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose,
                 onClick={() => handleSave(selectedRole.id)}
                 disabled={saving}
               >
-                {saving ? "Saving..." : "Save"}
+                {saving ? t("channelPermissions.saving") : t("channelPermissions.save")}
               </button>
             </div>
           </>
         ) : (
           <div style={{ color: "var(--text-muted)", padding: 16 }}>
-            Select a role to configure its channel permissions.
+            {t("channelPermissions.selectRoleHint")}
           </div>
         )}
       </div>
@@ -203,10 +205,10 @@ export default function ChannelPermissionsEditor({ channelId, serverId, onClose,
 
   return (
     <div className="server-settings-overlay" onClick={onClose} role="presentation">
-      <div className="server-settings-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Channel Permissions">
+      <div className="server-settings-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={t("channelPermissions.ariaLabel")}>
         <div className="server-settings-header">
-          <h3>Channel Permissions</h3>
-          <button className="btn-ghost" onClick={onClose} aria-label="Close">&times;</button>
+          <h3>{t("channelPermissions.title")}</h3>
+          <button className="btn-ghost" onClick={onClose} aria-label={t("channelPermissions.closeAriaLabel")}>&times;</button>
         </div>
         {content}
       </div>

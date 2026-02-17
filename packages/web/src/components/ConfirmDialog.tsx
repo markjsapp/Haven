@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 interface ConfirmDialogProps {
@@ -14,12 +15,13 @@ interface ConfirmDialogProps {
 export default function ConfirmDialog({
   title,
   message,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   danger = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef);
 
@@ -38,14 +40,14 @@ export default function ConfirmDialog({
         <p className="confirm-dialog-message" id="confirm-dialog-desc">{message}</p>
         <div className="modal-footer">
           <button type="button" className="btn-ghost" onClick={onCancel}>
-            {cancelLabel}
+            {cancelLabel ?? t("confirmDialog.defaultCancel")}
           </button>
           <button
             type="button"
             className={`btn-primary modal-submit ${danger ? "btn-danger" : ""}`}
             onClick={onConfirm}
           >
-            {confirmLabel}
+            {confirmLabel ?? t("confirmDialog.defaultConfirm")}
           </button>
         </div>
       </div>

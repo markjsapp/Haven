@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useFriendsStore } from "../store/friends.js";
 import { usePresenceStore } from "../store/presence.js";
 import { useChatStore } from "../store/chat.js";
@@ -11,6 +12,7 @@ import type { FriendResponse } from "@haven/core";
 type Tab = "online" | "all" | "pending" | "blocked";
 
 export default function FriendsList() {
+  const { t } = useTranslation();
   const friends = useFriendsStore((s) => s.friends);
   const loading = useFriendsStore((s) => s.loading);
   const loadFriends = useFriendsStore((s) => s.loadFriends);
@@ -66,13 +68,13 @@ export default function FriendsList() {
     try {
       const result = await sendRequest(addInput.trim());
       if (result.status === "accepted") {
-        setAddSuccess(`You are now friends with ${result.username}!`);
+        setAddSuccess(t("friendsList.nowFriends", { username: result.username }));
       } else {
-        setAddSuccess(`Friend request sent to ${result.username}.`);
+        setAddSuccess(t("friendsList.requestSent", { username: result.username }));
       }
       setAddInput("");
     } catch (err: any) {
-      setAddError(err.message || "Failed to send request");
+      setAddError(err.message || t("friendsList.failedSendRequest"));
     }
   }
 
@@ -100,19 +102,19 @@ export default function FriendsList() {
         <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style={{ opacity: 0.7 }} aria-hidden="true">
           <path d="M14 8.01c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm9-3v-3h-2v3h-3v2h3v3h2v-3h3v-2h-3z" />
         </svg>
-        <span className="friends-title">Friends</span>
+        <span className="friends-title">{t("friendsList.title")}</span>
         <div className="friends-tabs">
           <button className={`friends-tab ${tab === "online" ? "active" : ""}`} onClick={() => setTab("online")}>
-            Online
+            {t("friendsList.tab.online")}
           </button>
           <button className={`friends-tab ${tab === "all" ? "active" : ""}`} onClick={() => setTab("all")}>
-            All
+            {t("friendsList.tab.all")}
           </button>
           <button className={`friends-tab ${tab === "pending" ? "active" : ""}`} onClick={() => setTab("pending")}>
-            Pending{pendingCount > 0 && <span className="request-badge">{pendingCount}</span>}
+            {t("friendsList.tab.pending")}{pendingCount > 0 && <span className="request-badge">{pendingCount}</span>}
           </button>
           <button className={`friends-tab ${tab === "blocked" ? "active" : ""}`} onClick={() => setTab("blocked")}>
-            Blocked
+            {t("friendsList.tab.blocked")}
           </button>
         </div>
       </div>
@@ -120,19 +122,19 @@ export default function FriendsList() {
       <div className="friends-body">
         {/* Add Friend Input */}
         <div className="add-friend-section">
-          <h3>Add Friend</h3>
-          <p className="add-friend-hint">You can add friends by their username.</p>
+          <h3>{t("friendsList.addFriend")}</h3>
+          <p className="add-friend-hint">{t("friendsList.addFriendHint")}</p>
           <div className="add-friend-row">
             <input
               type="text"
-              placeholder="Enter a username"
+              placeholder={t("friendsList.addFriendPlaceholder")}
               value={addInput}
               onChange={(e) => { setAddInput(e.target.value); setAddError(""); setAddSuccess(""); }}
               onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-              aria-label="Add friend by username"
+              aria-label={t("friendsList.addFriendAriaLabel")}
             />
             <button className="btn-primary" onClick={handleAdd} disabled={!addInput.trim()}>
-              Send Friend Request
+              {t("friendsList.sendFriendRequest")}
             </button>
           </div>
           {addError && <div className="add-friend-error" aria-live="polite">{addError}</div>}
@@ -143,24 +145,24 @@ export default function FriendsList() {
 
         {/* Friend List */}
         <div className="friends-section-title">
-          {tab === "online" && `ONLINE — ${filtered.length}`}
-          {tab === "all" && `ALL FRIENDS — ${filtered.length}`}
-          {tab === "pending" && `PENDING — ${filtered.length}`}
-          {tab === "blocked" && `BLOCKED — ${blockedUserIds.length}`}
+          {tab === "online" && `${t("friendsList.sectionOnline")} — ${filtered.length}`}
+          {tab === "all" && `${t("friendsList.sectionAllFriends")} — ${filtered.length}`}
+          {tab === "pending" && `${t("friendsList.sectionPending")} — ${filtered.length}`}
+          {tab === "blocked" && `${t("friendsList.sectionBlocked")} — ${blockedUserIds.length}`}
         </div>
 
-        {loading && <div className="friends-empty">Loading...</div>}
+        {loading && <div className="friends-empty">{t("friendsList.loading")}</div>}
 
         {!loading && filtered.length === 0 && tab !== "blocked" && (
           <div className="friends-empty">
-            {tab === "online" && "No friends online right now."}
-            {tab === "all" && "You haven't added any friends yet."}
-            {tab === "pending" && "No pending friend requests."}
+            {tab === "online" && t("friendsList.emptyOnline")}
+            {tab === "all" && t("friendsList.emptyAll")}
+            {tab === "pending" && t("friendsList.emptyPending")}
           </div>
         )}
 
         {tab === "blocked" && blockedUserIds.length === 0 && (
-          <div className="friends-empty">No blocked users.</div>
+          <div className="friends-empty">{t("friendsList.emptyBlocked")}</div>
         )}
 
         <div className="friend-list">
@@ -192,9 +194,9 @@ export default function FriendsList() {
 
       {confirmRemove && (
         <ConfirmDialog
-          title="Remove Friend"
-          message={`Are you sure you want to remove ${confirmRemove.name} as a friend?`}
-          confirmLabel="Remove Friend"
+          title={t("friendsList.confirm.removeTitle")}
+          message={t("friendsList.confirm.removeMessage", { name: confirmRemove.name })}
+          confirmLabel={t("friendsList.confirm.removeLabel")}
           danger
           onConfirm={() => {
             removeFriend(confirmRemove.id);
@@ -258,6 +260,7 @@ function FriendRow({
   onContextMenu: (e: React.MouseEvent) => void;
   onInviteToServer: () => void;
 }) {
+  const { t } = useTranslation();
   const startDm = useChatStore((s) => s.startDm);
   const displayName = friend.display_name || friend.username;
 
@@ -273,23 +276,23 @@ function FriendRow({
           <span className="friend-username">
             {friend.status === "pending"
               ? friend.is_incoming
-                ? "Incoming Friend Request"
-                : "Outgoing Friend Request"
+                ? t("friendsList.incomingFriendRequest")
+                : t("friendsList.outgoingFriendRequest")
               : isOnline
-                ? "Online"
-                : "Offline"}
+                ? t("friendsList.online")
+                : t("friendsList.offline")}
           </span>
         </div>
       </div>
       <div className="friend-actions">
         {friend.status === "pending" && friend.is_incoming && (
           <>
-            <button className="friend-action-btn accept" onClick={onAccept} title="Accept" aria-label="Accept friend request">
+            <button className="friend-action-btn accept" onClick={onAccept} title={t("friendsList.acceptTitle")} aria-label={t("friendsList.acceptAriaLabel")}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
               </svg>
             </button>
-            <button className="friend-action-btn decline" onClick={onDecline} title="Decline" aria-label="Decline friend request">
+            <button className="friend-action-btn decline" onClick={onDecline} title={t("friendsList.declineTitle")} aria-label={t("friendsList.declineAriaLabel")}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
               </svg>
@@ -301,14 +304,16 @@ function FriendRow({
             <button
               className="friend-action-btn message"
               onClick={() => startDm(friend.username).catch(() => {})}
-              title="Message"
-              aria-label="Send message"
+              title={t("friendsList.messageTitle")}
+              aria-label={t("friendsList.messageAriaLabel")}
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" />
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <circle cx="12" cy="5" r="2" />
+                <circle cx="12" cy="12" r="2" />
+                <circle cx="12" cy="19" r="2" />
               </svg>
             </button>
-            <button className="friend-action-btn decline" onClick={onRemove} title="Remove Friend" aria-label="Remove friend">
+            <button className="friend-action-btn decline" onClick={onRemove} title={t("friendsList.removeFriendTitle")} aria-label={t("friendsList.removeFriendAriaLabel")}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
               </svg>
@@ -316,7 +321,7 @@ function FriendRow({
           </>
         )}
         {friend.status === "pending" && !friend.is_incoming && (
-          <button className="friend-action-btn decline" onClick={onRemove} title="Cancel Request" aria-label="Cancel friend request">
+          <button className="friend-action-btn decline" onClick={onRemove} title={t("friendsList.cancelRequestTitle")} aria-label={t("friendsList.cancelRequestAriaLabel")}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
             </svg>
@@ -346,6 +351,7 @@ function FriendContextMenu({
   onRemove: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
 
@@ -371,30 +377,30 @@ function FriendContextMenu({
       onClick={(e) => e.stopPropagation()}
       onKeyDown={handleKeyDown}
       role="menu"
-      aria-label="Friend options"
+      aria-label={t("friendsList.contextMenu.ariaLabel")}
       tabIndex={-1}
     >
       {isAccepted && (
         <button role="menuitem" tabIndex={-1} onClick={onMessage}>
-          Message
+          {t("friendsList.contextMenu.message")}
         </button>
       )}
       {isAccepted && hasServers && (
         <button role="menuitem" tabIndex={-1} onClick={onInviteToServer}>
-          Invite to Server
+          {t("friendsList.contextMenu.inviteToServer")}
         </button>
       )}
       {isAccepted && (
         <>
           <div className="context-divider" role="separator" />
           <button role="menuitem" tabIndex={-1} className="danger" onClick={onRemove}>
-            Remove Friend
+            {t("friendsList.contextMenu.removeFriend")}
           </button>
         </>
       )}
       {friend.status === "pending" && (
         <button role="menuitem" tabIndex={-1} className="danger" onClick={onRemove}>
-          {friend.is_incoming ? "Decline Request" : "Cancel Request"}
+          {friend.is_incoming ? t("friendsList.contextMenu.declineRequest") : t("friendsList.contextMenu.cancelRequest")}
         </button>
       )}
     </div>

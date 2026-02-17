@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export default function EditMemberRolesModal({ serverId, userId, username, onClose, onChanged }: Props) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef);
@@ -35,7 +37,7 @@ export default function EditMemberRolesModal({ serverId, userId, username, onClo
       setAllRoles(roles.filter((r) => !r.is_default));
       setMemberRoleIds(new Set((profile.roles || []).map((r) => r.id)));
     } catch (err: any) {
-      setError(err.message || "Failed to load roles");
+      setError(err.message || t("editMemberRoles.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -63,22 +65,22 @@ export default function EditMemberRolesModal({ serverId, userId, username, onClo
       setSavedRoleId(roleId);
       setTimeout(() => setSavedRoleId(null), 1500);
     } catch (err: any) {
-      setError(err.message || "Failed to update role");
+      setError(err.message || t("editMemberRoles.updateFailed"));
     }
   }
 
   return (
     <div className="modal-overlay" onClick={onClose} role="presentation">
       <div className="modal-dialog edit-roles-modal" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="edit-roles-title">
-        <h3 className="modal-title" id="edit-roles-title">Edit Roles</h3>
-        <p className="edit-roles-subtitle">Manage roles for <strong>{username}</strong></p>
+        <h3 className="modal-title" id="edit-roles-title">{t("editMemberRoles.title")}</h3>
+        <p className="edit-roles-subtitle">{t("editMemberRoles.subtitle", { username })}</p>
 
         {error && <div className="error-small">{error}</div>}
 
         {loading ? (
-          <div className="edit-roles-loading">Loading roles...</div>
+          <div className="edit-roles-loading">{t("editMemberRoles.loadingRoles")}</div>
         ) : allRoles.length === 0 ? (
-          <div className="edit-roles-empty">No roles to assign. Create roles first.</div>
+          <div className="edit-roles-empty">{t("editMemberRoles.noRoles")}</div>
         ) : (
           <div className="edit-roles-list">
             {allRoles.map((role) => (
@@ -93,7 +95,7 @@ export default function EditMemberRolesModal({ serverId, userId, username, onClo
                 )}
                 <span>{role.name}</span>
                 {savedRoleId === role.id && (
-                  <span className="role-saved-indicator">Updated</span>
+                  <span className="role-saved-indicator">{t("editMemberRoles.updated")}</span>
                 )}
               </label>
             ))}
@@ -102,7 +104,7 @@ export default function EditMemberRolesModal({ serverId, userId, username, onClo
 
         <div className="modal-footer">
           <button type="button" className="btn-primary modal-submit" onClick={onClose}>
-            Done
+            {t("editMemberRoles.done")}
           </button>
         </div>
       </div>

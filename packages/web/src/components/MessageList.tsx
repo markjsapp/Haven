@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { Permission } from "@haven/core";
@@ -44,15 +45,15 @@ function stripEmbeddedImageUrls(text: string, previews?: LinkPreview[]): string 
 
 // ─── Date Divider Helpers ─────────────────────────────
 
-function formatDateDivider(dateStr: string): string {
+function formatDateDivider(dateStr: string, t: (key: string) => string): string {
   const date = new Date(dateStr);
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today.getTime() - 86400000);
   const msgDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
-  if (msgDate.getTime() === today.getTime()) return "Today";
-  if (msgDate.getTime() === yesterday.getTime()) return "Yesterday";
+  if (msgDate.getTime() === today.getTime()) return t("messageList.dateDivider.today");
+  if (msgDate.getTime() === yesterday.getTime()) return t("messageList.dateDivider.yesterday");
 
   return date.toLocaleDateString(undefined, {
     year: "numeric",
@@ -74,6 +75,7 @@ function isDifferentDay(a: string, b: string): boolean {
 // ─── Component ────────────────────────────────────────
 
 export default function MessageList() {
+  const { t } = useTranslation();
   const currentChannelId = useChatStore((s) => s.currentChannelId);
   const messages = useChatStore((s) => s.messages);
   const channels = useChatStore((s) => s.channels);
@@ -86,6 +88,8 @@ export default function MessageList() {
   const blockedUserIds = useChatStore((s) => s.blockedUserIds);
   const startReply = useChatStore((s) => s.startReply);
   const pinnedMessageIds = useChatStore((s) => s.pinnedMessageIds);
+  const pinMessage = useChatStore((s) => s.pinMessage);
+  const unpinMessage = useChatStore((s) => s.unpinMessage);
   const userRoleColors = useChatStore((s) => s.userRoleColors);
   const customEmojis = useChatStore((s) => s.customEmojis);
   const newMessageDividers = useChatStore((s) => s.newMessageDividers);
@@ -168,7 +172,7 @@ export default function MessageList() {
   }, [user, nameMap, userNames]);
 
   return (
-    <div className="message-list" role="log" aria-live="polite" aria-label="Messages">
+    <div className="message-list" role="log" aria-live="polite" aria-relevant="additions text" aria-label={t("messageList.ariaLabel")}>
       {/* Conversation start marker */}
       {currentChannel && channelDisplay && (
         <div className="conversation-start">
@@ -208,14 +212,14 @@ export default function MessageList() {
 
         const dateDividerEl = showDateDivider ? (
           <div className="date-divider" key={`divider-${msg.id}`}>
-            <span className="date-divider-text">{formatDateDivider(msg.timestamp)}</span>
+            <span className="date-divider-text">{formatDateDivider(msg.timestamp, t)}</span>
           </div>
         ) : null;
 
         const showNewDivider = i === newDividerIndex && i > 0;
         const newDividerEl = showNewDivider ? (
           <div className="new-messages-divider" key={`new-${msg.id}`}>
-            <span className="new-messages-divider-label">NEW</span>
+            <span className="new-messages-divider-label">{t("messageList.newDivider")}</span>
           </div>
         ) : null;
 
@@ -225,13 +229,13 @@ export default function MessageList() {
           try {
             const data = JSON.parse(msg.text);
             const name = data.username ?? data.user_id?.slice(0, 8) ?? "Someone";
-            if (data.event === "member_joined") systemContent = `${name} joined the server`;
-            else if (data.event === "member_left") systemContent = `${name} left the group`;
-            else if (data.event === "member_kicked") systemContent = `${name} was kicked from the server`;
+            if (data.event === "member_joined") systemContent = t("messageList.system.joinedServer", { name });
+            else if (data.event === "member_left") systemContent = t("messageList.system.leftGroup", { name });
+            else if (data.event === "member_kicked") systemContent = t("messageList.system.kicked", { name });
             else if (data.event === "message_pinned") {
-              systemContent = <>{name} pinned {data.message_id ? <button className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>a message</button> : "a message"}</>;
+              systemContent = <>{name} {t("messageList.system.pinnedMessage")} {data.message_id ? <button className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>{t("messageList.system.aMessage")}</button> : t("messageList.system.aMessage")}</>;
             } else if (data.event === "message_unpinned") {
-              systemContent = <>{name} unpinned {data.message_id ? <button className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>a message</button> : "a message"}</>;
+              systemContent = <>{name} {t("messageList.system.unpinnedMessage")} {data.message_id ? <button className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>{t("messageList.system.aMessage")}</button> : t("messageList.system.aMessage")}</>;
             } else systemContent = `${name} — ${data.event}`;
           } catch { /* use raw text */ }
 
@@ -241,11 +245,11 @@ export default function MessageList() {
               {newDividerEl}
               <div className="system-message" id={`msg-${msg.id}`}>
                 <span className="system-message-text">{systemContent}</span>
-                <span className="system-message-time">
+                <time className="system-message-time" dateTime={new Date(msg.timestamp).toISOString()}>
                   {new Date(msg.timestamp).toLocaleString([], {
                     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
                   })}
-                </span>
+                </time>
               </div>
             </Fragment>
           );
@@ -277,14 +281,14 @@ export default function MessageList() {
                 <div className="message-avatar">?</div>
                 <div className="message-content">
                   <div className="message-meta">
-                    <span className="message-sender">Blocked User</span>
-                    <span className="message-time">
+                    <span className="message-sender">{t("messageList.blockedUser")}</span>
+                    <time className="message-time" dateTime={new Date(msg.timestamp).toISOString()}>
                       {new Date(msg.timestamp).toLocaleString([], {
                         month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
                       })}
-                    </span>
+                    </time>
                   </div>
-                  <div className="message-text">Message from a blocked user</div>
+                  <div className="message-text">{t("messageList.blockedUserMessage")}</div>
                 </div>
               </div>
             </Fragment>
@@ -332,7 +336,7 @@ export default function MessageList() {
                 {msg.replyToId && !repliedMsg && (
                   <div className="reply-preview reply-preview-unknown">
                     <span className="reply-preview-bar" />
-                    <span className="reply-preview-text">Original message not loaded</span>
+                    <span className="reply-preview-text">{t("messageList.replyPreview.notLoaded")}</span>
                   </div>
                 )}
                 {!isGrouped && (
@@ -344,17 +348,17 @@ export default function MessageList() {
                     >
                       {senderName}
                     </span>
-                    <span className="message-time">
+                    <time className="message-time" dateTime={new Date(msg.timestamp).toISOString()}>
                       {new Date(msg.timestamp).toLocaleString([], {
                         month: "short",
                         day: "numeric",
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
-                    </span>
-                    {msg.edited && <span className="message-edited">(edited)</span>}
+                    </time>
+                    {msg.edited && <span className="message-edited">{t("messageList.edited")}</span>}
                     {isPinned && (
-                      <span className="message-pin-indicator" title="Pinned">
+                      <span className="message-pin-indicator" title={t("messageList.pinned")}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                           <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
                         </svg>
@@ -405,7 +409,7 @@ export default function MessageList() {
                       type="button"
                       className="reaction-pill reaction-add-btn"
                       onClick={() => setReactionPickerMsgId(msg.id)}
-                      title="Add Reaction"
+                      title={t("messageList.actions.addReactionTitle")}
                     >
                       +
                     </button>
@@ -418,8 +422,8 @@ export default function MessageList() {
                   type="button"
                   className="message-action-btn"
                   onClick={() => startReply(msg.id)}
-                  title="Reply"
-                  aria-label="Reply"
+                  title={t("messageList.actions.replyTitle")}
+                  aria-label={t("messageList.actions.replyAriaLabel")}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
@@ -432,11 +436,23 @@ export default function MessageList() {
                   onClick={() => setReactionPickerMsgId(
                     reactionPickerMsgId === msg.id ? null : msg.id
                   )}
-                  title="Add Reaction"
-                  aria-label="Add Reaction"
+                  title={t("messageList.actions.addReactionTitle")}
+                  aria-label={t("messageList.actions.addReactionAriaLabel")}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
+                  </svg>
+                </button>
+                {/* Pin/Unpin button */}
+                <button
+                  type="button"
+                  className="message-action-btn"
+                  onClick={() => isPinned ? unpinMessage(msg.id) : pinMessage(msg.id)}
+                  title={isPinned ? t("messageList.actions.unpinTitle") : t("messageList.actions.pinTitle")}
+                  aria-label={isPinned ? t("messageList.actions.unpinAriaLabel") : t("messageList.actions.pinAriaLabel")}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
                   </svg>
                 </button>
                 {isOwn && (
@@ -444,8 +460,8 @@ export default function MessageList() {
                     type="button"
                     className="message-action-btn"
                     onClick={() => startEditing(msg.id)}
-                    title="Edit"
-                    aria-label="Edit"
+                    title={t("messageList.actions.editTitle")}
+                    aria-label={t("messageList.actions.editAriaLabel")}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 000-1.42l-2.34-2.34a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" />
@@ -457,8 +473,8 @@ export default function MessageList() {
                     type="button"
                     className="message-action-btn message-action-danger"
                     onClick={() => setDeletingMessageId(msg.id)}
-                    title="Delete"
-                    aria-label="Delete"
+                    title={t("messageList.actions.deleteTitle")}
+                    aria-label={t("messageList.actions.deleteAriaLabel")}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                       <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
@@ -483,9 +499,9 @@ export default function MessageList() {
       <div ref={bottomRef} style={{ minHeight: 24, flexShrink: 0 }} />
       {deletingMessageId && (
         <ConfirmDialog
-          title="Delete Message"
-          message="Are you sure you want to delete this message? This cannot be undone."
-          confirmLabel="Delete"
+          title={t("messageList.confirm.deleteTitle")}
+          message={t("messageList.confirm.deleteMessage")}
+          confirmLabel={t("messageList.confirm.deleteLabel")}
           danger
           onConfirm={() => {
             deleteMessage(deletingMessageId);
@@ -540,6 +556,7 @@ interface InviteCardProps {
 }
 
 function InviteCard({ invite, senderId }: InviteCardProps) {
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const servers = useChatStore((s) => s.servers);
   const [joining, setJoining] = useState(false);
@@ -583,15 +600,15 @@ function InviteCard({ invite, senderId }: InviteCardProps) {
           )}
         </div>
         <div className="invite-card-info">
-          <span className="invite-card-label">Server Invite</span>
+          <span className="invite-card-label">{t("messageList.inviteCard.serverInvite")}</span>
           <span className="invite-card-name">{invite.server_name}</span>
         </div>
       </div>
       <div className="invite-card-actions">
         {alreadyMember || joined ? (
-          <span className="invite-card-status joined">Joined</span>
+          <span className="invite-card-status joined">{t("messageList.inviteCard.joined")}</span>
         ) : isSender ? (
-          <span className="invite-card-status waiting">Invite Sent</span>
+          <span className="invite-card-status waiting">{t("messageList.inviteCard.inviteSent")}</span>
         ) : error ? (
           <span className="invite-card-status error">{error}</span>
         ) : (
@@ -601,10 +618,10 @@ function InviteCard({ invite, senderId }: InviteCardProps) {
               onClick={handleAccept}
               disabled={joining}
             >
-              {joining ? "Joining..." : "Accept"}
+              {joining ? t("messageList.inviteCard.joining") : t("messageList.inviteCard.accept")}
             </button>
             <button className="invite-card-btn ignore" disabled>
-              Ignore
+              {t("messageList.inviteCard.ignore")}
             </button>
           </>
         )}

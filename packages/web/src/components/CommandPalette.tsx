@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
@@ -15,6 +16,7 @@ interface PaletteItem {
 }
 
 export default function CommandPalette({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -86,26 +88,26 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
     // Actions
     results.push({
       id: "act-settings",
-      label: "User Settings",
+      label: t("commandPalette.userSettings"),
       category: "actions",
       action: () => { setShowUserSettings(true); onClose(); },
     });
     results.push({
       id: "act-friends",
-      label: "Friends List",
+      label: t("commandPalette.friendsList"),
       category: "actions",
       action: () => { selectServer(null); setShowFriends(true); onClose(); },
     });
     results.push({
       id: "act-members",
-      label: "Toggle Member Sidebar",
+      label: t("commandPalette.toggleMemberSidebar"),
       category: "actions",
       action: () => { toggleMemberSidebar(); onClose(); },
     });
     if (user?.is_instance_admin) {
       results.push({
         id: "act-admin",
-        label: "Admin Dashboard",
+        label: t("commandPalette.adminDashboard"),
         category: "actions",
         action: () => { setShowAdminPanel(true); onClose(); },
       });
@@ -172,10 +174,10 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
   }, []);
 
   const categoryLabels: Record<string, string> = {
-    channels: "Channels",
-    dms: "Direct Messages",
-    servers: "Servers",
-    actions: "Actions",
+    channels: t("commandPalette.categoryChannels"),
+    dms: t("commandPalette.categoryDirectMessages"),
+    servers: t("commandPalette.categoryServers"),
+    actions: t("commandPalette.categoryActions"),
   };
 
   let globalIndex = 0;
@@ -191,17 +193,17 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
             ref={inputRef}
             className="command-palette-input"
             type="text"
-            placeholder="Where would you like to go?"
+            placeholder={t("commandPalette.placeholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            aria-label="Search"
+            aria-label={t("commandPalette.searchAriaLabel")}
             autoComplete="off"
           />
         </div>
         <div className="command-palette-results" ref={listRef} role="listbox">
           {flatItems.length === 0 && (
-            <div className="command-palette-empty">No results found</div>
+            <div className="command-palette-empty">{t("commandPalette.noResults")}</div>
           )}
           {Object.entries(grouped).map(([cat, catItems]) => (
             <div key={cat} className="command-palette-group">

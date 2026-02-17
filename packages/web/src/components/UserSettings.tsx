@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore, type Theme } from "../store/ui.js";
 import { useVoiceStore } from "../store/voice.js";
@@ -18,6 +19,7 @@ import {
 type Tab = "account" | "profile" | "privacy" | "voice" | "appearance" | "accessibility" | "security";
 
 export default function UserSettings() {
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const api = useAuthStore((s) => s.api);
   const setShowUserSettings = useUiStore((s) => s.setShowUserSettings);
@@ -38,50 +40,50 @@ export default function UserSettings() {
 
   return (
     <div className="user-settings-overlay" role="presentation">
-      <div className="user-settings-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-label="User Settings">
+      <div className="user-settings-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("userSettings.ariaLabel")}>
         <nav className="user-settings-sidebar">
-          <div className="user-settings-sidebar-header">User Settings</div>
+          <div className="user-settings-sidebar-header">{t("userSettings.sidebarHeader")}</div>
           <button
             className={`user-settings-nav-item ${tab === "account" ? "active" : ""}`}
             onClick={() => setTab("account")}
           >
-            My Account
+            {t("userSettings.tab.myAccount")}
           </button>
           <button
             className={`user-settings-nav-item ${tab === "profile" ? "active" : ""}`}
             onClick={() => setTab("profile")}
           >
-            Profile
+            {t("userSettings.tab.profile")}
           </button>
           <button
             className={`user-settings-nav-item ${tab === "privacy" ? "active" : ""}`}
             onClick={() => setTab("privacy")}
           >
-            Privacy
+            {t("userSettings.tab.privacy")}
           </button>
           <button
             className={`user-settings-nav-item ${tab === "voice" ? "active" : ""}`}
             onClick={() => setTab("voice")}
           >
-            Voice & Audio
+            {t("userSettings.tab.voiceAudio")}
           </button>
           <button
             className={`user-settings-nav-item ${tab === "appearance" ? "active" : ""}`}
             onClick={() => setTab("appearance")}
           >
-            Appearance
+            {t("userSettings.tab.appearance")}
           </button>
           <button
             className={`user-settings-nav-item ${tab === "security" ? "active" : ""}`}
             onClick={() => setTab("security")}
           >
-            Security & Backup
+            {t("userSettings.tab.securityBackup")}
           </button>
           <button
             className={`user-settings-nav-item ${tab === "accessibility" ? "active" : ""}`}
             onClick={() => setTab("accessibility")}
           >
-            Accessibility
+            {t("userSettings.tab.accessibility")}
           </button>
           <div className="user-settings-sidebar-divider" />
           <button
@@ -91,19 +93,19 @@ export default function UserSettings() {
               setShowUserSettings(false);
             }}
           >
-            Log Out
+            {t("userSettings.logOut")}
           </button>
         </nav>
         <div className="user-settings-content">
           <div className="user-settings-content-header">
-            <h2>{tab === "account" ? "My Account" : tab === "profile" ? "Profile" : tab === "privacy" ? "Privacy" : tab === "voice" ? "Voice & Audio" : tab === "appearance" ? "Appearance" : tab === "security" ? "Security & Backup" : "Accessibility"}</h2>
-            <button className="settings-esc-close" onClick={() => setShowUserSettings(false)} aria-label="Close settings">
+            <h2>{tab === "account" ? t("userSettings.tab.myAccount") : tab === "profile" ? t("userSettings.tab.profile") : tab === "privacy" ? t("userSettings.tab.privacy") : tab === "voice" ? t("userSettings.tab.voiceAudio") : tab === "appearance" ? t("userSettings.tab.appearance") : tab === "security" ? t("userSettings.tab.securityBackup") : t("userSettings.tab.accessibility")}</h2>
+            <button className="settings-esc-close" onClick={() => setShowUserSettings(false)} aria-label={t("userSettings.closeAriaLabel")}>
               <div className="settings-esc-circle">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
                 </svg>
               </div>
-              <span className="settings-esc-label">ESC</span>
+              <span className="settings-esc-label">{t("userSettings.escLabel")}</span>
             </button>
           </div>
           <div className="user-settings-content-body">
@@ -124,6 +126,7 @@ export default function UserSettings() {
 // ─── My Account Tab ──────────────────────────────
 
 function AccountTab() {
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const api = useAuthStore((s) => s.api);
 
@@ -145,15 +148,15 @@ function AccountTab() {
     setPwError("");
     setPwSuccess("");
     if (!currentPassword || !newPassword) {
-      setPwError("All fields are required");
+      setPwError(t("userSettings.account.allFieldsRequired"));
       return;
     }
     if (newPassword.length < 8) {
-      setPwError("New password must be at least 8 characters");
+      setPwError(t("userSettings.account.passwordMinLength"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPwError("New passwords do not match");
+      setPwError(t("userSettings.account.passwordsDoNotMatch"));
       return;
     }
     setPwLoading(true);
@@ -162,12 +165,12 @@ function AccountTab() {
         current_password: currentPassword,
         new_password: newPassword,
       });
-      setPwSuccess("Password changed successfully");
+      setPwSuccess(t("userSettings.account.passwordChanged"));
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err: any) {
-      setPwError(err.message || "Failed to change password");
+      setPwError(err.message || t("userSettings.account.failedChangePassword"));
     } finally {
       setPwLoading(false);
     }
@@ -178,22 +181,22 @@ function AccountTab() {
       <div className="settings-card">
         <div className="settings-card-row">
           <div>
-            <div className="settings-label">USERNAME</div>
+            <div className="settings-label">{t("userSettings.account.usernameLabel")}</div>
             <div className="settings-value">{user.username}</div>
           </div>
         </div>
         <div className="settings-card-row">
           <div>
-            <div className="settings-label">DISPLAY NAME</div>
+            <div className="settings-label">{t("userSettings.account.displayNameLabel")}</div>
             <div className="settings-value">{user.display_name || user.username}</div>
           </div>
         </div>
       </div>
 
-      <div className="settings-section-title">Change Password</div>
+      <div className="settings-section-title">{t("userSettings.account.changePassword")}</div>
       <div className="settings-fields">
         <label className="settings-field-label">
-          Current Password
+          {t("userSettings.account.currentPassword")}
           <input
             className="settings-input"
             type="password"
@@ -203,7 +206,7 @@ function AccountTab() {
           />
         </label>
         <label className="settings-field-label">
-          New Password
+          {t("userSettings.account.newPassword")}
           <input
             className="settings-input"
             type="password"
@@ -213,7 +216,7 @@ function AccountTab() {
           />
         </label>
         <label className="settings-field-label">
-          Confirm New Password
+          {t("userSettings.account.confirmNewPassword")}
           <input
             className="settings-input"
             type="password"
@@ -229,34 +232,34 @@ function AccountTab() {
           onClick={handleChangePassword}
           disabled={pwLoading}
         >
-          {pwLoading ? "Changing..." : "Change Password"}
+          {pwLoading ? t("userSettings.account.changing") : t("userSettings.account.changePasswordBtn")}
         </button>
       </div>
 
-      <div className="settings-section-title" style={{ marginTop: 32 }}>Delete Account</div>
+      <div className="settings-section-title" style={{ marginTop: 32 }}>{t("userSettings.account.deleteAccount")}</div>
       <p className="settings-description">
-        Permanently delete your account and all associated data. This action cannot be undone.
+        {t("userSettings.account.deleteAccountDesc")}
       </p>
       {!showDeleteConfirm ? (
         <button
           className="btn-danger"
           onClick={() => setShowDeleteConfirm(true)}
         >
-          Delete Account
+          {t("userSettings.account.deleteAccountBtn")}
         </button>
       ) : (
         <div className="delete-account-confirm">
           <p className="settings-description" style={{ color: "var(--red)", fontWeight: 600 }}>
-            Are you sure? All your data, servers you own, and messages will be permanently deleted.
+            {t("userSettings.account.deleteConfirmWarning")}
           </p>
           <label className="settings-field-label">
-            Confirm Password
+            {t("userSettings.account.confirmPassword")}
             <input
               className="settings-input"
               type="password"
               value={deletePassword}
               onChange={(e) => { setDeletePassword(e.target.value); setDeleteError(""); }}
-              placeholder="Enter your password to confirm"
+              placeholder={t("userSettings.account.confirmPasswordPlaceholder")}
               autoComplete="current-password"
             />
           </label>
@@ -266,7 +269,7 @@ function AccountTab() {
               className="btn-secondary"
               onClick={() => { setShowDeleteConfirm(false); setDeletePassword(""); setDeleteError(""); }}
             >
-              Cancel
+              {t("userSettings.account.cancel")}
             </button>
             <button
               className="btn-danger"
@@ -278,13 +281,13 @@ function AccountTab() {
                   await api.deleteAccount(deletePassword);
                   useAuthStore.getState().logout();
                 } catch (err: any) {
-                  setDeleteError(err.message || "Failed to delete account");
+                  setDeleteError(err.message || t("userSettings.account.failedDeleteAccount"));
                 } finally {
                   setDeleteLoading(false);
                 }
               }}
             >
-              {deleteLoading ? "Deleting..." : "Permanently Delete Account"}
+              {deleteLoading ? t("userSettings.account.deleting") : t("userSettings.account.permanentlyDeleteAccount")}
             </button>
           </div>
         </div>
@@ -296,6 +299,7 @@ function AccountTab() {
 // ─── Profile Tab ────────────────────────────────────
 
 function ProfileTab() {
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const api = useAuthStore((s) => s.api);
 
@@ -327,9 +331,9 @@ function ProfileTab() {
       useAuthStore.setState({
         user: { ...user!, ...updated },
       });
-      setSuccess("Profile updated");
+      setSuccess(t("userSettings.profile.profileUpdated"));
     } catch (err: any) {
-      setError(err.message || "Failed to update profile");
+      setError(err.message || t("userSettings.profile.failedUpdateProfile"));
     } finally {
       setSaving(false);
     }
@@ -339,7 +343,7 @@ function ProfileTab() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      setError("Avatar must be under 2MB");
+      setError(t("userSettings.profile.avatarTooLarge"));
       return;
     }
     setError("");
@@ -350,9 +354,9 @@ function ProfileTab() {
       useAuthStore.setState({
         user: { ...user!, ...updated },
       });
-      setSuccess("Avatar updated");
+      setSuccess(t("userSettings.profile.avatarUpdated"));
     } catch (err: any) {
-      setError(err.message || "Failed to upload avatar");
+      setError(err.message || t("userSettings.profile.failedUploadAvatar"));
     } finally {
       setAvatarUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -363,7 +367,7 @@ function ProfileTab() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) {
-      setError("Banner must be under 8MB");
+      setError(t("userSettings.profile.bannerTooLarge"));
       return;
     }
     setError("");
@@ -374,9 +378,9 @@ function ProfileTab() {
       useAuthStore.setState({
         user: { ...user!, ...updated },
       });
-      setSuccess("Banner updated");
+      setSuccess(t("userSettings.profile.bannerUpdated"));
     } catch (err: any) {
-      setError(err.message || "Failed to upload banner");
+      setError(err.message || t("userSettings.profile.failedUploadBanner"));
     } finally {
       setBannerUploading(false);
       if (bannerInputRef.current) bannerInputRef.current.value = "";
@@ -392,7 +396,7 @@ function ProfileTab() {
         style={user.banner_url ? { backgroundImage: `url(${user.banner_url})` } : undefined}
       >
         <div className="settings-banner-overlay">
-          {bannerUploading ? "Uploading..." : "Change Banner"}
+          {bannerUploading ? t("userSettings.profile.uploading") : t("userSettings.profile.changeBanner")}
         </div>
       </div>
       <input
@@ -411,7 +415,7 @@ function ProfileTab() {
             size={80}
           />
           <div className="settings-avatar-overlay">
-            {avatarUploading ? "Uploading..." : "Change Avatar"}
+            {avatarUploading ? t("userSettings.profile.uploading") : t("userSettings.profile.changeAvatar")}
           </div>
         </div>
         <input
@@ -425,7 +429,7 @@ function ProfileTab() {
 
       <div className="settings-fields">
         <label className="settings-field-label">
-          Display Name
+          {t("userSettings.profile.displayName")}
           <input
             className="settings-input"
             type="text"
@@ -436,19 +440,19 @@ function ProfileTab() {
           />
         </label>
         <label className="settings-field-label">
-          About Me
+          {t("userSettings.profile.aboutMe")}
           <textarea
             className="settings-textarea"
             value={aboutMe}
             onChange={(e) => setAboutMe(e.target.value)}
             maxLength={190}
             rows={3}
-            placeholder="Tell us about yourself"
+            placeholder={t("userSettings.profile.aboutMePlaceholder")}
           />
           <span className="settings-char-count">{aboutMe.length}/190</span>
         </label>
         <div className="settings-field-label">
-          Custom Status
+          {t("userSettings.profile.customStatus")}
           <div className="settings-input-with-emoji">
             <input
               ref={statusInputRef}
@@ -457,15 +461,15 @@ function ProfileTab() {
               value={customStatus}
               onChange={(e) => setCustomStatus(e.target.value)}
               maxLength={128}
-              placeholder="What's happening?"
+              placeholder={t("userSettings.profile.customStatusPlaceholder")}
             />
             <div className="settings-emoji-btn-wrap">
               <button
                 type="button"
                 className="create-channel-emoji-btn"
                 onClick={() => setShowStatusEmoji(!showStatusEmoji)}
-                title="Add emoji"
-                aria-label="Add emoji to status"
+                title={t("userSettings.profile.addEmojiTitle")}
+                aria-label={t("userSettings.profile.addEmojiAriaLabel")}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
@@ -498,7 +502,7 @@ function ProfileTab() {
           onClick={handleSaveProfile}
           disabled={saving}
         >
-          {saving ? "Saving..." : "Save Changes"}
+          {saving ? t("userSettings.profile.saving") : t("userSettings.profile.saveChanges")}
         </button>
       </div>
     </div>
@@ -508,6 +512,7 @@ function ProfileTab() {
 // ─── Privacy Tab ────────────────────────────────────
 
 function PrivacyTab() {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const user = useAuthStore((s) => s.user);
 
@@ -544,20 +549,20 @@ function PrivacyTab() {
   }
 
   if (loading) {
-    return <div className="settings-section"><p className="settings-loading">Loading...</p></div>;
+    return <div className="settings-section"><p className="settings-loading">{t("userSettings.privacy.loading")}</p></div>;
   }
 
   return (
     <div className="settings-section">
-      <div className="settings-section-title">Direct Message Privacy</div>
+      <div className="settings-section-title">{t("userSettings.privacy.dmPrivacy")}</div>
       <p className="settings-description">
-        Choose who can send you direct messages.
+        {t("userSettings.privacy.dmPrivacyDesc")}
       </p>
       <div className="settings-select-group">
         {[
-          { value: "everyone", label: "Everyone" },
-          { value: "friends_only", label: "Friends Only" },
-          { value: "server_members", label: "Server Members" },
+          { value: "everyone", label: t("userSettings.privacy.everyone") },
+          { value: "friends_only", label: t("userSettings.privacy.friendsOnly") },
+          { value: "server_members", label: t("userSettings.privacy.serverMembers") },
         ].map((opt) => (
           <label key={opt.value} className="settings-radio-label">
             <input
@@ -573,10 +578,10 @@ function PrivacyTab() {
       </div>
 
       <div className="settings-section-title" style={{ marginTop: 24 }}>
-        Blocked Users {blockedUsers.length > 0 && `(${blockedUsers.length})`}
+        {t("userSettings.privacy.blockedUsers")} {blockedUsers.length > 0 && `(${blockedUsers.length})`}
       </div>
       {blockedUsers.length === 0 ? (
-        <p className="settings-description">You haven't blocked anyone.</p>
+        <p className="settings-description">{t("userSettings.privacy.noBlockedUsers")}</p>
       ) : (
         <div className="settings-blocked-list">
           {blockedUsers.map((b) => (
@@ -594,7 +599,7 @@ function PrivacyTab() {
                 className="btn-secondary settings-unblock-btn"
                 onClick={() => handleUnblock(b.user_id)}
               >
-                Unblock
+                {t("userSettings.privacy.unblock")}
               </button>
             </div>
           ))}
@@ -607,6 +612,7 @@ function PrivacyTab() {
 // ─── Voice & Audio Tab ──────────────────────────────
 
 function VoiceTab() {
+  const { t } = useTranslation();
   const {
     inputDeviceId,
     outputDeviceId,
@@ -689,13 +695,13 @@ function VoiceTab() {
 
   return (
     <div className="settings-section">
-      <div className="settings-section-title">Input Device</div>
+      <div className="settings-section-title">{t("userSettings.voice.inputDevice")}</div>
       <select
         className="settings-select"
         value={inputDeviceId}
         onChange={(e) => setInputDevice(e.target.value)}
       >
-        <option value="">Default</option>
+        <option value="">{t("userSettings.voice.default")}</option>
         {inputDevices.map((d) => (
           <option key={d.deviceId} value={d.deviceId}>
             {d.label || `Microphone (${d.deviceId.slice(0, 8)})`}
@@ -703,7 +709,7 @@ function VoiceTab() {
         ))}
       </select>
 
-      <div className="settings-section-title">Input Volume</div>
+      <div className="settings-section-title">{t("userSettings.voice.inputVolume")}</div>
       <div className="settings-slider-row">
         <input
           type="range"
@@ -721,7 +727,7 @@ function VoiceTab() {
           className="btn-secondary"
           onClick={testing ? stopMicTest : startMicTest}
         >
-          {testing ? "Stop Test" : "Test Microphone"}
+          {testing ? t("userSettings.voice.stopTest") : t("userSettings.voice.testMicrophone")}
         </button>
         {testing && (
           <div className="mic-level-bar">
@@ -730,13 +736,13 @@ function VoiceTab() {
         )}
       </div>
 
-      <div className="settings-section-title" style={{ marginTop: 24 }}>Output Device</div>
+      <div className="settings-section-title" style={{ marginTop: 24 }}>{t("userSettings.voice.outputDevice")}</div>
       <select
         className="settings-select"
         value={outputDeviceId}
         onChange={(e) => setOutputDevice(e.target.value)}
       >
-        <option value="">Default</option>
+        <option value="">{t("userSettings.voice.default")}</option>
         {outputDevices.map((d) => (
           <option key={d.deviceId} value={d.deviceId}>
             {d.label || `Speaker (${d.deviceId.slice(0, 8)})`}
@@ -744,7 +750,7 @@ function VoiceTab() {
         ))}
       </select>
 
-      <div className="settings-section-title">Output Volume</div>
+      <div className="settings-section-title">{t("userSettings.voice.outputVolume")}</div>
       <div className="settings-slider-row">
         <input
           type="range"
@@ -757,14 +763,14 @@ function VoiceTab() {
         <span className="settings-slider-value">{Math.round(outputVolume * 100)}%</span>
       </div>
 
-      <div className="settings-section-title" style={{ marginTop: 24 }}>Voice Processing</div>
+      <div className="settings-section-title" style={{ marginTop: 24 }}>{t("userSettings.voice.voiceProcessing")}</div>
       <label className="settings-toggle-label">
         <input
           type="checkbox"
           checked={echoCancellation}
           onChange={(e) => setEchoCancellation(e.target.checked)}
         />
-        <span>Echo Cancellation</span>
+        <span>{t("userSettings.voice.echoCancellation")}</span>
       </label>
       <label className="settings-toggle-label">
         <input
@@ -772,7 +778,7 @@ function VoiceTab() {
           checked={noiseSuppression}
           onChange={(e) => setNoiseSuppression(e.target.checked)}
         />
-        <span>Noise Suppression</span>
+        <span>{t("userSettings.voice.noiseSuppression")}</span>
       </label>
     </div>
   );
@@ -781,10 +787,17 @@ function VoiceTab() {
 // ─── Security & Backup Tab ──────────────────────────
 
 function SecurityTab() {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
 
   const [backupExists, setBackupExists] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Session management
+  const [sessions, setSessions] = useState<import("@haven/core").SessionResponse[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionError, setSessionError] = useState("");
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   // Change phrase flow
   type Mode = "idle" | "change" | "setup" | "generated";
@@ -810,18 +823,47 @@ function SecurityTab() {
       .catch(() => {
         if (!cancelled) setLoading(false);
       });
+    // Load sessions
+    api.getSessions()
+      .then((s) => { if (!cancelled) setSessions(s); })
+      .catch(() => { if (!cancelled) setSessionError(t("userSettings.security.failedLoadSessions")); })
+      .finally(() => { if (!cancelled) setSessionsLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [api]);
+
+  async function handleRevokeSession(familyId: string) {
+    setRevokingId(familyId);
+    setSessionError("");
+    try {
+      await api.revokeSession(familyId);
+      setSessions((prev) => prev.filter((s) => s.family_id !== familyId));
+    } catch {
+      setSessionError(t("userSettings.security.failedRevokeSession"));
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  async function handleRevokeAllOther() {
+    setSessionError("");
+    const others = sessions.filter((s) => !s.is_current && s.family_id);
+    for (const s of others) {
+      try {
+        await api.revokeSession(s.family_id!);
+      } catch { /* continue */ }
+    }
+    setSessions((prev) => prev.filter((s) => s.is_current));
+  }
 
   async function handleChangePhrase() {
     setError("");
     setSuccess("");
     if (newPhrase.length < 8) {
-      setError("New phrase must be at least 8 characters");
+      setError(t("userSettings.security.changePhrase.phraseMinLength"));
       return;
     }
     if (newPhrase !== confirmPhrase) {
-      setError("New phrases do not match");
+      setError(t("userSettings.security.changePhrase.phrasesDoNotMatch"));
       return;
     }
     setSaving(true);
@@ -829,7 +871,7 @@ function SecurityTab() {
       // If we have a cached phrase, use it; otherwise require the current phrase
       const cached = getCachedPhrase();
       if (!cached && !currentPhrase) {
-        setError("Enter your current security phrase to verify identity");
+        setError(t("userSettings.security.changePhrase.enterCurrentPhrase"));
         setSaving(false);
         return;
       }
@@ -840,14 +882,14 @@ function SecurityTab() {
       // Upload new backup with new phrase
       await uploadBackup(newPhrase);
       cacheSecurityPhrase(newPhrase);
-      setSuccess("Security phrase updated successfully");
+      setSuccess(t("userSettings.security.changePhrase.phraseUpdated"));
       setMode("idle");
       setBackupExists(true);
       setCurrentPhrase("");
       setNewPhrase("");
       setConfirmPhrase("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update. Is the current phrase correct?");
+      setError(e instanceof Error ? e.message : t("userSettings.security.changePhrase.failedUpdate"));
     } finally {
       setSaving(false);
     }
@@ -861,10 +903,10 @@ function SecurityTab() {
       await uploadBackup(phrase);
       cacheSecurityPhrase(phrase);
       setBackupExists(true);
-      setSuccess("Key backup created successfully");
+      setSuccess(t("userSettings.security.setup.backupCreated"));
       setMode("idle");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create backup");
+      setError(e instanceof Error ? e.message : t("userSettings.security.setup.failedCreate"));
     } finally {
       setSaving(false);
     }
@@ -877,35 +919,83 @@ function SecurityTab() {
     try {
       await api.deleteKeyBackup();
       setBackupExists(false);
-      setSuccess("Backup deleted");
+      setSuccess(t("userSettings.security.backupDeleted"));
       setMode("idle");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete backup");
+      setError(e instanceof Error ? e.message : t("userSettings.security.failedDeleteBackup"));
     } finally {
       setSaving(false);
     }
   }
 
   if (loading) {
-    return <div className="settings-section"><p className="settings-loading">Loading...</p></div>;
+    return <div className="settings-section"><p className="settings-loading">{t("userSettings.security.loading")}</p></div>;
   }
 
   return (
+    <>
     <div className="settings-section">
-      <div className="settings-section-title">Key Backup Status</div>
+      <div className="settings-section-title">{t("userSettings.security.activeSessions")}</div>
       <p className="settings-description">
-        Your key backup protects your encrypted messages. If you log in on a new device,
-        you'll need your security phrase to restore access to your message history.
+        {t("userSettings.security.activeSessionsDesc")}
+      </p>
+      {sessionsLoading && <p className="settings-loading">{t("userSettings.security.loadingSessions")}</p>}
+      {sessionError && <div className="settings-error">{sessionError}</div>}
+      {!sessionsLoading && sessions.length > 0 && (
+        <div className="session-list">
+          {sessions.map((s) => (
+            <div key={s.id} className={`session-card${s.is_current ? " session-current" : ""}`}>
+              <div className="session-card-info">
+                <div className="session-card-device">
+                  {s.device_name || t("userSettings.security.unknownDevice")}
+                  {s.is_current && <span className="session-badge-current">{t("userSettings.security.current")}</span>}
+                </div>
+                <div className="session-card-meta">
+                  {s.ip_address && <span>{s.ip_address}</span>}
+                  {s.last_activity && (
+                    <span>{t("userSettings.security.active")} {new Date(s.last_activity).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>
+                  )}
+                  <span>{t("userSettings.security.created")} {new Date(s.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>
+                </div>
+              </div>
+              {!s.is_current && s.family_id && (
+                <button
+                  className="btn-secondary btn-danger-outline btn-sm"
+                  onClick={() => handleRevokeSession(s.family_id!)}
+                  disabled={revokingId === s.family_id}
+                >
+                  {revokingId === s.family_id ? t("userSettings.security.revoking") : t("userSettings.security.revoke")}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {!sessionsLoading && sessions.length > 1 && (
+        <button
+          className="btn-secondary btn-danger-outline"
+          style={{ marginTop: 12 }}
+          onClick={handleRevokeAllOther}
+        >
+          {t("userSettings.security.revokeAllOther")}
+        </button>
+      )}
+    </div>
+
+    <div className="settings-section">
+      <div className="settings-section-title">{t("userSettings.security.keyBackupStatus")}</div>
+      <p className="settings-description">
+        {t("userSettings.security.keyBackupDesc")}
       </p>
       <div className="settings-card" style={{ marginBottom: 16 }}>
         <div className="settings-card-row">
           <div>
-            <div className="settings-label">STATUS</div>
+            <div className="settings-label">{t("userSettings.security.statusLabel")}</div>
             <div className="settings-value">
               {backupExists ? (
-                <span style={{ color: "var(--status-online, #3ba55d)" }}>Backup exists on server</span>
+                <span style={{ color: "var(--status-online, #3ba55d)" }}>{t("userSettings.security.backupExists")}</span>
               ) : (
-                <span style={{ color: "var(--status-dnd, #ed4245)" }}>No backup — messages won't transfer to new devices</span>
+                <span style={{ color: "var(--status-dnd, #ed4245)" }}>{t("userSettings.security.noBackup")}</span>
               )}
             </div>
           </div>
@@ -921,14 +1011,14 @@ function SecurityTab() {
                 onClick={() => { setMode("change"); setError(""); setSuccess(""); }}
                 style={{ marginRight: 8 }}
               >
-                Change Security Phrase
+                {t("userSettings.security.changeSecurityPhrase")}
               </button>
               <button
                 className="btn-secondary btn-danger-outline"
                 onClick={handleDeleteBackup}
                 disabled={saving}
               >
-                Delete Backup
+                {t("userSettings.security.deleteBackup")}
               </button>
             </>
           ) : (
@@ -938,7 +1028,7 @@ function SecurityTab() {
                 onClick={() => { setMode("setup"); setError(""); setSuccess(""); }}
                 style={{ marginRight: 8 }}
               >
-                Set Up Security Phrase
+                {t("userSettings.security.setUpSecurityPhrase")}
               </button>
               <button
                 className="btn-secondary"
@@ -949,7 +1039,7 @@ function SecurityTab() {
                   setSuccess("");
                 }}
               >
-                Generate Recovery Key
+                {t("userSettings.security.generateRecoveryKey")}
               </button>
             </>
           )}
@@ -958,16 +1048,16 @@ function SecurityTab() {
 
       {mode === "change" && (
         <div className="settings-fields">
-          <div className="settings-section-title">Change Security Phrase</div>
+          <div className="settings-section-title">{t("userSettings.security.changePhrase.title")}</div>
           {!getCachedPhrase() && (
             <label className="settings-field-label">
-              Current Security Phrase
+              {t("userSettings.security.changePhrase.currentLabel")}
               <input
                 className="settings-input"
                 type="password"
                 value={currentPhrase}
                 onChange={(e) => { setCurrentPhrase(e.target.value); setError(""); }}
-                placeholder="Enter your current phrase..."
+                placeholder={t("userSettings.security.changePhrase.currentPlaceholder")}
               />
             </label>
           )}
@@ -981,7 +1071,7 @@ function SecurityTab() {
               setError("");
             }}
           >
-            Generate Phrase
+            {t("userSettings.security.changePhrase.generatePhrase")}
           </button>
           {newPhrase && newPhrase === confirmPhrase && newPhrase.includes("-") && (
             <div className="recovery-key-display" style={{ marginBottom: 12 }}>
@@ -991,41 +1081,41 @@ function SecurityTab() {
                 style={{ marginTop: 8, width: "100%" }}
                 onClick={() => navigator.clipboard.writeText(newPhrase)}
               >
-                Copy to Clipboard
+                {t("userSettings.security.changePhrase.copyToClipboard")}
               </button>
             </div>
           )}
           <label className="settings-field-label">
-            New Security Phrase
+            {t("userSettings.security.changePhrase.newLabel")}
             <input
               className="settings-input"
               type="password"
               value={newPhrase}
               onChange={(e) => { setNewPhrase(e.target.value); setError(""); }}
-              placeholder="At least 8 characters..."
+              placeholder={t("userSettings.security.changePhrase.newPlaceholder")}
             />
           </label>
           <label className="settings-field-label">
-            Confirm New Phrase
+            {t("userSettings.security.changePhrase.confirmLabel")}
             <input
               className="settings-input"
               type="password"
               value={confirmPhrase}
               onChange={(e) => { setConfirmPhrase(e.target.value); setError(""); }}
-              placeholder="Confirm new phrase..."
+              placeholder={t("userSettings.security.changePhrase.confirmPlaceholder")}
               onKeyDown={(e) => e.key === "Enter" && handleChangePhrase()}
             />
           </label>
           {error && <div className="settings-error">{error}</div>}
           <div className="security-phrase-actions">
-            <button className="btn-secondary" onClick={() => setMode("idle")}>Cancel</button>
+            <button className="btn-secondary" onClick={() => setMode("idle")}>{t("userSettings.security.changePhrase.cancel")}</button>
             <button
               className="btn-primary"
               onClick={handleChangePhrase}
               disabled={saving || !newPhrase || !confirmPhrase}
               style={{ marginLeft: 8 }}
             >
-              {saving ? "Saving..." : "Update Phrase"}
+              {saving ? t("userSettings.security.changePhrase.saving") : t("userSettings.security.changePhrase.updatePhrase")}
             </button>
           </div>
         </div>
@@ -1033,9 +1123,9 @@ function SecurityTab() {
 
       {mode === "setup" && (
         <div className="settings-fields">
-          <div className="settings-section-title">Create Security Phrase</div>
+          <div className="settings-section-title">{t("userSettings.security.setup.title")}</div>
           <p className="settings-description">
-            Choose a strong phrase you'll remember, or generate one automatically.
+            {t("userSettings.security.setup.desc")}
           </p>
           <button
             className="btn-secondary"
@@ -1047,7 +1137,7 @@ function SecurityTab() {
               setError("");
             }}
           >
-            Generate Phrase
+            {t("userSettings.security.setup.generatePhrase")}
           </button>
           {newPhrase && newPhrase === confirmPhrase && newPhrase.includes("-") && (
             <div className="recovery-key-display" style={{ marginBottom: 12 }}>
@@ -1057,29 +1147,29 @@ function SecurityTab() {
                 style={{ marginTop: 8, width: "100%" }}
                 onClick={() => navigator.clipboard.writeText(newPhrase)}
               >
-                Copy to Clipboard
+                {t("userSettings.security.setup.copyToClipboard")}
               </button>
             </div>
           )}
           <label className="settings-field-label">
-            Security Phrase
+            {t("userSettings.security.setup.phraseLabel")}
             <input
               className="settings-input"
               type="password"
               value={newPhrase}
               onChange={(e) => { setNewPhrase(e.target.value); setError(""); }}
-              placeholder="At least 8 characters..."
+              placeholder={t("userSettings.security.setup.phrasePlaceholder")}
               autoFocus
             />
           </label>
           <label className="settings-field-label">
-            Confirm Phrase
+            {t("userSettings.security.setup.confirmLabel")}
             <input
               className="settings-input"
               type="password"
               value={confirmPhrase}
               onChange={(e) => { setConfirmPhrase(e.target.value); setError(""); }}
-              placeholder="Confirm phrase..."
+              placeholder={t("userSettings.security.setup.confirmPlaceholder")}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && newPhrase.length >= 8 && newPhrase === confirmPhrase) {
                   handleSetupWithPhrase(newPhrase);
@@ -1089,18 +1179,18 @@ function SecurityTab() {
           </label>
           {error && <div className="settings-error">{error}</div>}
           <div className="security-phrase-actions">
-            <button className="btn-secondary" onClick={() => setMode("idle")}>Cancel</button>
+            <button className="btn-secondary" onClick={() => setMode("idle")}>{t("userSettings.security.setup.cancel")}</button>
             <button
               className="btn-primary"
               onClick={() => {
-                if (newPhrase.length < 8) { setError("Must be at least 8 characters"); return; }
-                if (newPhrase !== confirmPhrase) { setError("Phrases do not match"); return; }
+                if (newPhrase.length < 8) { setError(t("userSettings.security.setup.mustBeMinLength")); return; }
+                if (newPhrase !== confirmPhrase) { setError(t("userSettings.security.setup.phrasesDoNotMatch")); return; }
                 handleSetupWithPhrase(newPhrase);
               }}
               disabled={saving || !newPhrase || !confirmPhrase}
               style={{ marginLeft: 8 }}
             >
-              {saving ? "Saving..." : "Create Backup"}
+              {saving ? t("userSettings.security.setup.saving") : t("userSettings.security.setup.createBackup")}
             </button>
           </div>
         </div>
@@ -1108,9 +1198,9 @@ function SecurityTab() {
 
       {mode === "generated" && (
         <div className="settings-fields">
-          <div className="settings-section-title">Your Recovery Key</div>
+          <div className="settings-section-title">{t("userSettings.security.generated.title")}</div>
           <p className="settings-description">
-            Copy this key and store it somewhere safe. You'll need it on other devices.
+            {t("userSettings.security.generated.desc")}
           </p>
           <div className="recovery-key-display">
             <code>{recoveryKey}</code>
@@ -1120,7 +1210,7 @@ function SecurityTab() {
             style={{ width: "100%", marginBottom: 12 }}
             onClick={() => navigator.clipboard.writeText(recoveryKey)}
           >
-            Copy to Clipboard
+            {t("userSettings.security.generated.copyToClipboard")}
           </button>
           <label className="security-phrase-confirm-label">
             <input
@@ -1128,18 +1218,18 @@ function SecurityTab() {
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
             />
-            I have saved my recovery key
+            {t("userSettings.security.generated.savedConfirm")}
           </label>
           {error && <div className="settings-error">{error}</div>}
           <div className="security-phrase-actions">
-            <button className="btn-secondary" onClick={() => setMode("idle")}>Cancel</button>
+            <button className="btn-secondary" onClick={() => setMode("idle")}>{t("userSettings.security.generated.cancel")}</button>
             <button
               className="btn-primary"
               onClick={() => handleSetupWithPhrase(recoveryKey)}
               disabled={!confirmed || saving}
               style={{ marginLeft: 8 }}
             >
-              {saving ? "Saving..." : "Save Backup"}
+              {saving ? t("userSettings.security.generated.saving") : t("userSettings.security.generated.saveBackup")}
             </button>
           </div>
         </div>
@@ -1147,49 +1237,51 @@ function SecurityTab() {
 
       {success && <div className="settings-success" style={{ marginTop: 12 }}>{success}</div>}
     </div>
+    </>
   );
 }
 
 // ─── Appearance Tab ─────────────────────────────────
 
 function AppearanceTab() {
+  const { t } = useTranslation();
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
 
-  const themes: { value: Theme; label: string; colors: string[] }[] = [
+  const themes: { value: Theme; key: string; colors: string[] }[] = [
     {
       value: "night",
-      label: "Night Mode",
+      key: "nightMode",
       colors: ["#1e1f22", "#2b2d31", "#313338", "#5865f2", "#dbdee1"],
     },
     {
       value: "default",
-      label: "Default",
+      key: "default",
       colors: ["#E2D9CC", "#EAE3D7", "#F5F0E8", "#C2410C", "#3D3029"],
     },
     {
       value: "light",
-      label: "Light Mode",
+      key: "lightMode",
       colors: ["#E3E5E8", "#F2F3F5", "#FFFFFF", "#4752C4", "#2E3338"],
     },
     {
       value: "sage",
-      label: "Sage",
+      key: "sage",
       colors: ["#171717", "#212121", "#2D2D2D", "#10A37F", "#ECECEC"],
     },
     {
       value: "cosmos",
-      label: "Cosmos",
+      key: "cosmos",
       colors: ["#131620", "#1B1F2E", "#232736", "#8B6CEF", "#E3E5EA"],
     },
     {
       value: "forest",
-      label: "Forest",
+      key: "forest",
       colors: ["#1A2318", "#222E1F", "#2A3627", "#5FAD56", "#D4DDD2"],
     },
     {
       value: "bluebird",
-      label: "Bluebird",
+      key: "bluebird",
       colors: ["#E8ECF0", "#F5F8FA", "#FFFFFF", "#0C7ABF", "#14171A"],
     },
   ];
@@ -1200,31 +1292,30 @@ function AppearanceTab() {
   return (
     <>
       <div className="settings-section">
-        <div className="settings-section-title">Theme</div>
-        <p className="settings-description">Choose how Haven looks for you.</p>
+        <div className="settings-section-title">{t("userSettings.appearance.theme")}</div>
+        <p className="settings-description">{t("userSettings.appearance.themeDesc")}</p>
         <div className="theme-picker">
-          {themes.map((t) => (
+          {themes.map((thm) => (
             <button
-              key={t.value}
-              className={`theme-card ${theme === t.value ? "selected" : ""}`}
-              onClick={() => setTheme(t.value)}
-              aria-pressed={theme === t.value}
+              key={thm.value}
+              className={`theme-card ${theme === thm.value ? "selected" : ""}`}
+              onClick={() => setTheme(thm.value)}
+              aria-pressed={theme === thm.value}
             >
               <div className="theme-preview">
-                {t.colors.map((c, i) => (
+                {thm.colors.map((c, i) => (
                   <div key={i} className="theme-swatch" style={{ background: c }} />
                 ))}
               </div>
-              <span className="theme-label">{t.label}</span>
+              <span className="theme-label">{t(`userSettings.appearance.${thm.key}`)}</span>
             </button>
           ))}
         </div>
       </div>
       <div className="settings-section">
-        <div className="settings-section-title">Custom CSS</div>
+        <div className="settings-section-title">{t("userSettings.appearance.customCss")}</div>
         <p className="settings-description">
-          Advanced: paste your own CSS to customize Haven's appearance. Changes apply immediately.
-          For security, <code>@import</code>, <code>url()</code>, and <code>expression()</code> are stripped.
+          {t("userSettings.appearance.customCssDesc")}
         </p>
         <textarea
           className="settings-input custom-css-textarea"
@@ -1240,7 +1331,7 @@ function AppearanceTab() {
             style={{ marginTop: 8 }}
             onClick={() => setCustomCss("")}
           >
-            Clear Custom CSS
+            {t("userSettings.appearance.clearCustomCss")}
           </button>
         )}
       </div>
@@ -1251,6 +1342,7 @@ function AppearanceTab() {
 // ─── Accessibility Tab ──────────────────────────────
 
 function AccessibilityTab() {
+  const { t } = useTranslation();
   const reducedMotion = useUiStore((s) => s.a11yReducedMotion);
   const font = useUiStore((s) => s.a11yFont);
   const highContrast = useUiStore((s) => s.a11yHighContrast);
@@ -1262,9 +1354,9 @@ function AccessibilityTab() {
 
   return (
     <div className="settings-section">
-      <div className="settings-section-title">Motion</div>
+      <div className="settings-section-title">{t("userSettings.accessibility.motion")}</div>
       <p className="settings-description">
-        Reduce or remove animations and transitions throughout the app.
+        {t("userSettings.accessibility.motionDesc")}
       </p>
       <label className="settings-toggle-label">
         <input
@@ -1272,22 +1364,21 @@ function AccessibilityTab() {
           checked={reducedMotion}
           onChange={(e) => setReducedMotion(e.target.checked)}
         />
-        <span>Reduce Motion</span>
+        <span>{t("userSettings.accessibility.reduceMotion")}</span>
       </label>
       <p className="settings-hint">
-        When enabled, most animations and transitions will be disabled. This also applies
-        when your operating system's "reduce motion" preference is active.
+        {t("userSettings.accessibility.reduceMotionHint")}
       </p>
 
-      <div className="settings-section-title" style={{ marginTop: 24 }}>Font</div>
+      <div className="settings-section-title" style={{ marginTop: 24 }}>{t("userSettings.accessibility.font")}</div>
       <p className="settings-description">
-        Choose a font optimized for readability.
+        {t("userSettings.accessibility.fontDesc")}
       </p>
       <div className="settings-select-group">
         {([
-          { value: "default", label: "Default (gg sans)" },
-          { value: "opendyslexic", label: "OpenDyslexic" },
-          { value: "atkinson", label: "Atkinson Hyperlegible" },
+          { value: "default", label: t("userSettings.accessibility.fontDefault") },
+          { value: "opendyslexic", label: t("userSettings.accessibility.fontOpenDyslexic") },
+          { value: "atkinson", label: t("userSettings.accessibility.fontAtkinson") },
         ] as const).map((opt) => (
           <label key={opt.value} className="settings-radio-label">
             <input
@@ -1302,9 +1393,9 @@ function AccessibilityTab() {
         ))}
       </div>
 
-      <div className="settings-section-title" style={{ marginTop: 24 }}>Contrast</div>
+      <div className="settings-section-title" style={{ marginTop: 24 }}>{t("userSettings.accessibility.contrast")}</div>
       <p className="settings-description">
-        Increase the contrast of text and UI elements for better visibility.
+        {t("userSettings.accessibility.contrastDesc")}
       </p>
       <label className="settings-toggle-label">
         <input
@@ -1312,12 +1403,12 @@ function AccessibilityTab() {
           checked={highContrast}
           onChange={(e) => setHighContrast(e.target.checked)}
         />
-        <span>High Contrast Mode</span>
+        <span>{t("userSettings.accessibility.highContrastMode")}</span>
       </label>
 
-      <div className="settings-section-title" style={{ marginTop: 24 }}>Chat Display</div>
+      <div className="settings-section-title" style={{ marginTop: 24 }}>{t("userSettings.accessibility.chatDisplay")}</div>
       <p className="settings-description">
-        Make chat messages easier to parse for screen readers and visual clarity.
+        {t("userSettings.accessibility.chatDisplayDesc")}
       </p>
       <label className="settings-toggle-label">
         <input
@@ -1325,10 +1416,10 @@ function AccessibilityTab() {
           checked={alwaysShowTimestamps}
           onChange={(e) => setAlwaysShowTimestamps(e.target.checked)}
         />
-        <span>Always Show Message Timestamps</span>
+        <span>{t("userSettings.accessibility.alwaysShowTimestamps")}</span>
       </label>
       <p className="settings-hint">
-        Show full timestamps and author names on every message, instead of grouping consecutive messages from the same user.
+        {t("userSettings.accessibility.alwaysShowTimestampsHint")}
       </p>
     </div>
   );

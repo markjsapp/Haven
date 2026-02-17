@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -34,6 +35,7 @@ interface VoiceRoomProps {
 }
 
 export default function VoiceRoom({ channelId, channelName, serverId }: VoiceRoomProps) {
+  const { t } = useTranslation();
   const {
     connectionState,
     currentChannelId,
@@ -158,15 +160,17 @@ export default function VoiceRoom({ channelId, channelName, serverId }: VoiceRoo
         )}
         <p className="voice-room-empty-text">
           {channelParticipants.length === 0
-            ? "No one is in this voice channel yet."
-            : `${channelParticipants.length} user${channelParticipants.length === 1 ? "" : "s"} in voice`}
+            ? t("voiceRoom.noOneInChannel")
+            : channelParticipants.length === 1
+              ? t("voiceRoom.usersInVoice", { count: channelParticipants.length })
+              : t("voiceRoom.usersInVoicePlural", { count: channelParticipants.length })}
         </p>
         <button
           className="btn-primary voice-join-btn"
           onClick={() => joinVoice(channelId)}
           disabled={isJoining}
         >
-          {isJoining ? "Connecting..." : "Join Voice"}
+          {isJoining ? t("voiceRoom.connecting") : t("voiceRoom.joinVoice")}
         </button>
       </div>
     </div>
@@ -184,6 +188,7 @@ interface RoomContentProps {
 }
 
 function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: RoomContentProps) {
+  const { t } = useTranslation();
   const { localParticipant } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
   const {
@@ -331,7 +336,7 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
           <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
         </svg>
         <h2>{channelName}</h2>
-        <span className="voice-connected-badge">Connected</span>
+        <span className="voice-connected-badge">{t("voiceRoom.connected")}</span>
       </div>
 
       {hasScreenShares ? (
@@ -355,7 +360,7 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
         <button
           className={`voice-control-btn ${isMuted ? "active" : ""}`}
           onClick={toggleMute}
-          title={isMuted ? "Unmute" : "Mute"}
+          title={isMuted ? t("voiceRoom.unmute") : t("voiceRoom.mute")}
         >
           {isMuted ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -371,7 +376,7 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
         <button
           className={`voice-control-btn ${isDeafened ? "active" : ""}`}
           onClick={toggleDeafen}
-          title={isDeafened ? "Undeafen" : "Deafen"}
+          title={isDeafened ? t("voiceRoom.undeafen") : t("voiceRoom.deafen")}
         >
           {isDeafened ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -389,7 +394,7 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
           <button
             className={`voice-control-btn ${isScreenSharing ? "screen-sharing" : ""}`}
             onClick={toggleScreenShare}
-            title={isScreenSharing ? "Stop Sharing" : "Share Screen"}
+            title={isScreenSharing ? t("voiceRoom.stopSharing") : t("voiceRoom.shareScreen")}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z" />
@@ -399,24 +404,24 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
             className="screen-share-quality-picker"
             value={screenSharePreset}
             onChange={(e) => setScreenSharePreset(e.target.value as ScreenShareQuality)}
-            title="Screen share quality"
+            title={t("voiceRoom.screenShareQuality")}
           >
-            <option value="360p">360p</option>
-            <option value="720p">720p</option>
-            <option value="720p60">720p 60fps</option>
-            <option value="1080p">1080p</option>
-            <option value="1080p60">1080p 60fps</option>
-            <option value="1440p">1440p</option>
-            <option value="1440p60">1440p 60fps</option>
-            <option value="4k">4K</option>
-            <option value="4k60">4K 60fps</option>
+            <option value="360p">{t("voiceRoom.quality360p")}</option>
+            <option value="720p">{t("voiceRoom.quality720p")}</option>
+            <option value="720p60">{t("voiceRoom.quality720p60")}</option>
+            <option value="1080p">{t("voiceRoom.quality1080p")}</option>
+            <option value="1080p60">{t("voiceRoom.quality1080p60")}</option>
+            <option value="1440p">{t("voiceRoom.quality1440p")}</option>
+            <option value="1440p60">{t("voiceRoom.quality1440p60")}</option>
+            <option value="4k">{t("voiceRoom.quality4k")}</option>
+            <option value="4k60">{t("voiceRoom.quality4k60")}</option>
           </select>
         </div>
 
         <button
           className="voice-control-btn voice-disconnect-btn"
           onClick={leaveVoice}
-          title="Disconnect"
+          title={t("voiceRoom.disconnect")}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
@@ -448,6 +453,7 @@ interface ScreenShareViewProps {
 }
 
 function ScreenShareView({ tracks, focusedIndex, onFocusChange }: ScreenShareViewProps) {
+  const { t } = useTranslation();
   const focused = tracks[focusedIndex];
 
   return (
@@ -457,21 +463,21 @@ function ScreenShareView({ tracks, focusedIndex, onFocusChange }: ScreenShareVie
           <>
             <VideoTrack trackRef={focused} />
             <div className="screen-share-label">
-              {focused.participant.name || focused.participant.identity}&apos;s screen
+              {t("voiceRoom.screenLabel", { name: focused.participant.name || focused.participant.identity })}
             </div>
           </>
         )}
       </div>
       {tracks.length > 1 && (
         <div className="screen-share-strip">
-          {tracks.map((t, i) => (
+          {tracks.map((tr, i) => (
             <button
-              key={`${t.participant.identity}-${i}`}
+              key={`${tr.participant.identity}-${i}`}
               className={`screen-share-thumb ${i === focusedIndex ? "focused" : ""}`}
               onClick={() => onFocusChange(i)}
             >
-              <VideoTrack trackRef={t} />
-              <span>{t.participant.name || t.participant.identity}</span>
+              <VideoTrack trackRef={tr} />
+              <span>{tr.participant.name || tr.participant.identity}</span>
             </button>
           ))}
         </div>
@@ -512,6 +518,7 @@ function ParticipantTile({
   isScreenSharing,
   onContextMenu,
 }: ParticipantTileProps) {
+  const { t } = useTranslation();
   return (
     <div
       className={`voice-participant ${isMuted ? "muted" : ""} ${serverMuted ? "server-muted" : ""} ${serverDeafened ? "server-deafened" : ""}`}
@@ -523,26 +530,26 @@ function ParticipantTile({
       <div className="voice-participant-info">
         <span className="voice-participant-name">
           {name}
-          {isLocal && <span className="voice-you-badge">(you)</span>}
+          {isLocal && <span className="voice-you-badge">{t("voiceRoom.youBadge")}</span>}
         </span>
         <div className="voice-participant-icons">
           {isScreenSharing && (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--green)" className="voice-mute-icon" aria-label="Screen Sharing">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--green)" className="voice-mute-icon" aria-label={t("voiceRoom.screenSharingAriaLabel")}>
               <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z" />
             </svg>
           )}
           {isMuted && (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)" className="voice-mute-icon" aria-label="Muted">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)" className="voice-mute-icon" aria-label={t("voiceRoom.mutedAriaLabel")}>
               <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.55-.9l4.17 4.18L21 19.73 4.27 3z" />
             </svg>
           )}
           {serverMuted && (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--yellow)" className="voice-mute-icon" aria-label="Server Muted">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--yellow)" className="voice-mute-icon" aria-label={t("voiceRoom.serverMutedAriaLabel")}>
               <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.55-.9l4.17 4.18L21 19.73 4.27 3z" />
             </svg>
           )}
           {serverDeafened && (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--yellow)" className="voice-mute-icon" aria-label="Server Deafened">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--yellow)" className="voice-mute-icon" aria-label={t("voiceRoom.serverDeafenedAriaLabel")}>
               <path d="M3.63 3.63a.996.996 0 000 1.41L7.29 8.7 7 9H4c-.55 0-1 .45-1 1v4c0 .55.45 1 1 1h3l3.29 3.29c.63.63 1.71.18 1.71-.71v-4.17l4.18 4.18c-.49.37-1.02.68-1.6.91-.36.15-.58.53-.58.92 0 .72.73 1.18 1.39.91.8-.33 1.55-.77 2.22-1.31l1.34 1.34a.996.996 0 101.41-1.41L5.05 3.63c-.39-.39-1.02-.39-1.42 0zM19 12c0 .82-.15 1.61-.41 2.34l1.53 1.53c.56-1.17.88-2.48.88-3.87 0-3.83-2.4-7.11-5.78-8.4-.59-.23-1.22.23-1.22.86v.19c0 .38.25.71.61.85C17.18 6.54 19 9.06 19 12zm-8.71-6.29l-.17.17L12 7.76V6.41c0-.89-1.08-1.33-1.71-.7zM16.5 12A4.5 4.5 0 0014 7.97v1.79l2.48 2.48c.01-.08.02-.16.02-.24z" />
             </svg>
           )}

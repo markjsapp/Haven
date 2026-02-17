@@ -39,6 +39,7 @@ pub async fn create_channel(
 
     let channel_type = req.channel_type.as_deref().unwrap_or("text");
     let position = req.position.unwrap_or(0);
+    let is_private = req.is_private.unwrap_or(false);
 
     let channel = queries::create_channel(
         state.db.write(),
@@ -47,6 +48,7 @@ pub async fn create_channel(
         channel_type,
         position,
         req.category_id,
+        is_private,
     )
     .await?;
 
@@ -73,6 +75,7 @@ pub async fn create_channel(
         category_id: channel.category_id,
         dm_status: channel.dm_status,
         last_message_id: None,
+        is_private: channel.is_private,
     }))
 }
 
@@ -127,6 +130,7 @@ pub async fn create_dm(
             category_id: None,
             dm_status: existing.dm_status,
             last_message_id: None,
+            is_private: false,
         }));
     }
 
@@ -163,7 +167,7 @@ pub async fn create_dm(
         return Err(AppError::Validation("encrypted_meta exceeds maximum size (8KB)".into()));
     }
 
-    let channel = queries::create_channel(state.db.write(), None, &encrypted_meta, "dm", 0, None).await?;
+    let channel = queries::create_channel(state.db.write(), None, &encrypted_meta, "dm", 0, None, false).await?;
 
     // Set dm_status
     if dm_status != "active" {
@@ -195,6 +199,7 @@ pub async fn create_dm(
         category_id: None,
         dm_status: Some(dm_status.to_string()),
         last_message_id: None,
+        is_private: false,
     }))
 }
 
@@ -220,6 +225,7 @@ pub async fn list_dm_channels(
             category_id: ch.category_id,
             dm_status: ch.dm_status,
             last_message_id: None,
+            is_private: ch.is_private,
         })
         .collect();
     Ok(Json(responses))
@@ -280,6 +286,7 @@ pub async fn update_channel(
         category_id: updated.category_id,
         dm_status: updated.dm_status,
         last_message_id: None,
+        is_private: updated.is_private,
     }))
 }
 
@@ -396,7 +403,7 @@ pub async fn create_group_dm(
         return Err(AppError::Validation("encrypted_meta exceeds maximum size (8KB)".into()));
     }
 
-    let channel = queries::create_channel(state.db.write(), None, &encrypted_meta, "group", 0, None).await?;
+    let channel = queries::create_channel(state.db.write(), None, &encrypted_meta, "group", 0, None, false).await?;
 
     // Add creator
     queries::add_channel_member(state.db.write(), channel.id, user_id).await?;
@@ -422,6 +429,7 @@ pub async fn create_group_dm(
         category_id: None,
         dm_status: Some("active".to_string()),
         last_message_id: None,
+        is_private: false,
     }))
 }
 

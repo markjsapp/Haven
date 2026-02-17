@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFriendsStore } from "../store/friends.js";
@@ -13,6 +14,7 @@ interface CreateGroupDmProps {
 const MAX_MEMBERS = 10; // including self
 
 export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
+  const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
   const user = useAuthStore((s) => s.user);
   const friends = useFriendsStore((s) => s.friends);
@@ -135,7 +137,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
         onClose();
       }
     } catch (err: any) {
-      setError(err.message || "Failed to create DM");
+      setError(err.message || t("createGroupDm.failed"));
     } finally {
       setCreating(false);
     }
@@ -143,24 +145,26 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
 
   const isGroup = selected.size >= 2;
   const buttonLabel = creating
-    ? "Creating..."
+    ? t("createGroupDm.submitLoading")
     : isGroup
-      ? "Create Group DM"
-      : "Create DM";
+      ? t("createGroupDm.submitGroup")
+      : t("createGroupDm.submitDm");
 
   return (
     <div className="create-dm-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="create-dm-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Select friends for DM">
+      <div className="create-dm-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("createGroupDm.title")}>
         <div className="create-dm-header">
           <div>
-            <h3>Select Friends</h3>
+            <h3>{t("createGroupDm.title")}</h3>
             <p className="create-dm-subtitle">
-              {remaining > 0
-                ? `You can add ${remaining} more friend${remaining !== 1 ? "s" : ""}.`
-                : "Group is full."}
+              {remaining <= 0
+                ? t("createGroupDm.groupFull")
+                : remaining === 1
+                  ? t("createGroupDm.remainingSingular")
+                  : t("createGroupDm.remainingPlural", { count: remaining })}
             </p>
           </div>
-          <button className="create-dm-close" onClick={onClose} aria-label="Close">
+          <button className="create-dm-close" onClick={onClose} aria-label={t("createGroupDm.close")}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
             </svg>
@@ -184,7 +188,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
               ref={searchRef}
               className="create-dm-search-input"
               type="text"
-              placeholder={selected.size === 0 ? "Type the username of a friend" : ""}
+              placeholder={selected.size === 0 ? t("createGroupDm.searchPlaceholder") : ""}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => {
@@ -202,7 +206,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
           <div className="create-dm-friend-list">
             {filteredFriends.length === 0 ? (
               <div className="create-dm-empty">
-                {search ? "No matching friends" : "No friends to add"}
+                {search ? t("createGroupDm.noMatchingFriends") : t("createGroupDm.noFriendsToAdd")}
               </div>
             ) : (
               filteredFriends.map((f) => {
@@ -251,7 +255,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
                 onChange={(e) => setGroupName(e.target.value)}
                 maxLength={64}
               />
-              <span className="create-dm-group-name-label">Group Name (optional)</span>
+              <span className="create-dm-group-name-label">{t("createGroupDm.groupNameLabel")}</span>
             </div>
           )}
 
@@ -259,7 +263,7 @@ export default function CreateGroupDm({ onClose }: CreateGroupDmProps) {
         </div>
 
         <div className="create-dm-footer">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-secondary" onClick={onClose}>{t("createGroupDm.cancel")}</button>
           <button
             className="btn-primary"
             onClick={handleCreate}

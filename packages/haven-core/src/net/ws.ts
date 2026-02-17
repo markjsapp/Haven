@@ -256,6 +256,17 @@ export class HavenWs {
   }
 
   private emit(type: string, msg: WsServerMessage): void {
+    // Fire wildcard handlers for all events (used by multi-tab broadcast)
+    const wildcardHandlers = this.listeners.get("*");
+    if (wildcardHandlers && type !== "_connect" && type !== "_disconnect") {
+      for (const handler of wildcardHandlers) {
+        try {
+          handler(msg);
+        } catch {
+          // Don't let a handler error break the event loop
+        }
+      }
+    }
     const handlers = this.listeners.get(type);
     if (handlers) {
       for (const handler of handlers) {

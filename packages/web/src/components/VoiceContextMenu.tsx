@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useVoiceStore } from "../store/voice.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
@@ -25,6 +26,7 @@ export default function VoiceContextMenu({
   position,
   onClose,
 }: Props) {
+  const { t } = useTranslation();
   const currentUser = useAuthStore((s) => s.user);
   const api = useAuthStore((s) => s.api);
   const { isMuted, isDeafened, toggleMute, toggleDeafen, userVolumes, setUserVolume } = useVoiceStore();
@@ -111,7 +113,7 @@ export default function VoiceContextMenu({
       ref={ref}
       style={style}
       role="menu"
-      aria-label="Voice user options"
+      aria-label={t("voiceContext.ariaLabel")}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
@@ -124,7 +126,7 @@ export default function VoiceContextMenu({
             tabIndex={-1}
             onClick={() => { toggleMute(); onClose(); }}
           >
-            {isMuted ? "Unmute" : "Mute"}
+            {isMuted ? t("voiceContext.unmute") : t("voiceContext.mute")}
           </button>
           <button
             className="user-context-item"
@@ -132,7 +134,7 @@ export default function VoiceContextMenu({
             tabIndex={-1}
             onClick={() => { toggleDeafen(); onClose(); }}
           >
-            {isDeafened ? "Undeafen" : "Deafen"}
+            {isDeafened ? t("voiceContext.undeafen") : t("voiceContext.deafen")}
           </button>
         </>
       )}
@@ -146,7 +148,7 @@ export default function VoiceContextMenu({
             tabIndex={-1}
             onClick={handleServerMute}
           >
-            {serverMuted ? "Server Unmute" : "Server Mute"}
+            {serverMuted ? t("voiceContext.serverUnmute") : t("voiceContext.serverMute")}
           </button>
           <button
             className="user-context-item"
@@ -154,7 +156,7 @@ export default function VoiceContextMenu({
             tabIndex={-1}
             onClick={handleServerDeafen}
           >
-            {serverDeafened ? "Server Undeafen" : "Server Deafen"}
+            {serverDeafened ? t("voiceContext.serverUndeafen") : t("voiceContext.serverDeafen")}
           </button>
         </>
       )}
@@ -169,8 +171,8 @@ export default function VoiceContextMenu({
             tabIndex={-1}
             onClick={handleNoteToggle}
           >
-            {existingNote ? "Edit Note" : "Add Note"}
-            <span className="user-context-hint">Only visible to you</span>
+            {existingNote ? t("voiceContext.editNote") : t("voiceContext.addNote")}
+            <span className="user-context-hint">{t("voiceContext.noteHint")}</span>
           </button>
           {noteOpen && (
             <div className="context-note-input" onMouseDown={(e) => e.stopPropagation()}>
@@ -178,7 +180,7 @@ export default function VoiceContextMenu({
                 className="context-note-textarea"
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
-                placeholder="Click to add a note..."
+                placeholder={t("voiceContext.notePlaceholder")}
                 rows={3}
                 autoFocus
                 onKeyDown={(e) => {
@@ -201,7 +203,7 @@ export default function VoiceContextMenu({
         <>
           <div className="user-context-divider" role="separator" />
           <div className="context-volume-section">
-            <span className="context-volume-label">User Volume</span>
+            <span className="context-volume-label">{t("voiceContext.userVolume")}</span>
             <div className="context-volume-slider-row">
               <input
                 type="range"
@@ -211,7 +213,7 @@ export default function VoiceContextMenu({
                 value={volume}
                 onChange={(e) => setUserVolume(userId, Number(e.target.value))}
                 onMouseDown={(e) => e.stopPropagation()}
-                aria-label="User volume"
+                aria-label={t("voiceContext.userVolumeAriaLabel")}
               />
               <span className="context-volume-value">{volume}%</span>
             </div>

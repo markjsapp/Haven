@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { decryptFile, fromBase64 } from "@haven/core";
 import { useAuthStore } from "../store/auth.js";
 import ImageLightbox from "./ImageLightbox.js";
@@ -41,6 +42,7 @@ export default function MessageAttachments({ attachments }: { attachments: Attac
 }
 
 function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
+  const { t } = useTranslation();
   const [blobUrl, setBlobUrl] = useState<string | null>(
     blobCache.get(attachment.id) ?? null,
   );
@@ -48,16 +50,36 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
   const [error, setError] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [spoilerRevealed, setSpoilerRevealed] = useState(false);
+  const [visible, setVisible] = useState(!!blobCache.get(attachment.id));
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const isMedia = isImage(attachment.mime_type) || isVideo(attachment.mime_type) || isAudio(attachment.mime_type);
   const isSpoiler = attachment.spoiler === true;
 
+  // Lazy-load: only fetch/decrypt when scrolled into view
   useEffect(() => {
-    // Auto-fetch images/videos
-    if (isMedia && !blobUrl && !loading && !error) {
+    if (visible || !isMedia || blobCache.has(attachment.id)) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [attachment.id, isMedia, visible]);
+
+  useEffect(() => {
+    // Auto-fetch when visible (or already cached)
+    if (isMedia && visible && !blobUrl && !loading && !error) {
       fetchAndDecrypt();
     }
-  }, [attachment.id, isMedia]);
+  }, [attachment.id, isMedia, visible]);
 
   async function fetchAndDecrypt() {
     if (blobCache.has(attachment.id)) {
@@ -105,7 +127,7 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
     const showSpoilerOverlay = isSpoiler && !spoilerRevealed;
 
     return (
-      <div className="attachment-image-wrap" style={aspectStyle}>
+      <div className="attachment-image-wrap" style={aspectStyle} ref={containerRef}>
         {/* Show thumbnail as instant preview while full image loads */}
         {!blobUrl && attachment.thumbnail && (
           <>
@@ -124,16 +146,16 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
           </>
         )}
         {loading && !attachment.thumbnail && (
-          <div className="attachment-loading">Loading...</div>
+          <div className="attachment-loading">{t("messageAttachments.loading")}</div>
         )}
         {error && !attachment.thumbnail && (
           <div className="attachment-error" onClick={fetchAndDecrypt} style={{ cursor: "pointer" }}>
-            Click to retry
+            {t("messageAttachments.clickToRetry")}
           </div>
         )}
         {error && attachment.thumbnail && (
           <div className="attachment-thumb-loading" onClick={fetchAndDecrypt} style={{ cursor: "pointer" }}>
-            <span style={{ fontSize: 12, color: "#fff" }}>Click to retry</span>
+            <span style={{ fontSize: 12, color: "#fff" }}>{t("messageAttachments.clickToRetry")}</span>
           </div>
         )}
         {blobUrl && (
@@ -152,7 +174,7 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
         )}
         {showSpoilerOverlay && blobUrl && (
           <div className="spoiler-overlay" onClick={() => setSpoilerRevealed(true)}>
-            <span>SPOILER</span>
+            <span>{t("messageAttachments.spoiler")}</span>
           </div>
         )}
         {lightboxOpen && blobUrl && (
@@ -170,7 +192,7 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
     const showSpoilerOverlay = isSpoiler && !spoilerRevealed;
 
     return (
-      <div className="attachment-video-wrap">
+      <div className="attachment-video-wrap" ref={containerRef}>
         {loading && (
           <div className="attachment-loading">
             <div className="attachment-loading-icon">
@@ -179,25 +201,30 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
               </svg>
             </div>
             <span>{attachment.filename} ({formatFileSize(attachment.size)})</span>
-            <span className="attachment-loading-sub">Decrypting...</span>
+            <span className="attachment-loading-sub">{t("messageAttachments.decrypting")}</span>
           </div>
         )}
         {error && (
           <div className="attachment-error" onClick={fetchAndDecrypt} style={{ cursor: "pointer" }}>
-            Click to retry
+            {t("messageAttachments.clickToRetry")}
           </div>
         )}
         {blobUrl && !showSpoilerOverlay && (
-          <video
-            className="attachment-video"
-            src={blobUrl}
-            controls
-            preload="auto"
-          />
+          <>
+            <video
+              className="attachment-video"
+              src={blobUrl}
+              controls
+              preload="auto"
+            />
+            <a href={blobUrl} download={attachment.filename} className="attachment-download-link">
+              {t("messageAttachments.downloadFile", { filename: attachment.filename })}
+            </a>
+          </>
         )}
         {blobUrl && showSpoilerOverlay && (
           <div className="spoiler-overlay" onClick={() => setSpoilerRevealed(true)}>
-            <span>SPOILER</span>
+            <span>{t("messageAttachments.spoiler")}</span>
           </div>
         )}
       </div>
@@ -206,20 +233,22 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
 
   if (isAudio(attachment.mime_type)) {
     return (
-      <AudioPlayer
-        blobUrl={blobUrl}
-        loading={loading}
-        error={error}
-        filename={attachment.filename}
-        size={attachment.size}
-        onRetry={fetchAndDecrypt}
-      />
+      <div ref={containerRef}>
+        <AudioPlayer
+          blobUrl={blobUrl}
+          loading={loading}
+          error={error}
+          filename={attachment.filename}
+          size={attachment.size}
+          onRetry={fetchAndDecrypt}
+        />
+      </div>
     );
   }
 
   // Generic file
   return (
-    <div className="attachment-file">
+    <div className="attachment-file" ref={containerRef}>
       <div className="attachment-file-icon">📎</div>
       <div className="attachment-file-info">
         <span className="attachment-file-name">{attachment.filename}</span>
@@ -230,14 +259,14 @@ function AttachmentItem({ attachment }: { attachment: AttachmentMeta }) {
         onClick={fetchAndDecrypt}
         disabled={loading}
       >
-        {loading ? "..." : blobUrl ? "Open" : "Download"}
+        {loading ? "..." : blobUrl ? t("messageAttachments.open") : t("messageAttachments.download")}
       </button>
       {blobUrl && (
         <a href={blobUrl} download={attachment.filename} className="attachment-file-download">
-          Save
+          {t("messageAttachments.save")}
         </a>
       )}
-      {error && <span className="attachment-error-inline">Failed</span>}
+      {error && <span className="attachment-error-inline">{t("messageAttachments.failed")}</span>}
     </div>
   );
 }
@@ -258,6 +287,7 @@ function AudioPlayer({
   size: number;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -375,9 +405,9 @@ function AudioPlayer({
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  const fmtTime = (t: number) => {
-    const m = Math.floor(t / 60);
-    const s = Math.floor(t % 60);
+  const fmtTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
@@ -400,7 +430,7 @@ function AudioPlayer({
         </div>
         <div className="audio-info">
           <span className="audio-filename">{filename}</span>
-          <span className="audio-size">{formatFileSize(size)} — Click to retry</span>
+          <span className="audio-size">{formatFileSize(size)} — {t("messageAttachments.clickToRetry")}</span>
         </div>
       </div>
     );
@@ -409,7 +439,7 @@ function AudioPlayer({
   return (
     <div className="audio-player">
       <audio ref={audioRef} src={blobUrl} preload="metadata" />
-      <button className="audio-play-btn" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>
+      <button className="audio-play-btn" onClick={togglePlay} aria-label={playing ? t("messageAttachments.pauseAriaLabel") : t("messageAttachments.playAriaLabel")}>
         {playing ? (
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
@@ -437,7 +467,7 @@ function AudioPlayer({
           className="audio-volume-btn"
           onClick={() => setVolumeOpen((v) => !v)}
           onDoubleClick={toggleMute}
-          aria-label={muted ? "Unmute" : "Mute"}
+          aria-label={muted ? t("messageAttachments.unmuteAriaLabel") : t("messageAttachments.muteAriaLabel")}
         >
           {muted || volume === 0 ? (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -465,6 +495,11 @@ function AudioPlayer({
           />
         </div>
       </div>
+      <a href={blobUrl} download={filename} className="audio-download-btn" aria-label={t("messageAttachments.downloadAriaLabel")} title={t("messageAttachments.download")}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+        </svg>
+      </a>
     </div>
   );
 }

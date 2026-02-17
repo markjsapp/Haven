@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
@@ -9,6 +10,7 @@ interface ReportModalProps {
 }
 
 export default function ReportModal({ messageId, channelId, onClose }: ReportModalProps) {
+  const { t } = useTranslation();
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +22,7 @@ export default function ReportModal({ messageId, channelId, onClose }: ReportMod
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (reason.trim().length < 10) {
-      setError("Reason must be at least 10 characters.");
+      setError(t("reportModal.reasonTooShort"));
       return;
     }
     setSubmitting(true);
@@ -34,7 +36,7 @@ export default function ReportModal({ messageId, channelId, onClose }: ReportMod
       setSubmitted(true);
       setTimeout(onClose, 1500);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to submit report.");
+      setError(err instanceof Error ? err.message : t("reportModal.failed"));
     } finally {
       setSubmitting(false);
     }
@@ -43,14 +45,14 @@ export default function ReportModal({ messageId, channelId, onClose }: ReportMod
   return (
     <div className="modal-overlay" onClick={onClose} role="presentation">
       <div className="modal-content" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
-        <h3 id="report-modal-title">Report Message</h3>
+        <h3 id="report-modal-title">{t("reportModal.title")}</h3>
         {submitted ? (
-          <p className="report-success">Report submitted. Thank you.</p>
+          <p className="report-success">{t("reportModal.success")}</p>
         ) : (
           <form onSubmit={handleSubmit}>
             <textarea
               className="report-reason"
-              placeholder="Describe the issue (min 10 characters)..."
+              placeholder={t("reportModal.placeholder")}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={4}
@@ -59,14 +61,14 @@ export default function ReportModal({ messageId, channelId, onClose }: ReportMod
             {error && <p className="report-error">{error}</p>}
             <div className="modal-actions">
               <button type="button" className="btn-ghost" onClick={onClose}>
-                Cancel
+                {t("reportModal.cancel")}
               </button>
               <button
                 type="submit"
                 className="btn-primary"
                 disabled={submitting || reason.trim().length < 10}
               >
-                {submitting ? "Submitting..." : "Submit Report"}
+                {submitting ? t("reportModal.submitLoading") : t("reportModal.submit")}
               </button>
             </div>
           </form>

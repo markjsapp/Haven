@@ -102,6 +102,15 @@ export function exportCryptoState() {
 }
 
 /**
+ * Get the associated data (both identity keys) for a DM session.
+ * Returns null if no session exists with this peer.
+ * The AD is 64 bytes: [initiator identity key || responder identity key].
+ */
+export function getSessionAD(peerId: string): Uint8Array | null {
+  return sessionAD.get(peerId) ?? null;
+}
+
+/**
  * Import crypto state from a backup. Clears existing state first,
  * then populates from the provided Maps/Sets.
  */

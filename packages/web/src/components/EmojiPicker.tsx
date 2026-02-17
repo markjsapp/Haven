@@ -1,5 +1,7 @@
 import { useRef, useEffect, useMemo, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { useChatStore } from "../store/chat.js";
+import { getServerUrl } from "../lib/serverUrl.js";
 
 const LazyPicker = lazy(() =>
   Promise.all([import("@emoji-mart/data"), import("@emoji-mart/react")]).then(
@@ -20,6 +22,7 @@ interface EmojiPickerProps {
 }
 
 export default function EmojiPicker({ onSelect, onClose, serverId, position = "above" }: EmojiPickerProps) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,6 +44,7 @@ export default function EmojiPicker({ onSelect, onClose, serverId, position = "a
   }, [onClose]);
 
   const customEmojis = useChatStore((s) => s.customEmojis);
+  const baseUrl = useMemo(() => getServerUrl(), []);
   const custom = useMemo(() => {
     if (!serverId) return undefined;
     const emojis = customEmojis[serverId];
@@ -48,25 +52,19 @@ export default function EmojiPicker({ onSelect, onClose, serverId, position = "a
     return [
       {
         id: "server-emojis",
-        name: "Server Emojis",
+        name: t("emojiPicker.serverEmojis"),
         emojis: emojis.map((e) => ({
           id: e.id,
           name: e.name,
           keywords: [e.name],
-          skins: [{ src: e.image_url }],
+          skins: [{ src: `${baseUrl}${e.image_url}` }],
         })),
       },
     ];
-  }, [serverId, customEmojis]);
-
-  // When server emojis exist, put them first in category order
-  const categoryOrder = useMemo(() => {
-    if (!custom) return undefined;
-    return ["server-emojis", "frequent", "people", "nature", "foods", "activity", "places", "objects", "symbols", "flags"];
-  }, [custom]);
+  }, [serverId, customEmojis, t, baseUrl]);
 
   return (
-    <div className={`emoji-picker${position === "below" ? " emoji-picker-below" : ""}`} ref={ref} role="dialog" aria-label="Emoji picker">
+    <div className={`emoji-picker${position === "below" ? " emoji-picker-below" : ""}`} ref={ref} role="dialog" aria-label={t("emojiPicker.ariaLabel")}>
       <Suspense fallback={<div className="emoji-picker-loading" />}>
         <LazyPicker
           onEmojiSelect={(emoji: { native?: string; id?: string }) => {
@@ -85,7 +83,6 @@ export default function EmojiPicker({ onSelect, onClose, serverId, position = "a
           perLine={8}
           maxFrequentRows={2}
           custom={custom}
-          categories={categoryOrder}
         />
       </Suspense>
     </div>

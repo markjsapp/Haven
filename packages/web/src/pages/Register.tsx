@@ -1,8 +1,10 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth";
 
 export default function Register() {
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -26,11 +28,11 @@ export default function Register() {
     setError("");
 
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError(t("register.passwordsMismatch"));
       return;
     }
     if (password.length < 8) {
-      setError("Password must be at least 8 characters");
+      setError(t("register.passwordTooShort"));
       return;
     }
 
@@ -44,7 +46,7 @@ export default function Register() {
       );
       navigate("/");
     } catch (err: any) {
-      setError(err.message || "Registration failed");
+      setError(err.message || t("register.failed"));
     } finally {
       setLoading(false);
     }
@@ -53,26 +55,26 @@ export default function Register() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>Haven</h1>
-        <p className="auth-subtitle">Create your account</p>
+        <h1>{t("register.appName")}</h1>
+        <p className="auth-subtitle">{t("register.subtitle")}</p>
 
         <form onSubmit={handleSubmit}>
           {inviteRequired && (
             <div className="field">
-              <label htmlFor="inviteCode">Invite Code</label>
+              <label htmlFor="inviteCode">{t("register.inviteCodeLabel")}</label>
               <input
                 id="inviteCode"
                 type="text"
                 value={inviteCode}
                 onChange={(e) => setInviteCode(e.target.value)}
                 required
-                placeholder="Enter your invite code"
+                placeholder={t("register.inviteCodePlaceholder")}
               />
             </div>
           )}
 
           <div className="field">
-            <label htmlFor="username">Username</label>
+            <label htmlFor="username">{t("register.usernameLabel")}</label>
             <input
               id="username"
               type="text"
@@ -83,12 +85,12 @@ export default function Register() {
               minLength={3}
               maxLength={32}
               pattern="^[a-zA-Z0-9_-]+$"
-              title="Alphanumeric, underscores, and hyphens only"
+              title={t("register.usernameTitle")}
             />
           </div>
 
           <div className="field">
-            <label htmlFor="displayName">Display Name (optional)</label>
+            <label htmlFor="displayName">{t("register.displayNameLabel")}</label>
             <input
               id="displayName"
               type="text"
@@ -98,7 +100,7 @@ export default function Register() {
           </div>
 
           <div className="field">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">{t("register.passwordLabel")}</label>
             <input
               id="password"
               type="password"
@@ -110,7 +112,7 @@ export default function Register() {
           </div>
 
           <div className="field">
-            <label htmlFor="confirmPassword">Confirm Password</label>
+            <label htmlFor="confirmPassword">{t("register.confirmPasswordLabel")}</label>
             <input
               id="confirmPassword"
               type="password"
@@ -123,16 +125,16 @@ export default function Register() {
           {error && <div className="error">{error}</div>}
 
           <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? "Generating keys..." : "Create Account"}
+            {loading ? t("register.submitLoading") : t("register.submit")}
           </button>
 
           <p className="auth-note">
-            Your encryption keys are generated locally. Haven never sees your password or private keys.
+            {t("register.encryptionNote")}
           </p>
         </form>
 
         <p className="auth-link">
-          Already have an account? <Link to="/login">Sign in</Link>
+          {t("register.alreadyHaveAccount")} <Link to="/login">{t("register.signIn")}</Link>
         </p>
       </div>
     </div>

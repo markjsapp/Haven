@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth";
 
 export default function Login() {
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
@@ -20,7 +22,7 @@ export default function Login() {
       await login(username, password, totpCode || undefined);
       navigate("/");
     } catch (err: any) {
-      setError(err.message || "Login failed");
+      setError(err.message || t("login.failed"));
     } finally {
       setLoading(false);
     }
@@ -29,12 +31,12 @@ export default function Login() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>Haven</h1>
-        <p className="auth-subtitle">Privacy-first communication</p>
+        <h1>{t("login.appName")}</h1>
+        <p className="auth-subtitle">{t("login.subtitle")}</p>
 
         <form onSubmit={handleSubmit}>
           <div className="field">
-            <label htmlFor="username">Username</label>
+            <label htmlFor="username">{t("login.usernameLabel")}</label>
             <input
               id="username"
               type="text"
@@ -46,7 +48,7 @@ export default function Login() {
           </div>
 
           <div className="field">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">{t("login.passwordLabel")}</label>
             <input
               id="password"
               type="password"
@@ -57,13 +59,13 @@ export default function Login() {
           </div>
 
           <div className="field">
-            <label htmlFor="totp">2FA Code (optional)</label>
+            <label htmlFor="totp">{t("login.totpLabel")}</label>
             <input
               id="totp"
               type="text"
               value={totpCode}
               onChange={(e) => setTotpCode(e.target.value)}
-              placeholder="Leave blank if not enabled"
+              placeholder={t("login.totpPlaceholder")}
               inputMode="numeric"
               maxLength={6}
             />
@@ -72,12 +74,12 @@ export default function Login() {
           {error && <div className="error">{error}</div>}
 
           <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? t("login.submitLoading") : t("login.submit")}
           </button>
         </form>
 
         <p className="auth-link">
-          No account? <Link to="/register">Create one</Link>
+          {t("login.noAccount")} <Link to="/register">{t("login.createOne")}</Link>
         </p>
       </div>
     </div>
