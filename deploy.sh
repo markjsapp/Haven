@@ -2,13 +2,21 @@
 set -euo pipefail
 
 # Haven deployment script
-# Usage: ./deploy.sh [--build-local]
-#   --build-local  Build the Docker image on the server (default)
+# Usage: ./deploy.sh              Pull latest image from GHCR and deploy
+#        ./deploy.sh --build      Build the Docker image locally and deploy
 
 COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
 HEALTH_URL="http://localhost:8080/health"
 HEALTH_TIMEOUT=60
+BUILD_LOCAL=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --build) BUILD_LOCAL=true ;;
+    *) echo "Unknown option: $arg"; exit 1 ;;
+  esac
+done
 
 # ─── Pre-flight checks ─────────────────────────────────
 
@@ -23,8 +31,13 @@ if ! command -v docker &>/dev/null; then
   exit 1
 fi
 
-echo "==> Building Haven..."
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build haven
+if [ "$BUILD_LOCAL" = true ]; then
+  echo "==> Building Haven locally..."
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build haven
+else
+  echo "==> Pulling latest Haven image from GHCR..."
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull haven
+fi
 
 echo "==> Recreating Haven container..."
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate haven
