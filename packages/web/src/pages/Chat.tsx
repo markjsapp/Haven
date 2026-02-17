@@ -20,6 +20,7 @@ import DmMemberSidebar from "../components/DmMemberSidebar.js";
 import PinnedMessagesPanel from "../components/PinnedMessagesPanel.js";
 const SearchPanel = lazy(() => import("../components/SearchPanel.js"));
 const VoiceRoom = lazy(() => import("../components/VoiceRoom.js"));
+const VoiceConnection = lazy(() => import("../components/VoiceConnection.js"));
 import { parseChannelDisplay } from "../lib/channel-utils.js";
 import SecurityPhraseSetup from "../components/SecurityPhraseSetup.js";
 import SecurityPhraseRestore from "../components/SecurityPhraseRestore.js";
@@ -445,6 +446,7 @@ export default function Chat() {
               </div>
             </div>
           )}
+          <Suspense fallback={null}><VoiceConnection>
           {showFriends && selectedServerId === null ? (
             <FriendsList />
           ) : currentChannelId && isVoiceChannel ? (
@@ -477,6 +479,7 @@ export default function Chat() {
               <p>{t("chat.noChannelMessage")}</p>
             </div>
           )}
+          </VoiceConnection></Suspense>
         </div>
       </div>
 
@@ -513,6 +516,7 @@ export default function Chat() {
 
       {backupPending && backupAvailable && <SecurityPhraseRestore />}
       {backupPending && !backupAvailable && <SecurityPhraseSetup />}
+
 
       {mentionPopup && (
         <ProfilePopup
