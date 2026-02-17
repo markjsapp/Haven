@@ -1,0 +1,63 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: "When I try to send a message in a server channel, the message shows as [encrypted] for other users."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this?
+      placeholder: |
+        1. Join a server with two accounts
+        2. Send a message from account A
+        3. View from account B
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Frontend (UI/UX)
+        - Backend (API/Server)
+        - Encryption (E2EE)
+        - Voice/Video (LiveKit)
+        - Deployment/Infra
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client
+      options:
+        - Web (browser)
+        - Desktop (Tauri)
+        - N/A (backend only)
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, error logs, browser/OS info, etc.
