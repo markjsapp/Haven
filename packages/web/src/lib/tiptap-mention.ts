@@ -8,15 +8,50 @@ import MentionList from "../components/MentionList.js";
 export interface MemberItem {
   id: string;
   label: string;
+  /** "everyone" | "role" for special mentions; undefined = normal user */
+  type?: "everyone" | "role";
+  /** Role color hex (only for type="role") */
+  color?: string | null;
 }
 
 /** Shared flag: true when any suggestion popup (mention/channel) is visible. */
 export const suggestionActiveRef = { current: false };
 
+/**
+ * Extended Mention extension that supports a `mentionType` attribute
+ * for distinguishing @everyone, @role, and @user mentions.
+ */
+const ExtendedMention = Mention.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      mentionType: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute("data-mention-type"),
+        renderHTML: (attributes: Record<string, unknown>) => {
+          if (!attributes.mentionType) return {};
+          return { "data-mention-type": attributes.mentionType as string };
+        },
+      },
+    };
+  },
+});
+
 export function createMentionExtension(getMembers: () => MemberItem[]) {
-  return Mention.configure({
+  return ExtendedMention.configure({
     HTMLAttributes: {
       class: "mention",
+    },
+    renderText: ({ node }) => `@${node.attrs.label ?? node.attrs.id}`,
+    renderHTML: ({ options, node }) => {
+      const attrs: Record<string, string> = {
+        ...options.HTMLAttributes,
+        "data-id": node.attrs.id,
+      };
+      if (node.attrs.mentionType) {
+        attrs["data-mention-type"] = node.attrs.mentionType;
+      }
+      return ["span", attrs, `@${node.attrs.label ?? node.attrs.id}`];
     },
     suggestion: {
       char: "@",
@@ -24,7 +59,28 @@ export function createMentionExtension(getMembers: () => MemberItem[]) {
         const q = query.toLowerCase();
         return getMembers()
           .filter((m) => m.label.toLowerCase().includes(q))
-          .slice(0, 8);
+          .slice(0, 10);
+      },
+      command: ({ editor, range, props }) => {
+        const item = props as unknown as MemberItem;
+        const nodeAttrs: Record<string, unknown> = {
+          id: item.id,
+          label: item.label,
+        };
+        if (item.type) {
+          nodeAttrs.mentionType = item.type;
+        }
+
+        editor
+          .chain()
+          .focus()
+          .insertContentAt(range, [
+            { type: "mention", attrs: nodeAttrs },
+            { type: "text", text: " " },
+          ])
+          .run();
+
+        window.getSelection()?.collapseToEnd();
       },
       render: () => {
         let component: ReactRenderer | null = null;
