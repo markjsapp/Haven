@@ -34,12 +34,40 @@ const ChannelMention = Mention.extend({
   },
 });
 
+// Extended Mention that renders data-mention-type for @everyone/@role
+const ExtendedMention = Mention.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      mentionType: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute("data-mention-type"),
+        renderHTML: (attributes: Record<string, unknown>) => {
+          if (!attributes.mentionType) return {};
+          return { "data-mention-type": attributes.mentionType as string };
+        },
+      },
+    };
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const attrs: Record<string, string> = {
+      ...HTMLAttributes,
+      class: "mention",
+      "data-id": node.attrs.id,
+    };
+    if (node.attrs.mentionType) {
+      attrs["data-mention-type"] = node.attrs.mentionType;
+    }
+    return ["span", attrs, `@${node.attrs.label ?? node.attrs.id}`];
+  },
+});
+
 const extensions = [
   StarterKit.configure({ codeBlock: false, link: false, underline: false }),
   CodeBlockLowlight.configure({ lowlight }),
   Link.configure({ openOnClick: false }),
   TiptapUnderline,
-  Mention.configure({
+  ExtendedMention.configure({
     HTMLAttributes: { class: "mention" },
   }),
   ChannelMention,
@@ -141,8 +169,8 @@ export default function MessageBody({ text, contentType, formatting, customEmoji
       return;
     }
 
-    // Handle @user mention clicks — show profile popup
-    const userMention = target.closest(".mention:not([data-type='channel'])") as HTMLElement | null;
+    // Handle @user mention clicks — show profile popup (skip @everyone and @role)
+    const userMention = target.closest(".mention:not([data-type='channel']):not([data-mention-type='everyone']):not([data-mention-type='role'])") as HTMLElement | null;
     if (userMention) {
       const userId = userMention.getAttribute("data-id");
       if (userId) {

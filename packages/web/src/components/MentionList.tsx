@@ -9,6 +9,8 @@ import Avatar from "./Avatar.js";
 interface MentionItem {
   id: string;
   label: string;
+  type?: "everyone" | "role";
+  color?: string | null;
 }
 
 interface MentionListProps {
@@ -59,7 +61,16 @@ export default forwardRef<{ onKeyDown: (props: { event: KeyboardEvent }) => bool
             className={`mention-list-item ${index === selectedIndex ? "mention-list-item-active" : ""}`}
             onClick={() => selectItem(index)}
           >
-            <Avatar name={item.label} size={24} />
+            {item.type === "everyone" ? (
+              <span className="mention-list-icon mention-list-icon-everyone">@</span>
+            ) : item.type === "role" ? (
+              <span
+                className="mention-list-icon mention-list-icon-role"
+                style={{ backgroundColor: item.color || "var(--text-muted)" }}
+              />
+            ) : (
+              <Avatar name={item.label} size={24} />
+            )}
             <span className="mention-list-name">{item.label}</span>
           </button>
         ))}
