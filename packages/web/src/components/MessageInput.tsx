@@ -202,8 +202,10 @@ export default function MessageInput({ placeholder }: MessageInputProps) {
 
   // Sync spellcheck attribute
   useEffect(() => {
-    if (!editor || !editor.view || !editor.view.dom) return;
-    editor.view.dom.setAttribute("spellcheck", spellcheck ? "true" : "false");
+    if (!editor || editor.isDestroyed) return;
+    try {
+      editor.view.dom.setAttribute("spellcheck", spellcheck ? "true" : "false");
+    } catch { /* editor not mounted yet */ }
   }, [editor, spellcheck]);
 
   // Close input context menu on outside click / scroll / escape
@@ -226,9 +228,10 @@ export default function MessageInput({ placeholder }: MessageInputProps) {
 
   // Update placeholder attribute when it changes
   useEffect(() => {
-    if (!editor || !editor.view) return;
-    // Force TipTap to re-render the placeholder by triggering an update
-    editor.view.dispatch(editor.state.tr);
+    if (!editor || editor.isDestroyed) return;
+    try {
+      editor.view.dispatch(editor.state.tr);
+    } catch { /* editor not mounted yet */ }
   }, [editor, resolvedPlaceholder]);
 
   // Draft save/restore on channel switch
