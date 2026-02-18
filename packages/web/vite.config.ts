@@ -57,6 +57,12 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5173,
+    fs: {
+      allow: [
+        // Default: search up from project root
+        path.resolve(__dirname, ".."),
+      ],
+    },
     proxy: {
       "/api/v1/ws": {
         target: "ws://127.0.0.1:8080",
