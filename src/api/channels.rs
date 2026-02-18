@@ -10,6 +10,7 @@ use crate::errors::{AppError, AppResult};
 use crate::middleware::AuthUser;
 use crate::models::*;
 use crate::permissions;
+use crate::ws::broadcast_to_server;
 use crate::AppState;
 
 /// POST /api/v1/servers/:server_id/channels
@@ -61,6 +62,9 @@ pub async fn create_channel(
         Some("channel"), Some(channel.id),
         Some(&serde_json::json!({ "channel_type": &channel.channel_type })), None,
     ).await;
+
+    // Notify other server members so their channel list updates
+    broadcast_to_server(&state, server_id, WsServerMessage::ServerUpdated { server_id }).await;
 
     Ok(Json(ChannelResponse {
         id: channel.id,
@@ -273,6 +277,8 @@ pub async fn update_channel(
         Some("channel"), Some(channel_id), None, None,
     ).await;
 
+    broadcast_to_server(&state, server_id, WsServerMessage::ServerUpdated { server_id }).await;
+
     Ok(Json(ChannelResponse {
         id: updated.id,
         server_id: updated.server_id,
@@ -313,6 +319,8 @@ pub async fn reorder_channels(
         .collect();
     queries::reorder_channels(state.db.write(), server_id, &order).await?;
 
+    broadcast_to_server(&state, server_id, WsServerMessage::ServerUpdated { server_id }).await;
+
     Ok(Json(serde_json::json!({ "message": "Channels reordered" })))
 }
 
@@ -345,6 +353,8 @@ pub async fn delete_channel(
         state.db.write(), server_id, user_id, "channel_delete",
         Some("channel"), Some(channel_id), None, None,
     ).await;
+
+    broadcast_to_server(&state, server_id, WsServerMessage::ServerUpdated { server_id }).await;
 
     Ok(Json(serde_json::json!({ "message": "Channel deleted" })))
 }

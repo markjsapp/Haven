@@ -4700,7 +4700,7 @@ em-emoji-picker {
 .role-settings {
   display: flex;
   min-height: 300px;
-  max-height: 400px;
+  flex: 1;
   overflow: hidden;
 }
 
@@ -5464,6 +5464,8 @@ em-emoji-picker {
   overflow-y: auto;
   min-width: 0;
   position: relative;
+  /* Extra right padding so ESC button doesn't overlap the scrollbar */
+  padding-right: 60px;
 }
 
 .user-settings-content-header {
@@ -5491,7 +5493,7 @@ em-emoji-picker {
   position: absolute;
   right: 20px;
   top: 20px;
-  z-index: 1;
+  z-index: 2;
 }
 
 .settings-esc-circle {

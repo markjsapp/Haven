@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
@@ -73,7 +73,9 @@ export default function EditMemberRolesModal({ serverId, userId, username, onClo
     <div className="modal-overlay" onClick={onClose} role="presentation">
       <div className="modal-dialog edit-roles-modal" onClick={(e) => e.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="edit-roles-title">
         <h3 className="modal-title" id="edit-roles-title">{t("editMemberRoles.title")}</h3>
-        <p className="edit-roles-subtitle">{t("editMemberRoles.subtitle", { username })}</p>
+        <p className="edit-roles-subtitle">
+          <Trans i18nKey="editMemberRoles.subtitle" values={{ username }} components={{ strong: <strong /> }} />
+        </p>
 
         {error && <div className="error-small">{error}</div>}
 
