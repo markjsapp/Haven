@@ -11,6 +11,7 @@ RUN cd packages/haven-core && npm ci && npm run build
 # Build web frontend
 COPY packages/web/package.json packages/web/package-lock.json packages/web/tsconfig.json packages/web/vite.config.ts packages/web/index.html packages/web/
 COPY packages/web/.npmrc packages/web/
+COPY packages/web/public packages/web/public
 COPY packages/web/src packages/web/src
 RUN cd packages/web && npm ci && npm run build
 

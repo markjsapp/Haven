@@ -393,6 +393,7 @@ export type WsServerMessage =
   | { type: "BulkMessagesDeleted"; payload: { channel_id: string; message_ids: string[] } }
   | { type: "MemberTimedOut"; payload: { server_id: string; user_id: string; timed_out_until: string | null } }
   | { type: "ReadStateUpdated"; payload: { channel_id: string; last_read_at: string } }
+  | { type: "ServerUpdated"; payload: { server_id: string } }
   | { type: "Hello"; payload: { session_id: string; heartbeat_interval_ms: number } }
   | { type: "Resumed"; payload: { replayed_count: number } }
   | { type: "InvalidSession" };

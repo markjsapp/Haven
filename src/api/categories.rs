@@ -9,6 +9,7 @@ use crate::errors::{AppError, AppResult};
 use crate::middleware::AuthUser;
 use crate::models::*;
 use crate::permissions;
+use crate::ws::broadcast_to_server;
 use crate::AppState;
 
 /// GET /api/v1/servers/:server_id/categories
@@ -43,6 +44,9 @@ pub async fn create_category(
 
     let position = req.position.unwrap_or(0);
     let cat = queries::create_category(state.db.write(), server_id, &req.name, position).await?;
+
+    broadcast_to_server(&state, server_id, WsServerMessage::ServerUpdated { server_id }).await;
+
     Ok(Json(CategoryResponse::from(cat)))
 }
 
@@ -63,6 +67,8 @@ pub async fn reorder_categories(
 
     let order: Vec<(Uuid, i32)> = req.order.iter().map(|p| (p.id, p.position)).collect();
     queries::reorder_categories(state.db.write(), server_id, &order).await?;
+
+    broadcast_to_server(&state, server_id, WsServerMessage::ServerUpdated { server_id }).await;
 
     Ok(Json(serde_json::json!({ "message": "Categories reordered" })))
 }
@@ -96,6 +102,9 @@ pub async fn update_category(
         req.position,
     )
     .await?;
+
+    broadcast_to_server(&state, server_id, WsServerMessage::ServerUpdated { server_id }).await;
+
     Ok(Json(CategoryResponse::from(updated)))
 }
 
@@ -121,6 +130,9 @@ pub async fn delete_category(
     }
 
     queries::delete_category(state.db.write(), category_id).await?;
+
+    broadcast_to_server(&state, server_id, WsServerMessage::ServerUpdated { server_id }).await;
+
     Ok(Json(serde_json::json!({ "message": "Category deleted" })))
 }
 
@@ -157,6 +169,8 @@ pub async fn set_channel_category(
     }
 
     let updated = queries::set_channel_category(state.db.write(), channel_id, req.category_id).await?;
+
+    broadcast_to_server(&state, server_id, WsServerMessage::ServerUpdated { server_id }).await;
 
     Ok(Json(ChannelResponse {
         id: updated.id,

@@ -490,6 +490,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     });
 
+    ws.on("ServerUpdated", () => {
+      // Server structure changed (channels/categories) — reload
+      get().loadChannels();
+    });
+
     ws.on("DmRequestReceived", () => {
       import("./friends.js").then(({ useFriendsStore }) => {
         useFriendsStore.getState().loadDmRequests();
