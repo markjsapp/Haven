@@ -99,6 +99,8 @@ interface ChatState {
   mentionCounts: Record<string, number>;
   /** serverId -> effective permission bitfield for current user */
   myPermissions: Record<string, bigint>;
+  /** serverId -> current user's role IDs in that server */
+  myRoleIds: Record<string, string[]>;
   /** userId -> highest-priority role color hex string */
   userRoleColors: Record<string, string>;
   /** serverId -> custom emojis for that server */
@@ -190,6 +192,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   unreadCounts: {},
   mentionCounts: {},
   myPermissions: {},
+  myRoleIds: {},
   userRoleColors: {},
   customEmojis: {},
   memberTimeouts: {},
@@ -659,6 +662,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
+    // Build myRoleIds map: serverId -> current user's role IDs in that server
+    const myRoleIds: Record<string, string[]> = {};
+    if (user) {
+      for (let i = 0; i < servers.length; i++) {
+        const me = memberArrays[i].find((m) => m.user_id === user.id);
+        if (me) myRoleIds[servers[i].id] = me.role_ids;
+      }
+    }
+
     // Merge DM/group names (server member names take priority)
     const mergedUserNames = { ...dmUserNames, ...userNames };
 
@@ -680,6 +692,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       userAvatars,
       blockedUserIds: blockedUsers.map((b) => b.user_id),
       myPermissions,
+      myRoleIds,
       userRoleColors,
       unreadCounts: serverUnreads,
       dataLoaded: true,
@@ -1390,14 +1403,25 @@ function appendMessage(
   return { messages: { ...state.messages, [channelId]: updated } };
 }
 
-/** Check if a tiptap formatting object mentions a specific user ID. */
-function formattingMentionsUser(formatting: unknown, userId: string): boolean {
+/** Check if a tiptap formatting object mentions a specific user (by ID, @everyone, or @role). */
+function formattingMentionsUser(formatting: unknown, userId: string, userRoleIds?: string[]): boolean {
   if (!formatting || typeof formatting !== "object") return false;
   const node = formatting as Record<string, unknown>;
-  if (node.type === "mention" && (node.attrs as Record<string, unknown>)?.id === userId) return true;
+  if (node.type === "mention") {
+    const attrs = node.attrs as Record<string, unknown> | undefined;
+    if (!attrs) return false;
+    // @everyone mentions all users
+    if (attrs.id === "everyone") return true;
+    // @role mentions users who have that role
+    if (attrs.mentionType === "role" && userRoleIds && typeof attrs.id === "string") {
+      if (userRoleIds.includes(attrs.id)) return true;
+    }
+    // Direct @user mention
+    if (attrs.id === userId) return true;
+  }
   const content = node.content;
   if (Array.isArray(content)) {
-    return content.some((child) => formattingMentionsUser(child, userId));
+    return content.some((child) => formattingMentionsUser(child, userId, userRoleIds));
   }
   return false;
 }
@@ -1523,7 +1547,11 @@ async function handleIncomingMessage(raw: MessageResponse) {
     if (raw.channel_id !== useChatStore.getState().currentChannelId) {
       const myId = useAuthStore.getState().user?.id;
       if (myId) {
-        const isMentioned = formattingMentionsUser(msg.formatting, myId);
+        // Look up user's role IDs for @role mention detection
+        const state = useChatStore.getState();
+        const channel = state.channels.find((ch) => ch.id === raw.channel_id);
+        const roleIds = channel?.server_id ? state.myRoleIds[channel.server_id] ?? [] : [];
+        const isMentioned = formattingMentionsUser(msg.formatting, myId, roleIds);
         const isReplyToMe = msg.replyToId
           ? (useChatStore.getState().messages[raw.channel_id] ?? []).some(
               (m) => m.id === msg.replyToId && m.senderId === myId,

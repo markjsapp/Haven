@@ -121,7 +121,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: server-linux-x64
+          path: artifacts/server-linux-x64
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
