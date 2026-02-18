@@ -202,7 +202,7 @@ export default function MessageInput({ placeholder }: MessageInputProps) {
 
   // Sync spellcheck attribute
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || !editor.view || !editor.view.dom) return;
     editor.view.dom.setAttribute("spellcheck", spellcheck ? "true" : "false");
   }, [editor, spellcheck]);
 
@@ -226,7 +226,7 @@ export default function MessageInput({ placeholder }: MessageInputProps) {
 
   // Update placeholder attribute when it changes
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || !editor.view) return;
     // Force TipTap to re-render the placeholder by triggering an update
     editor.view.dispatch(editor.state.tr);
   }, [editor, resolvedPlaceholder]);
