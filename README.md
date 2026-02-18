@@ -32,7 +32,10 @@ Most chat platforms choose between features and privacy. Haven doesn't.
 | Open source | Yes | No | Yes | Yes |
 | Rich text & embeds | Yes | Yes | Limited | No |
 | Encrypted file sharing | Yes | No encryption | Opt-in | Yes |
+| Internationalization (i18n) | Yes | Partial | Yes | Yes |
+| Accessibility (a11y) | Yes | Partial | Limited | Limited |
 | No tracking / telemetry | Yes | No | Varies | Yes |
+
 
 **Haven gives you Discord-level features with Signal-level privacy.** Your server, your data, your keys. The backend never sees plaintext — not messages, not filenames, not even channel names.
 
@@ -47,6 +50,10 @@ Most chat platforms choose between features and privacy. Haven doesn't.
 **Security** — X3DH + Double Ratchet for DMs (Signal Protocol), Sender Keys for group channels, encrypted file attachments, encrypted key backup (Argon2id KDF), Argon2id password hashing, JWT + rotating refresh tokens, optional TOTP 2FA, proof-of-work registration gate
 
 **Voice** — self hosted LiveKit-powered voice channels with screen sharing (360p–4K quality presets), per-user volume control (0–200%), server mute/deafen, right-click context menu on participants
+
+**Internationalization** — Full i18n support via react-i18next with externalized string keys, ready for community translations
+
+**Accessibility** — ARIA labels and roles throughout, keyboard navigation, focus traps in modals and dialogs, screen reader support, configurable reduced motion, high-contrast mode, dyslexia-friendly font option
 
 ## Tech Stack
 

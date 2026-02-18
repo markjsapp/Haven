@@ -1221,3 +1221,14 @@ async fn handle_unpin_message(
         }
     }
 }
+
+/// Broadcast a WS message to all subscribers of a server's channels.
+pub async fn broadcast_to_server(state: &AppState, server_id: Uuid, msg: WsServerMessage) {
+    if let Ok(channels) = queries::get_server_channels(state.db.read(), server_id).await {
+        for ch in channels {
+            if let Some(broadcaster) = state.channel_broadcasts.get(&ch.id) {
+                let _ = broadcaster.send(msg.clone());
+            }
+        }
+    }
+}

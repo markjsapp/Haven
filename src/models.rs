@@ -743,6 +743,8 @@ pub enum WsServerMessage {
     Resumed {
         replayed_count: u32,
     },
+    /// Server structure changed (channels/categories created/updated/deleted)
+    ServerUpdated { server_id: Uuid },
     /// Session expired or invalid — do a full reconnect
     InvalidSession,
 }
