@@ -23,6 +23,8 @@ import { createChannelMentionExtension, type ChannelItem } from "../lib/tiptap-c
 import { createEmojiSuggestExtension } from "../lib/tiptap-emoji-suggest.js";
 import { useUiStore } from "../store/ui.js";
 import { parseChannelName } from "../lib/channel-utils.js";
+import { usePermissions } from "../hooks/usePermissions.js";
+import { Permission } from "@haven/core";
 
 const lowlight = createLowlight(common);
 
@@ -97,9 +99,24 @@ export default function MessageInput({ placeholder }: MessageInputProps) {
   const setShowSendButton = useUiStore((s) => s.setShowSendButton);
   const spellcheck = useUiStore((s) => s.spellcheck);
   const setSpellcheck = useUiStore((s) => s.setSpellcheck);
+  const roles = useChatStore((s) => s.roles);
+  const { can } = usePermissions();
 
-  // Keep mention member list in sync
-  memberListRef.current = Object.entries(userNames).map(([id, name]) => ({ id, label: name }));
+  // Keep mention member list in sync (special mentions first, then users)
+  const specialMentions: MemberItem[] = [];
+  if (selectedServerId) {
+    if (can(Permission.MENTION_EVERYONE)) {
+      specialMentions.push({ id: "everyone", label: "everyone", type: "everyone" });
+    }
+    const serverRoles = roles[selectedServerId] ?? [];
+    for (const role of serverRoles) {
+      if (!role.is_default) {
+        specialMentions.push({ id: role.id, label: role.name, type: "role", color: role.color });
+      }
+    }
+  }
+  const userMentions: MemberItem[] = Object.entries(userNames).map(([id, name]) => ({ id, label: name }));
+  memberListRef.current = [...specialMentions, ...userMentions];
 
   // Keep channel mention list in sync (scoped to current server, text channels only)
   channelListRef.current = channels
