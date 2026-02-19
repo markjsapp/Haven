@@ -39,7 +39,7 @@ services:
       - "7881:7881"     # RTC over TCP
       - "7882:7882/udp" # RTC over UDP (media traffic)
     environment:
-      LIVEKIT_KEYS: "LIVEKIT_CREDENTIALS_REMOVED="
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey12345678}: ${LIVEKIT_API_SECRET:-devsecret-change-me-in-production}"
     command: --dev --bind 0.0.0.0
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880"]

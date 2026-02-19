@@ -97,8 +97,10 @@ ssh haven@YOUR_SERVER_IP
 ### 5. Clone and Configure Haven
 
 ```bash
-git clone https://github.com/markjsapp/haven.git
-cd haven
+sudo mkdir -p /opt/haven
+sudo chown haven:haven /opt/haven
+git clone https://github.com/markjsapp/haven.git /opt/haven
+cd /opt/haven
 
 # Create production environment file
 cp .env.production.example .env.production
@@ -107,7 +109,7 @@ cp .env.production.example .env.production
 Edit `.env.production` and fill in all values:
 
 ```bash
-nano .env.production
+nano /opt/haven/.env.production
 ```
 
 **Required values to generate:**
@@ -145,13 +147,14 @@ dig +short chat.yourdomain.com
 
 ```bash
 # Start the full stack (first run builds everything — takes 5-10 minutes)
+cd /opt/haven
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 ```
 
 Watch the logs:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production logs -f haven
+docker compose -f /opt/haven/docker-compose.prod.yml --env-file /opt/haven/.env.production logs -f haven
 ```
 
 Caddy will automatically obtain a Let's Encrypt TLS certificate once DNS resolves.
@@ -174,7 +177,7 @@ Each new user who registers with an invite code also receives 3 invite codes of 
 After pushing code changes:
 
 ```bash
-cd ~/haven
+cd /opt/haven
 git pull
 ./deploy.sh
 ```
@@ -204,7 +207,7 @@ crontab -e
 Add this line:
 
 ```
-0 3 * * * docker compose -f ~/haven/docker-compose.prod.yml --env-file ~/haven/.env.production exec -T postgres pg_dump -U haven haven | gzip > ~/backups/haven-$(date +\%Y\%m\%d).sql.gz && find ~/backups -name "*.sql.gz" -mtime +14 -delete
+0 3 * * * docker compose -f /opt/haven/docker-compose.prod.yml --env-file /opt/haven/.env.production exec -T postgres pg_dump -U haven haven | gzip > ~/backups/haven-$(date +\%Y\%m\%d).sql.gz && find ~/backups -name "*.sql.gz" -mtime +14 -delete
 ```
 
 This runs daily at 3 AM and keeps 14 days of backups.
