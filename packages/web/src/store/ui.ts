@@ -64,10 +64,16 @@ interface UiState {
   /** Hide muted channels in channel sidebar */
   hideMutedChannels: boolean;
 
+  /** Transient search query from member sidebar input (not persisted) */
+  searchQuery: string;
+
+  /** Which tab to open in User Settings (transient, not persisted) */
+  userSettingsTab: string | null;
+
   selectServer(id: string | null): void;
   toggleMemberSidebar(): void;
   setShowFriends(show: boolean): void;
-  setShowUserSettings(show: boolean): void;
+  setShowUserSettings(show: boolean, tab?: string): void;
   setShowAdminPanel(show: boolean): void;
   togglePinnedPanel(): void;
   toggleSearchPanel(): void;
@@ -94,6 +100,7 @@ interface UiState {
   setMemberSidebarWidth(w: number): void;
   setServerBarWidth(w: number): void;
   setHideMutedChannels(hide: boolean): void;
+  setSearchQuery(query: string): void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -127,6 +134,8 @@ export const useUiStore = create<UiState>()(
       memberSidebarWidth: 240,
       serverBarWidth: 72,
       hideMutedChannels: false,
+      searchQuery: "",
+      userSettingsTab: null,
 
       selectServer(id) {
         set({
@@ -144,8 +153,8 @@ export const useUiStore = create<UiState>()(
         set({ showFriends: show });
       },
 
-      setShowUserSettings(show) {
-        set({ showUserSettings: show });
+      setShowUserSettings(show, tab) {
+        set({ showUserSettings: show, userSettingsTab: show ? (tab ?? null) : null });
       },
 
       setShowAdminPanel(show) {
@@ -157,7 +166,11 @@ export const useUiStore = create<UiState>()(
       },
 
       toggleSearchPanel() {
-        set((s) => ({ searchPanelOpen: !s.searchPanelOpen, pinnedPanelOpen: false }));
+        set((s) => ({
+          searchPanelOpen: !s.searchPanelOpen,
+          pinnedPanelOpen: false,
+          ...(!s.searchPanelOpen ? {} : { searchQuery: "" }),
+        }));
       },
 
       setMentionPopup(popup) {
@@ -231,6 +244,7 @@ export const useUiStore = create<UiState>()(
       setMemberSidebarWidth(w) { set({ memberSidebarWidth: w }); },
       setServerBarWidth(w) { set({ serverBarWidth: w }); },
       setHideMutedChannels(hide) { set({ hideMutedChannels: hide }); },
+      setSearchQuery(query) { set({ searchQuery: query }); },
       setUserNote(userId, note) {
         set((s) => {
           if (!note.trim()) {

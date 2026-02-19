@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { parseChannelName } from "../lib/channel-utils.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 // ─── Filter Parsing ─────────────────────────────────────
 
@@ -59,7 +60,8 @@ function removeFilter(rawQuery: string, filterToken: string): string {
 
 export default function SearchPanel() {
   const { t } = useTranslation();
-  const [rawQuery, setRawQuery] = useState("");
+  const initialQuery = useUiStore((s) => s.searchQuery);
+  const [rawQuery, setRawQuery] = useState(initialQuery);
   const [dateAfter, setDateAfter] = useState("");
   const [dateBefore, setDateBefore] = useState("");
   const messages = useChatStore((s) => s.messages);
@@ -69,10 +71,17 @@ export default function SearchPanel() {
   const toggleSearchPanel = useUiStore((s) => s.toggleSearchPanel);
   const selectedServerId = useUiStore((s) => s.selectedServerId);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Sync if external searchQuery changes while open
+  useEffect(() => {
+    if (initialQuery) setRawQuery(initialQuery);
+  }, [initialQuery]);
 
   // Build channel name lookup
   const channelNameMap = useMemo(() => {
@@ -244,7 +253,8 @@ export default function SearchPanel() {
   };
 
   return (
-    <div className="search-panel">
+    <div className="modal-overlay" onClick={toggleSearchPanel}>
+    <div className="search-modal" ref={dialogRef} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
       <div className="search-panel-header">
         <h3>{t("search.title")}</h3>
         <button type="button" className="btn-ghost" onClick={toggleSearchPanel} aria-label={t("search.closeAriaLabel")}>
@@ -377,6 +387,7 @@ export default function SearchPanel() {
           </div>
         ))}
       </div>
+    </div>
     </div>
   );
 }

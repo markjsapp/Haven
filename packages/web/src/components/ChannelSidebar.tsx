@@ -838,7 +838,7 @@ function ChannelItemContent({ ch, isOverlay, onContextMenu }: { ch: ChannelRespo
   return (
     <>
       <button
-        className={`channel-item ${ch.id === currentChannelId ? "active" : ""} ${unread > 0 ? "unread" : ""} ${muted ? "muted" : ""} ${isInThisVoice ? "voice-active" : ""} ${isOverlay ? "drag-overlay" : ""}`}
+        className={`channel-item ${ch.id === currentChannelId ? "active" : ""} ${unread > 0 ? "unread" : ""} ${muted || notifySetting === "nothing" ? "muted" : ""} ${isInThisVoice ? "voice-active" : ""} ${isOverlay ? "drag-overlay" : ""}`}
         onClick={isOverlay ? undefined : handleChannelClick}
         onContextMenu={onContextMenu ? (e) => onContextMenu(e, ch.id) : undefined}
         data-roving-item

@@ -24,7 +24,8 @@ export default function UserSettings() {
   const user = useAuthStore((s) => s.user);
   const api = useAuthStore((s) => s.api);
   const setShowUserSettings = useUiStore((s) => s.setShowUserSettings);
-  const [tab, setTab] = useState<Tab>("account");
+  const initialTab = useUiStore((s) => s.userSettingsTab) as Tab | null;
+  const [tab, setTab] = useState<Tab>(initialTab ?? "account");
 
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
@@ -1470,9 +1471,6 @@ function AppearanceTab() {
     },
   ];
 
-  const customCss = useUiStore((s) => s.customCss);
-  const setCustomCss = useUiStore((s) => s.setCustomCss);
-
   return (
     <>
       <div className="settings-section">
@@ -1495,29 +1493,6 @@ function AppearanceTab() {
             </button>
           ))}
         </div>
-      </div>
-      <div className="settings-section">
-        <div className="settings-section-title">{t("userSettings.appearance.customCss")}</div>
-        <p className="settings-description">
-          {t("userSettings.appearance.customCssDesc")}
-        </p>
-        <textarea
-          className="settings-input custom-css-textarea"
-          value={customCss}
-          onChange={(e) => setCustomCss(e.target.value)}
-          placeholder={`/* Example: change the brand color */\n:root {\n  --brand: #ff6b6b;\n}`}
-          spellCheck={false}
-          rows={8}
-        />
-        {customCss && (
-          <button
-            className="btn-ghost"
-            style={{ marginTop: 8 }}
-            onClick={() => setCustomCss("")}
-          >
-            {t("userSettings.appearance.clearCustomCss")}
-          </button>
-        )}
       </div>
     </>
   );

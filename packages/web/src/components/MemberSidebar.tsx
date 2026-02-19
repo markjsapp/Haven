@@ -1,9 +1,8 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useEffect, useState, useMemo, lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../store/auth.js";
 import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
 import { useChatStore } from "../store/chat.js";
-import { useUiStore } from "../store/ui.js";
 const ProfilePopup = lazy(() => import("./ProfilePopup.js"));
 import FullProfileCard from "./FullProfileCard.js";
 import UserContextMenu from "./UserContextMenu.js";
@@ -20,10 +19,8 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
   const ownerId = useChatStore((s) => s.servers.find((sv) => sv.id === serverId)?.owner_id);
   const memberListVersion = useChatStore((s) => s.memberListVersion);
 
-  const toggleSearchPanel = useUiStore((s) => s.toggleSearchPanel);
-  const searchPanelOpen = useUiStore((s) => s.searchPanelOpen);
-
   const [members, setMembers] = useState<ServerMemberResponse[]>([]);
+  const [memberFilter, setMemberFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [profilePopup, setProfilePopup] = useState<{
     userId: string;
@@ -52,7 +49,15 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
     return () => { cancelled = true; };
   }, [serverId, memberListVersion]);
 
-  const filtered = members;
+  const filtered = useMemo(() => {
+    const q = memberFilter.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((m) => {
+      const name = (m.nickname || m.display_name || m.username).toLowerCase();
+      const username = m.username.toLowerCase();
+      return name.includes(q) || username.includes(q);
+    });
+  }, [members, memberFilter]);
 
   // Group members: online+role → under role, online+no role → by status, offline → all in "Offline"
   const nonDefaultRoles = roles.filter((r) => !r.is_default && r.color).sort((a, b) => b.position - a.position);
@@ -115,17 +120,29 @@ export default function MemberSidebar({ serverId }: { serverId: string }) {
   return (
     <aside className="member-sidebar" aria-label={t("memberSidebar.ariaLabel")}>
       <div className="member-sidebar-header">
-        <button
-          className={`search-input-wrapper search-trigger-btn${searchPanelOpen ? " active" : ""}`}
-          onClick={toggleSearchPanel}
-          aria-label={t("memberSidebar.searchAriaLabel")}
-          title={t("memberSidebar.searchTitle")}
-        >
+        <div className="search-input-wrapper">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="search-icon" aria-hidden="true">
             <path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
           </svg>
-          <span className="search-trigger-text">{t("memberSidebar.searchText")}</span>
-        </button>
+          <input
+            type="text"
+            className="search-input"
+            placeholder={t("memberSidebar.searchText")}
+            value={memberFilter}
+            onChange={(e) => setMemberFilter(e.target.value)}
+            aria-label={t("memberSidebar.searchAriaLabel")}
+          />
+          {memberFilter && (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={() => setMemberFilter("")}
+              aria-label={t("search.closeAriaLabel")}
+            >
+              &times;
+            </button>
+          )}
+        </div>
       </div>
       <div className="member-sidebar-content">
       {statusGroups.map((group) => (
@@ -312,7 +329,7 @@ function MemberItem({
       {isOwner && (
         <span title={t("memberSidebar.serverOwner")}>
           <svg className="member-owner-crown" width="16" height="16" viewBox="0 0 16 16" fill="#f0b232" aria-hidden="true">
-            <path d="M2 11l2-6 4 3 4-3 2 6H2zm6-9l2.5 4L8 8 5.5 6 8 2z" />
+            <path d="M8 1v4M8 5L5 3v4l3 2 3-2V3L8 5zM8 9v6M5 13h6" stroke="#f0b232" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </svg>
         </span>
       )}

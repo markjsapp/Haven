@@ -526,8 +526,8 @@ export default function Chat() {
       )}
 
       {pinnedPanelOpen && currentChannelId && <PinnedMessagesPanel channelId={currentChannelId} />}
-      {searchPanelOpen && <Suspense fallback={null}><SearchPanel /></Suspense>}
 
+      {searchPanelOpen && <Suspense fallback={null}><SearchPanel /></Suspense>}
       {showUserSettings && <Suspense fallback={null}><UserSettings /></Suspense>}
       {showAdminPanel && <Suspense fallback={null}><AdminPanel onClose={() => setShowAdminPanel(false)} /></Suspense>}
       {showCommandPalette && <Suspense fallback={null}><CommandPalette onClose={() => setShowCommandPalette(false)} /></Suspense>}

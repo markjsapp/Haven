@@ -116,7 +116,7 @@ export default function UserPanel() {
           />
         </div>
         <div className="user-panel-info">
-          <span className="user-panel-name">{user.display_name || user.username}</span>
+          <span className="user-panel-name" role="button" tabIndex={0} onClick={() => setShowUserSettings(true, "profile")} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShowUserSettings(true, "profile"); } }}>{user.display_name || user.username}</span>
           {user.custom_status ? (
             <span className="user-panel-custom-status" onClick={() => setShowCustomStatus(true)} title={t("userPanel.editCustomStatus")} role="button" tabIndex={0} aria-label={t("userPanel.setCustomStatus")} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShowCustomStatus(true); } }}>
               {user.custom_status_emoji && <span>{user.custom_status_emoji} </span>}
