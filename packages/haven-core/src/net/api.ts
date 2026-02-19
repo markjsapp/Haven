@@ -252,7 +252,7 @@ export class HavenApi {
     return this.get(`/api/v1/servers/${serverId}/members/@me/permissions`);
   }
 
-  async updateServer(serverId: string, req: { system_channel_id?: string | null }): Promise<{ ok: boolean }> {
+  async updateServer(serverId: string, req: { system_channel_id?: string | null; encrypted_meta?: string }): Promise<{ ok: boolean }> {
     return this.patch(`/api/v1/servers/${serverId}`, req);
   }
 

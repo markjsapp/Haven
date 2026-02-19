@@ -845,6 +845,8 @@
   "serverSettings.overview.serverIconAlt": "Server icon",
   "serverSettings.overview.serverIconDesc": "Upload an image to use as the server icon.",
   "serverSettings.overview.serverIconUpdated": "Server icon updated!",
+  "serverSettings.overview.serverName": "Server Name",
+  "serverSettings.overview.serverNameUpdated": "Server name updated!",
   "serverSettings.overview.systemChannelNone": "None",
   "serverSettings.overview.systemMessagesChannel": "System Messages Channel",
   "serverSettings.overview.systemMessagesDesc": "New member join messages will be posted in this channel.",

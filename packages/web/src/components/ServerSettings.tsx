@@ -10,7 +10,8 @@ import ConfirmDialog from "./ConfirmDialog.js";
 import BanMemberModal from "./BanMemberModal.js";
 import EditMemberRolesModal from "./EditMemberRolesModal.js";
 import Avatar from "./Avatar.js";
-import { parseChannelDisplay } from "../lib/channel-utils.js";
+import { parseChannelDisplay, parseServerName } from "../lib/channel-utils.js";
+import { unicodeBtoa } from "../lib/base64.js";
 
 /** Format snake_case audit action into a readable label. */
 function formatAuditAction(action: string): string {
@@ -49,6 +50,9 @@ export default function ServerSettings({ serverId, onClose }: Props) {
   const [categories, setCategories] = useState<CategoryResponse[]>([]);
   const [bans, setBans] = useState<BanResponse[]>([]);
   const [systemChannelId, setSystemChannelId] = useState<string | null>(null);
+  const [serverName, setServerName] = useState(() =>
+    server ? parseServerName(server.encrypted_meta) : ""
+  );
   const [tab, setTab] = useState<"overview" | "members" | "invites" | "categories" | "roles" | "bans" | "emoji" | "audit">(
     canManageServer ? "overview" : "members"
   );
@@ -310,6 +314,37 @@ export default function ServerSettings({ serverId, onClose }: Props) {
             </button>
             {error && <div className="settings-error" style={{ marginBottom: 16 }}>{error}</div>}
 
+            {tab === "overview" && canManageServer && (
+              <div className="settings-section">
+                <div className="settings-section-title">{t("serverSettings.overview.serverName")}</div>
+                <input
+                  type="text"
+                  className="settings-input"
+                  value={serverName}
+                  onChange={(e) => setServerName(e.target.value)}
+                  maxLength={100}
+                  style={{ marginBottom: 12 }}
+                />
+                <button
+                  className="btn-primary settings-save-btn"
+                  disabled={!serverName.trim()}
+                  onClick={async () => {
+                    setError("");
+                    try {
+                      const meta = unicodeBtoa(JSON.stringify({ name: serverName.trim() }));
+                      await api.updateServer(serverId, { encrypted_meta: meta });
+                      await useChatStore.getState().loadChannels();
+                      setSuccess(t("serverSettings.overview.serverNameUpdated"));
+                      setTimeout(() => setSuccess(""), 3000);
+                    } catch (err: any) {
+                      setError(err.message || t("serverSettings.overview.failedUpdateServer"));
+                    }
+                  }}
+                >
+                  {t("serverSettings.overview.saveChanges")}
+                </button>
+              </div>
+            )}
             {tab === "overview" && canManageServer && (
               <div className="settings-section">
                 <div className="settings-section-title">{t("serverSettings.overview.serverIcon")}</div>
