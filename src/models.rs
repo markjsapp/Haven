@@ -137,7 +137,7 @@ pub struct AuthResponse {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum LoginResponse {
-    Success(AuthResponse),
+    Success(Box<AuthResponse>),
     TotpRequired { totp_required: bool },
 }
 

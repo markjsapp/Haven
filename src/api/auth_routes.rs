@@ -339,14 +339,13 @@ pub async fn login(
     }
 
     // Verify TOTP if enabled
-    if user.totp_secret.is_some() {
+    if let Some(ref secret) = user.totp_secret {
         match req.totp_code.as_deref() {
             None => {
                 // Credentials valid, but TOTP is required — return challenge
                 return Ok(LoginResponse::TotpRequired { totp_required: true });
             }
             Some(code) => {
-                let secret = user.totp_secret.as_ref().unwrap();
                 if !auth::verify_totp(secret, code)? {
                     return Err(AppError::AuthError("Invalid TOTP code".into()));
                 }
@@ -368,11 +367,11 @@ pub async fn login(
         device.as_deref(), ip.as_deref(),
     ).await?;
 
-    Ok(LoginResponse::Success(AuthResponse {
+    Ok(LoginResponse::Success(Box::new(AuthResponse {
         access_token,
         refresh_token,
         user: user.into(),
-    }))
+    })))
 }
 
 /// POST /api/v1/auth/refresh
