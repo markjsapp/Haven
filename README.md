@@ -1,10 +1,14 @@
 # Haven
 
-A privacy-first, end-to-end encrypted chat platform. 
+<p align="center">
+  <img src="assets/havenlogocircle.png" alt="Haven" width="128" />
+</p>
+
+A privacy-first, end-to-end encrypted chat platform.
 
 ## What is Haven?
 
-Haven is a full-featured chat application — servers, channels, DMs, friends, roles, voice, file sharing — with one fundamental difference: **all message content is encrypted client-side before it ever touches the server**. The backend is an intentional "dumb relay" for encrypted blobs. It handles routing, auth, and access control, but has zero knowledge of what you're saying.
+Haven is a full-featured chat application servers, channels, DMs, friends, roles, voice, screen and file sharing with one fundamental difference: **all message content is encrypted client-side before it ever touches the server**. The backend is an intentional "dumb relay" for encrypted blobs. It handles routing, auth, and access control, and has zero knowledge of what you're saying or sending. Current beta build is hosted in EU/Germany.
 
 ### What the server can see
 - Encrypted blobs (messages, metadata, attachments)
@@ -37,17 +41,36 @@ Most chat platforms choose between features and privacy. Haven doesn't.
 | No tracking / telemetry | Yes | No | Varies | Yes |
 
 
-**Haven gives you Discord-level features with Signal-level privacy.** Your server, your data, your keys. The backend never sees plaintext — not messages, not filenames, not even channel names.
+**Haven gives you Discord-level features with Signal-level privacy.** Your server, your data, your keys. The backend never sees plaintext not messages, not filenames, not even channel names. Features that are normally paywalled like animated emojis, higher quality video and voice calls, are uncompromised.
+
+### How Haven compares to other open-source alternatives
+
+| | Haven | [Stoat](https://stoat.chat/) (formerly Revolt) | [Spacebar](https://spacebar.chat/) (formerly Fosscord) |
+|---|:---:|:---:|:---:|
+| End-to-end encryption | Yes (all messages) | Planned, not yet implemented | Not implemented |
+| Backend language | Rust | Rust | TypeScript (Node.js) |
+| Database | PostgreSQL | MongoDB | PostgreSQL |
+| Discord API compatible | No (own API) | No (own API) | Yes (reimplements Discord's API) |
+| Voice & video | Yes (LiveKit) | Yes (LiveKit), maturing | Partial (WebRTC WIP) |
+| Self-hostable | Yes | Yes | Yes |
+| Mobile apps | Planned | Android, iOS | None |
+| License | AGPL-3.0 | AGPL-3.0 | AGPL-3.0 |
+
+**[Stoat](https://stoat.chat/)** is a polished, feature-rich Discord alternative with native mobile apps and a growing community. It does not yet offer end-to-end encryption, though it's on their roadmap. If you want a mature, general-purpose chat platform and don't need E2EE, Stoat is a solid choice.
+
+**[Spacebar](https://spacebar.chat/)** takes a unique approach: it reimplements Discord's backend API, so existing Discord bots and client libraries work out of the box. It's still in active development and not yet production-ready. Like Stoat, it does not offer end-to-end encryption.
+
+**Haven** is purpose-built for privacy. Every message is encrypted client-side before reaching the server — the backend is an intentional "dumb relay" for encrypted blobs. If E2EE is a requirement, Haven is the only option in this space that delivers it today.
 
 ## Features
 
-**Communication** — Servers with text and voice channels, 1-on-1 and group DMs, friend requests, typing indicators, online presence, link previews, @mentions, message pinning, emoji reactions, big emoji rendering
+**Communication** — Servers with text and voice channels, 1-on-1 and group DMs, friend requests, typing indicators, online presence, link previews, @mentions, message pinning, emoji reactions, animated emojis, and supports gifs
 
 **Media** — Encrypted file attachments with inline image/video/audio previews, image lightbox viewer, embedded audio player with seek and volume controls, video playback with MIME normalization, spoiler overlays for sensitive content, drag-and-drop uploads with progress tracking, thumbnail previews during loading
 
 **Organization** — Channel categories with drag-and-drop, server folders for grouping servers, Discord-style roles and permissions (bitfield with channel overwrites), shareable invite codes, server management, audit logs
 
-**Security** — X3DH + Double Ratchet for DMs (Signal Protocol), Sender Keys for group channels, encrypted file attachments, encrypted key backup (Argon2id KDF), Argon2id password hashing, JWT + rotating refresh tokens, optional TOTP 2FA, proof-of-work registration gate
+**Security** — X3DH + Double Ratchet for DMs (Signal Protocol), Sender Keys for group channels, encrypted file attachments, encrypted key backup (Argon2id KDF), Argon2id password hashing, JWT + rotating refresh tokens, optional TOTP 2FA with two-step login, proof-of-work registration gate, Cloudflare Turnstile CAPTCHA
 
 **Voice** — self hosted LiveKit-powered voice channels with screen sharing (360p–4K quality presets), per-user volume control (0–200%), server mute/deafen, right-click context menu on participants
 
@@ -79,8 +102,9 @@ Haven/
 ├── packages/
 │   ├── haven-core/             # Shared TS library — see packages/haven-core/README.md
 │   └── web/                    # React frontend — see packages/web/README.md
+├── assets/                     # Logo and icon files
 ├── migrations/                 # PostgreSQL schema migrations
-├── tests/                      # Rust integration tests (126 tests)
+├── tests/                      # Rust integration tests (136 tests)
 ├── docs/                       # Guides and research
 └── docker-compose.yml          # Local dev infrastructure
 ```
@@ -132,7 +156,7 @@ cargo test
 # haven-core — 78 tests
 cd packages/haven-core && npx vitest run
 
-# Web frontend — 53 tests
+# Web frontend — 61 tests
 cd packages/web && npx vitest run
 ```
 
@@ -155,16 +179,23 @@ All routes are under `/api/v1/`. The WebSocket endpoint is at `/api/v1/ws?token=
 
 | Area | Endpoints | Description |
 |------|-----------|-------------|
-| Auth | `/auth/register`, `/auth/login`, `/auth/refresh` | Registration with PoW, JWT auth, TOTP 2FA |
+| Auth | `/auth/register`, `/auth/login`, `/auth/refresh` | Registration with PoW + Turnstile, JWT auth, session management |
+| 2FA | `/auth/totp/setup`, `/auth/totp/verify`, `/auth/totp` | TOTP setup, verification, and disable |
+| Users | `/users/:id/profile`, `/users/search`, `/users/:id/block` | Profiles, avatars, banners, search, blocking |
 | Keys | `/users/:id/keys`, `/keys/prekeys`, `/keys/backup` | X3DH key bundles, prekey management, encrypted backup |
-| Servers | `/servers`, `/servers/:id/channels` | CRUD servers and channels |
-| Messages | `/channels/:id/messages` | Send/receive encrypted messages |
+| Servers | `/servers`, `/servers/:id/channels` | CRUD servers, channels, icons |
+| Categories | `/servers/:id/categories` | Channel categories with ordering |
+| Messages | `/channels/:id/messages`, `/channels/:id/pins` | Send/receive encrypted messages, pinning |
 | Sender Keys | `/channels/:id/sender-keys` | Group E2EE key distribution |
-| Roles | `/servers/:id/roles`, `/channels/:id/overwrites` | Permission management |
+| Roles | `/servers/:id/roles`, `/channels/:id/overwrites` | Permission management with channel overwrites |
 | Friends | `/friends`, `/dm` | Friend requests, DMs, privacy settings |
 | Invites | `/servers/:id/invites`, `/invites/:code/join` | Server invite codes |
-| Voice | `/voice/:id/join` | LiveKit voice channel tokens |
+| Voice | `/voice/:id/join`, `/voice/:id/participants` | LiveKit voice tokens, server mute/deafen |
 | Attachments | `/attachments/upload`, `/attachments/:id` | Encrypted file upload/download |
+| Emojis | `/servers/:id/emojis` | Custom server emoji management |
+| GIFs | `/gifs/search`, `/gifs/trending` | GIF search and trending via Giphy |
+| Reports | `/reports` | Content reporting |
+| Audit Log | `/servers/:id/audit-log` | Server audit trail |
 | Admin | `/admin/stats`, `/admin/users` | Instance administration |
 | Registration Invites | `/registration-invites`, `/auth/invite-required` | Beta invite system |
 

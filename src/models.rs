@@ -62,11 +62,13 @@ pub struct UserPublic {
     pub encrypted_profile: Option<String>, // base64
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_instance_admin: Option<bool>,
+    pub totp_enabled: bool,
 }
 
 impl From<User> for UserPublic {
     fn from(u: User) -> Self {
         let admin = if u.is_instance_admin { Some(true) } else { None };
+        let totp = u.totp_secret.is_some();
         Self {
             id: u.id,
             username: u.username,
@@ -81,6 +83,7 @@ impl From<User> for UserPublic {
                 base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &v)
             }),
             is_instance_admin: admin,
+            totp_enabled: totp,
         }
     }
 }
@@ -128,6 +131,20 @@ pub struct AuthResponse {
     pub access_token: String,
     pub refresh_token: String,
     pub user: UserPublic,
+}
+
+/// Login endpoint returns either full auth tokens or a TOTP challenge.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum LoginResponse {
+    Success(AuthResponse),
+    TotpRequired { totp_required: bool },
+}
+
+impl axum::response::IntoResponse for LoginResponse {
+    fn into_response(self) -> axum::response::Response {
+        axum::Json(self).into_response()
+    }
 }
 
 #[derive(Debug, Deserialize)]

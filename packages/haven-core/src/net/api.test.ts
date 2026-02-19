@@ -80,7 +80,7 @@ describe("auth", () => {
       username: "alice",
       password: "secret",
     });
-    expect(result.access_token).toBe("at-1");
+    expect("access_token" in result && result.access_token).toBe("at-1");
     expect(api.currentAccessToken).toBe("at-1");
   });
 

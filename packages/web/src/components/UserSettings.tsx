@@ -5,6 +5,7 @@ import { useUiStore, type Theme } from "../store/ui.js";
 import { useVoiceStore } from "../store/voice.js";
 import Avatar from "./Avatar.js";
 import EmojiPicker from "./EmojiPicker.js";
+import { QRCodeSVG } from "qrcode.react";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import type { BlockedUserResponse } from "@haven/core";
 import { generateRecoveryKey, generatePassphrase } from "@haven/core";
@@ -789,6 +790,7 @@ function VoiceTab() {
 function SecurityTab() {
   const { t } = useTranslation();
   const api = useAuthStore((s) => s.api);
+  const user = useAuthStore((s) => s.user);
 
   const [backupExists, setBackupExists] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -798,6 +800,17 @@ function SecurityTab() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionError, setSessionError] = useState("");
   const [revokingId, setRevokingId] = useState<string | null>(null);
+
+  // TOTP 2FA
+  const [totpEnabled, setTotpEnabled] = useState(user?.totp_enabled ?? false);
+  type TotpMode = "idle" | "setup" | "disable";
+  const [totpMode, setTotpMode] = useState<TotpMode>("idle");
+  const [totpSetupData, setTotpSetupData] = useState<{ secret: string; qr_code_uri: string } | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [totpError, setTotpError] = useState("");
+  const [totpSuccess, setTotpSuccess] = useState("");
+  const [totpSaving, setTotpSaving] = useState(false);
+  const [totpSecretCopied, setTotpSecretCopied] = useState(false);
 
   // Change phrase flow
   type Mode = "idle" | "change" | "setup" | "generated";
@@ -928,6 +941,53 @@ function SecurityTab() {
     }
   }
 
+  async function handleTotpSetup() {
+    setTotpError("");
+    setTotpSuccess("");
+    setTotpSaving(true);
+    try {
+      const data = await api.totpSetup();
+      setTotpSetupData(data);
+      setTotpMode("setup");
+    } catch (e: any) {
+      setTotpError(e?.message || t("userSettings.security.totp.setupFailed"));
+    } finally {
+      setTotpSaving(false);
+    }
+  }
+
+  async function handleTotpVerify() {
+    setTotpError("");
+    setTotpSaving(true);
+    try {
+      await api.totpVerify({ code: totpCode });
+      setTotpEnabled(true);
+      setTotpMode("idle");
+      setTotpSetupData(null);
+      setTotpCode("");
+      setTotpSuccess(t("userSettings.security.totp.enableSuccess"));
+    } catch {
+      setTotpError(t("userSettings.security.totp.invalidCode"));
+    } finally {
+      setTotpSaving(false);
+    }
+  }
+
+  async function handleTotpDisable() {
+    setTotpError("");
+    setTotpSaving(true);
+    try {
+      await api.totpDisable();
+      setTotpEnabled(false);
+      setTotpMode("idle");
+      setTotpSuccess(t("userSettings.security.totp.disableSuccess"));
+    } catch (e: any) {
+      setTotpError(e?.message || "Failed to disable 2FA");
+    } finally {
+      setTotpSaving(false);
+    }
+  }
+
   if (loading) {
     return <div className="settings-section"><p className="settings-loading">{t("userSettings.security.loading")}</p></div>;
   }
@@ -980,6 +1040,130 @@ function SecurityTab() {
           {t("userSettings.security.revokeAllOther")}
         </button>
       )}
+    </div>
+
+    <div className="settings-section">
+      <div className="settings-section-title">{t("userSettings.security.totp.title")}</div>
+      <p className="settings-description">
+        {t("userSettings.security.totp.desc")}
+      </p>
+
+      {totpMode === "idle" && (
+        <>
+          <div className="settings-card" style={{ marginBottom: 16 }}>
+            <div className="settings-card-row">
+              <div>
+                <div className="settings-label">{t("userSettings.security.statusLabel")}</div>
+                <div className="settings-value">
+                  {totpEnabled ? (
+                    <span style={{ color: "var(--green)" }}>{t("userSettings.security.totp.enabled")}</span>
+                  ) : (
+                    <span style={{ color: "var(--text-muted)" }}>{t("userSettings.security.totp.disabled")}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="security-phrase-actions">
+            {totpEnabled ? (
+              <button
+                className="btn-secondary btn-danger-outline"
+                onClick={() => { setTotpMode("disable"); setTotpError(""); setTotpSuccess(""); }}
+              >
+                {t("userSettings.security.totp.disable")}
+              </button>
+            ) : (
+              <button
+                className="btn-primary"
+                onClick={handleTotpSetup}
+                disabled={totpSaving}
+              >
+                {totpSaving ? t("userSettings.security.loading") : t("userSettings.security.totp.enable")}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {totpMode === "setup" && totpSetupData && (
+        <div className="settings-fields">
+          <p className="settings-description" style={{ marginBottom: 8 }}>
+            {t("userSettings.security.totp.scanQrCode")}
+          </p>
+          <div className="totp-qr-container">
+            <QRCodeSVG value={totpSetupData.qr_code_uri} size={180} bgColor="transparent" fgColor="var(--text-normal)" />
+          </div>
+          <p className="settings-description" style={{ marginTop: 12, marginBottom: 4 }}>
+            {t("userSettings.security.totp.manualEntry")}
+          </p>
+          <div className="totp-secret-display">
+            <code>{totpSetupData.secret}</code>
+            <button
+              className="btn-secondary btn-sm"
+              style={{ marginLeft: 8 }}
+              onClick={() => {
+                navigator.clipboard.writeText(totpSetupData.secret);
+                setTotpSecretCopied(true);
+                setTimeout(() => setTotpSecretCopied(false), 2000);
+              }}
+            >
+              {totpSecretCopied ? t("userSettings.security.totp.copied") : t("userSettings.security.totp.copySecret")}
+            </button>
+          </div>
+          <label className="settings-field-label" style={{ marginTop: 16 }}>
+            {t("userSettings.security.totp.enterCode")}
+            <input
+              className="settings-input totp-code-input"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={totpCode}
+              onChange={(e) => { setTotpCode(e.target.value.replace(/\D/g, "")); setTotpError(""); }}
+              placeholder={t("userSettings.security.totp.codePlaceholder")}
+              autoFocus
+            />
+          </label>
+          {totpError && <div className="settings-error">{totpError}</div>}
+          <div className="security-phrase-actions">
+            <button className="btn-secondary" onClick={() => { setTotpMode("idle"); setTotpSetupData(null); setTotpCode(""); setTotpError(""); }}>
+              {t("userSettings.security.totp.cancel")}
+            </button>
+            <button
+              className="btn-primary"
+              onClick={handleTotpVerify}
+              disabled={totpSaving || totpCode.length !== 6}
+              style={{ marginLeft: 8 }}
+            >
+              {totpSaving ? t("userSettings.security.totp.verifying") : t("userSettings.security.totp.verifyAndEnable")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {totpMode === "disable" && (
+        <div className="settings-fields">
+          <p className="settings-description" style={{ color: "var(--red)" }}>
+            {t("userSettings.security.totp.disableWarning")}
+          </p>
+          {totpError && <div className="settings-error">{totpError}</div>}
+          <div className="security-phrase-actions">
+            <button className="btn-secondary" onClick={() => { setTotpMode("idle"); setTotpError(""); }}>
+              {t("userSettings.security.totp.cancel")}
+            </button>
+            <button
+              className="btn-secondary btn-danger-outline"
+              onClick={handleTotpDisable}
+              disabled={totpSaving}
+              style={{ marginLeft: 8 }}
+            >
+              {totpSaving ? t("userSettings.security.totp.disabling") : t("userSettings.security.totp.confirmDisable")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {totpSuccess && <div className="settings-success" style={{ marginTop: 12 }}>{totpSuccess}</div>}
     </div>
 
     <div className="settings-section">

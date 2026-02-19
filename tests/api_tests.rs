@@ -2058,8 +2058,8 @@ async fn login_requires_totp_when_enabled(pool: Pool) {
     )
     .await;
 
-    // Login without TOTP code should fail
-    let (status, _) = app
+    // Login without TOTP code should return totp_required challenge
+    let (status, value) = app
         .request(
             Method::POST,
             "/api/v1/auth/login",
@@ -2067,7 +2067,9 @@ async fn login_requires_totp_when_enabled(pool: Pool) {
             Some(json!({ "username": "totp_login", "password": "testpassword123" })),
         )
         .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["totp_required"], json!(true));
+    assert!(value.get("access_token").is_none());
 
     // Login with valid TOTP code should succeed
     let code = generate_totp_code(&secret_b32);

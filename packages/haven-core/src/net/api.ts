@@ -1,8 +1,12 @@
 import { getSodium, initSodium } from "../crypto/utils.js";
+import {
+  isLoginSuccess,
+} from "../types.js";
 import type {
   RegisterInput,
   LoginRequest,
   AuthResponse,
+  LoginResponse,
   RefreshRequest,
   TotpSetupResponse,
   TotpVerifyRequest,
@@ -138,9 +142,11 @@ export class HavenApi {
     return res;
   }
 
-  async login(req: LoginRequest): Promise<AuthResponse> {
-    const res = await this.post<AuthResponse>("/api/v1/auth/login", req);
-    this.setTokens(res.access_token, res.refresh_token);
+  async login(req: LoginRequest): Promise<LoginResponse> {
+    const res = await this.post<LoginResponse>("/api/v1/auth/login", req);
+    if (isLoginSuccess(res)) {
+      this.setTokens(res.access_token, res.refresh_token);
+    }
     return res;
   }
 

@@ -36,6 +36,16 @@ export interface AuthResponse {
   user: UserPublic;
 }
 
+export interface LoginTotpRequiredResponse {
+  totp_required: true;
+}
+
+export type LoginResponse = AuthResponse | LoginTotpRequiredResponse;
+
+export function isLoginSuccess(res: LoginResponse): res is AuthResponse {
+  return "access_token" in res;
+}
+
 export interface RefreshRequest {
   refresh_token: string;
 }
@@ -73,6 +83,7 @@ export interface UserPublic {
   created_at: string;
   encrypted_profile?: string | null; // base64 encrypted blob
   is_instance_admin?: boolean;
+  totp_enabled?: boolean;
 }
 
 export interface MutualFriendInfo {

@@ -10,6 +10,7 @@ import {
   generateOneTimePreKeys,
   prepareRegistrationKeys,
   MemoryStore,
+  isLoginSuccess,
   type UserPublic,
   type IdentityKeyPair,
   type SignedPreKey,
@@ -98,7 +99,7 @@ interface AuthState {
 
   init(): Promise<void>;
   register(username: string, password: string, displayName?: string, inviteCode?: string, turnstileToken?: string): Promise<void>;
-  login(username: string, password: string, totpCode?: string): Promise<void>;
+  login(username: string, password: string, totpCode?: string): Promise<"totp_required" | void>;
   logout(): void;
   completeBackupSetup(): void;
 }
@@ -167,6 +168,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     const { api } = get();
     const res = await api.login({ username, password, totp_code: totpCode });
+
+    // If TOTP is required, signal the UI to show the TOTP step
+    if (!isLoginSuccess(res)) {
+      return "totp_required";
+    }
 
     // Try to reuse the persisted identity key for this user.
     // Generating a new identity key on every login would invalidate all

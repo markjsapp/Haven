@@ -327,7 +327,7 @@ pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<LoginRequest>,
-) -> AppResult<Json<AuthResponse>> {
+) -> AppResult<LoginResponse> {
     // Find user
     let user = queries::find_user_by_username(state.db.read(), &req.username)
         .await?
@@ -339,13 +339,18 @@ pub async fn login(
     }
 
     // Verify TOTP if enabled
-    if let Some(ref secret) = user.totp_secret {
-        let code = req
-            .totp_code
-            .as_deref()
-            .ok_or(AppError::AuthError("TOTP code required".into()))?;
-        if !auth::verify_totp(secret, code)? {
-            return Err(AppError::AuthError("Invalid TOTP code".into()));
+    if user.totp_secret.is_some() {
+        match req.totp_code.as_deref() {
+            None => {
+                // Credentials valid, but TOTP is required — return challenge
+                return Ok(LoginResponse::TotpRequired { totp_required: true });
+            }
+            Some(code) => {
+                let secret = user.totp_secret.as_ref().unwrap();
+                if !auth::verify_totp(secret, code)? {
+                    return Err(AppError::AuthError("Invalid TOTP code".into()));
+                }
+            }
         }
     }
 
@@ -363,7 +368,7 @@ pub async fn login(
         device.as_deref(), ip.as_deref(),
     ).await?;
 
-    Ok(Json(AuthResponse {
+    Ok(LoginResponse::Success(AuthResponse {
         access_token,
         refresh_token,
         user: user.into(),

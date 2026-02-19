@@ -625,6 +625,58 @@ body {
   margin-bottom: 1rem;
 }
 
+/* ─── TOTP / 2FA ─────────────────────────────────── */
+.totp-qr-container {
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  margin: 8px 0;
+}
+
+.totp-secret-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  margin: 4px 0;
+}
+
+.totp-secret-display code {
+  font-family: "Consolas", "Monaco", "Courier New", monospace;
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+  color: var(--text-normal);
+  word-break: break-all;
+  flex: 1;
+}
+
+.totp-code-input {
+  letter-spacing: 6px;
+  font-size: 1.2rem;
+  text-align: center;
+  font-family: "Consolas", "Monaco", "Courier New", monospace;
+}
+
+.auth-back-link {
+  display: block;
+  width: 100%;
+  text-align: center;
+  background: none;
+  border: none;
+  color: var(--text-link);
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 0.75rem 0 0;
+}
+
+.auth-back-link:hover {
+  text-decoration: underline;
+}
+
 .auth-note {
   text-align: center;
   font-size: 0.75rem;
