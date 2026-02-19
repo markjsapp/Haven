@@ -10,6 +10,7 @@ Haven is an end-to-end encrypted (E2EE) chat platform a privacy-focused gaming c
 - **Rebuild haven-core** (`cd packages/haven-core && npm run build`) before the web frontend can pick up changes — web imports from `dist/`.
 - **Never commit secrets** — `.env.*` files (except `.env.example`), private keys, API tokens.
 - **All UI strings must use i18n** — use `t("key")` via react-i18next. Translations live in `packages/web/src/i18n/en.json`.
+- **Migrations are append-only** — NEVER edit, delete, rename, or reorder an existing migration file. sqlx checksums every migration; a mismatch causes the server to panic on startup. Schema changes always go in a new file.
 
 ## Architecture
 
@@ -81,6 +82,29 @@ Haven/
 - Migrations in `migrations/` — named `YYYYMMDD000001_description.sql`
 - Redis for presence, rate limiting, refresh tokens
 - Integration tests use `#[sqlx::test(migrations = "./migrations")]` — each test gets a fresh DB
+- **Production data persists across deploys** — Docker named volumes (`postgres_data`, `redis_data`, `haven_data`) survive container recreation. `deploy.sh` only recreates the Haven container; PostgreSQL/Redis stay running.
+
+### Migration Safety (production data preservation)
+
+Migrations run automatically on server startup via `sqlx::migrate!()`. sqlx tracks applied migrations by checksum in a `_sqlx_migrations` table and only runs new ones.
+
+**NEVER do in a migration:**
+- `DROP TABLE` / `TRUNCATE` — destroys production data
+- `DROP COLUMN` without first deploying code that stops using it (two-phase approach)
+- `ALTER COLUMN ... TYPE` that narrows a type (e.g. `TEXT` → `VARCHAR(50)`)
+
+**NEVER do to existing migration files:**
+- Edit content — checksum mismatch → server panics on startup
+- Delete the file — same panic
+- Rename or reorder — breaks the sequential application order
+
+**Safe operations (do freely):**
+- `CREATE TABLE`, `ADD COLUMN`, `CREATE INDEX`, `ADD CONSTRAINT` (with defaults)
+- Always in a **new** migration file following the `YYYYMMDD000001_description.sql` naming convention
+
+**To remove a column safely (two-phase):**
+1. Deploy code that stops reading/writing the column
+2. Next deploy: add a new migration with `ALTER TABLE ... DROP COLUMN`
 
 ## Testing
 
@@ -116,6 +140,7 @@ Run these to verify changes:
 - If new DB columns/tables are added but tests fail with 500: check that a migration file was created (not just applied via psql).
 - If the frontend shows stale haven-core types: rebuild haven-core (`npm run build` in `packages/haven-core/`).
 - If routes return 404 with 0ms latency: check for `{param}` instead of `:param` in route definitions.
+- If the server panics on startup with a migration checksum error: an existing migration file was modified. Revert it to the original content — never edit applied migrations.
 - `cargo test` requires Docker (PostgreSQL + Redis) running via `docker-compose up -d`.
 - Vite `manualChunks`: don't add packages that lack a `"."` export in their package.json (e.g. `@tiptap/pm`).
 - `libsodium-wrappers-sumo` lives in `haven-core/node_modules`, not `web/node_modules` — resolved via Vite alias.

@@ -98,7 +98,7 @@ git push origin main
 ssh haven@YOUR_SERVER_IP
 
 # Pull and deploy
-cd ~/haven
+cd /opt/haven
 git pull
 ./deploy.sh
 ```
@@ -115,14 +115,25 @@ The deploy script builds a new Docker image, swaps the container (2-5s downtime)
 
 ### Database migrations
 
-Migrations run automatically on server startup. If you add a new migration file in `migrations/`, it will be applied the next time the Haven container starts.
+Migrations run automatically on server startup via `sqlx::migrate!()`. If you add a new migration file in `migrations/`, it will be applied the next time the Haven container starts. Production data (users, messages, channels, etc.) persists across deploys — only the Haven container is recreated.
+
+**Critical rules — violating these will cause production outages or data loss:**
+
+- **Never edit, delete, rename, or reorder an existing migration file.** sqlx checksums every migration. A mismatch causes the server to **panic on startup** and refuse to boot.
+- **Never use `DROP TABLE`, `TRUNCATE`, or `DROP COLUMN`** in a migration unless you've already deployed code that stops using that table/column (two-phase approach).
+- **Always create a new file** for schema changes: `YYYYMMDD000001_description.sql`
+- **Safe operations:** `CREATE TABLE`, `ADD COLUMN`, `CREATE INDEX`, `ADD CONSTRAINT` (with defaults)
+
+**To safely remove a column in production:**
+1. First deploy: ship code that no longer reads/writes the column
+2. Second deploy: add a new migration with `ALTER TABLE ... DROP COLUMN`
 
 ### When things go wrong
 
 Check logs:
 ```bash
 ssh haven@YOUR_SERVER_IP
-cd ~/haven
+cd /opt/haven
 docker compose -f docker-compose.prod.yml --env-file .env.production logs --tail=100 haven
 ```
 
@@ -167,5 +178,7 @@ cd packages/haven-core && npm run build
 - **Route params**: Use `:param` syntax, NOT `{param}`. axum 0.7 uses matchit 0.7.3 which only supports colon syntax. `{param}` silently 404s.
 - **haven-core rebuild**: If the frontend shows stale types or missing methods, rebuild haven-core (`cd packages/haven-core && npm run build`).
 - **Test database**: `cargo test` requires Docker running with PostgreSQL + Redis (`docker compose up -d`).
+- **Migration files are immutable**: Never edit, delete, or reorder an existing migration. sqlx checksums each one — a mismatch causes the server to panic on startup. Always create a new file.
 - **Migration order**: Migration filenames must sort chronologically. Use the `YYYYMMDD000001_description.sql` pattern.
+- **Migration checksum panic**: If the server won't start due to a checksum error, an existing migration was modified. Revert it to the original content.
 - **CORS in production**: The `CORS_ORIGINS` env var is set to `https://{HAVEN_DOMAIN}` in `docker-compose.prod.yml`. If you're testing from a different origin, update it.
