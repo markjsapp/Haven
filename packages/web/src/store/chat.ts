@@ -268,10 +268,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     ws.on("NewMessage", (msg: Extract<WsServerMessage, { type: "NewMessage" }>) => {
       handleIncomingMessage(msg.payload);
-      const authUser = useAuthStore.getState().user;
-      if (msg.payload.sender_token !== authUser?.id) {
-        sendNotification("New Message", "You received a new message");
-      }
     });
 
     ws.on("MessageEdited", (msg: Extract<WsServerMessage, { type: "MessageEdited" }>) => {
@@ -1598,6 +1594,29 @@ async function handleIncomingMessage(raw: MessageResponse) {
               [raw.channel_id]: (state.mentionCounts[raw.channel_id] ?? 0) + 1,
             },
           }));
+        }
+
+        // Notification with server/channel override cascade
+        const { channelNotifications, serverNotifications } = useUiStore.getState();
+        const channelSetting = channelNotifications[raw.channel_id] ?? "default";
+        const serverSetting = channel?.server_id
+          ? (serverNotifications[channel.server_id] ?? "default")
+          : "default";
+
+        // Cascade: channel > server > inherent default
+        // Inherent default: server channels = "mentions", DMs = "all"
+        let effective = channelSetting as string;
+        if (effective === "default") effective = serverSetting;
+        if (effective === "default") effective = channel?.server_id ? "mentions" : "all";
+
+        const shouldNotify =
+          effective === "all" ||
+          (effective === "mentions" && (isMentioned || isReplyToMe));
+
+        if (shouldNotify) {
+          const senderName = useChatStore.getState().userNames[msg.senderId] ?? "Someone";
+          const body = msg.text?.slice(0, 100) || "sent a message";
+          sendNotification("New Message", `${senderName}: ${body}`);
         }
       }
     }

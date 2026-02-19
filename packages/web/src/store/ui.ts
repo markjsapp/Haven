@@ -29,6 +29,8 @@ interface UiState {
   mutedChannels: Record<string, MuteEntry>;
   /** channelId -> notification override */
   channelNotifications: Record<string, NotificationOverride>;
+  /** serverId -> notification override */
+  serverNotifications: Record<string, NotificationOverride>;
 
   /** Appearance */
   theme: Theme;
@@ -75,6 +77,7 @@ interface UiState {
   unmuteChannel(channelId: string): void;
   isChannelMuted(channelId: string): boolean;
   setChannelNotification(channelId: string, setting: NotificationOverride): void;
+  setServerNotification(serverId: string, setting: NotificationOverride): void;
 
   setTheme(theme: Theme): void;
   setA11yReducedMotion(enabled: boolean): void;
@@ -106,6 +109,7 @@ export const useUiStore = create<UiState>()(
       mentionPopup: null,
       mutedChannels: {},
       channelNotifications: {},
+      serverNotifications: {},
 
       theme: "night",
 
@@ -201,6 +205,18 @@ export const useUiStore = create<UiState>()(
         });
       },
 
+      setServerNotification(serverId, setting) {
+        set((s) => {
+          if (setting === "default") {
+            const { [serverId]: _, ...rest } = s.serverNotifications;
+            return { serverNotifications: rest };
+          }
+          return {
+            serverNotifications: { ...s.serverNotifications, [serverId]: setting },
+          };
+        });
+      },
+
       setTheme(theme) { set({ theme }); },
       setA11yReducedMotion(enabled) { set({ a11yReducedMotion: enabled }); },
       setA11yFont(font) { set({ a11yFont: font }); },
@@ -232,6 +248,7 @@ export const useUiStore = create<UiState>()(
         memberSidebarOpen: state.memberSidebarOpen,
         mutedChannels: state.mutedChannels,
         channelNotifications: state.channelNotifications,
+        serverNotifications: state.serverNotifications,
         theme: state.theme,
         a11yReducedMotion: state.a11yReducedMotion,
         a11yFont: state.a11yFont,
