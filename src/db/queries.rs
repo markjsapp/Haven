@@ -421,6 +421,19 @@ pub async fn update_system_channel(
     Ok(())
 }
 
+pub async fn update_server_meta(
+    pool: &Pool,
+    server_id: Uuid,
+    encrypted_meta: &[u8],
+) -> AppResult<()> {
+    sqlx::query("UPDATE servers SET encrypted_meta = $1 WHERE id = $2")
+        .bind(encrypted_meta)
+        .bind(server_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn update_server_icon(
     pool: &Pool,
     server_id: Uuid,

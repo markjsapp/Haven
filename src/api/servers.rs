@@ -248,13 +248,30 @@ pub async fn update_server(
         }
     }
 
-    queries::update_system_channel(state.db.write(), server_id, req.system_channel_id).await?;
+    // Update encrypted_meta (server name) if provided
+    if let Some(ref meta) = req.encrypted_meta {
+        let meta_bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            meta.as_bytes(),
+        ).map_err(|_| AppError::Validation("Invalid base64 for encrypted_meta".into()))?;
+        if meta_bytes.is_empty() || meta_bytes.len() > 4096 {
+            return Err(AppError::Validation("encrypted_meta must be between 1 and 4096 bytes".into()));
+        }
+        queries::update_server_meta(state.db.write(), server_id, &meta_bytes).await?;
+    }
+
+    if req.system_channel_id.is_some() {
+        queries::update_system_channel(state.db.write(), server_id, req.system_channel_id).await?;
+    }
 
     // Audit log
     let _ = queries::insert_audit_log(
         state.db.write(), server_id, user_id, "server_update",
         Some("server"), Some(server_id),
-        Some(&serde_json::json!({ "system_channel_id": req.system_channel_id })), None,
+        Some(&serde_json::json!({
+            "system_channel_id": req.system_channel_id,
+            "encrypted_meta_updated": req.encrypted_meta.is_some(),
+        })), None,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

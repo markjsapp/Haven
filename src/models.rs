@@ -958,6 +958,7 @@ pub struct UpdateNicknameRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateServerRequest {
     pub system_channel_id: Option<Uuid>,
+    pub encrypted_meta: Option<String>,
 }
 
 // ─── Channel Member Info ─────────────────────────────
