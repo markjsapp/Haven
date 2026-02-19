@@ -5,6 +5,17 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use uuid::Uuid;
 
+/// Active DM/group call state (ephemeral, not persisted).
+pub struct ActiveCall {
+    pub caller_id: Uuid,
+    pub started_at: Instant,
+}
+
+/// A connected (accepted) call with its start time for duration tracking.
+pub struct ConnectedCall {
+    pub started_at: Instant,
+}
+
 /// In-memory state stores for single-instance mode (no Redis).
 ///
 /// When Redis is configured, these still serve as a local cache layer.
@@ -23,6 +34,10 @@ pub struct MemoryStore {
     pub voice_muted: Arc<DashMap<Uuid, HashSet<Uuid>>>,
     /// Server-deafened users per voice channel
     pub voice_deafened: Arc<DashMap<Uuid, HashSet<Uuid>>>,
+    /// Active DM/group calls: channel_id → call state
+    pub active_calls: Arc<DashMap<Uuid, ActiveCall>>,
+    /// Connected (accepted) calls: channel_id → connected call state
+    pub connected_calls: Arc<DashMap<Uuid, ConnectedCall>>,
 }
 
 impl Default for MemoryStore {
@@ -34,6 +49,8 @@ impl Default for MemoryStore {
             voice_participants: Arc::new(DashMap::new()),
             voice_muted: Arc::new(DashMap::new()),
             voice_deafened: Arc::new(DashMap::new()),
+            active_calls: Arc::new(DashMap::new()),
+            connected_calls: Arc::new(DashMap::new()),
         }
     }
 }

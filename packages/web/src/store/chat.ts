@@ -420,6 +420,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     });
 
+    // DM/group call events
+    ws.on("CallRinging", (msg: Extract<WsServerMessage, { type: "CallRinging" }>) => {
+      import("./voice.js").then(({ useVoiceStore }) => {
+        const { channel_id, caller_id, caller_name } = msg.payload;
+        useVoiceStore.getState().handleCallRinging(channel_id, caller_id, caller_name);
+      });
+    });
+
+    ws.on("CallAccepted", (msg: Extract<WsServerMessage, { type: "CallAccepted" }>) => {
+      import("./voice.js").then(({ useVoiceStore }) => {
+        const { channel_id, user_id } = msg.payload;
+        useVoiceStore.getState().handleCallAccepted(channel_id, user_id);
+      });
+    });
+
+    ws.on("CallRejected", (msg: Extract<WsServerMessage, { type: "CallRejected" }>) => {
+      import("./voice.js").then(({ useVoiceStore }) => {
+        const { channel_id, user_id } = msg.payload;
+        useVoiceStore.getState().handleCallRejected(channel_id, user_id);
+      });
+    });
+
+    ws.on("CallEnded", (msg: Extract<WsServerMessage, { type: "CallEnded" }>) => {
+      import("./voice.js").then(({ useVoiceStore }) => {
+        const { channel_id, ended_by } = msg.payload;
+        useVoiceStore.getState().handleCallEnded(channel_id, ended_by);
+      });
+    });
+
     // Custom emoji events
     ws.on("EmojiCreated", (msg: Extract<WsServerMessage, { type: "EmojiCreated" }>) => {
       const { server_id, emoji } = msg.payload;

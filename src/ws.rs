@@ -19,6 +19,7 @@ use uuid::Uuid;
 use crate::auth::{validate_access_token, user_id_from_claims};
 use crate::db::queries;
 use crate::errors::AppError;
+use crate::memory_store::{ActiveCall, ConnectedCall};
 use crate::models::{MessageResponse, WsClientMessage, WsServerMessage};
 use crate::pubsub;
 use crate::AppState;
@@ -230,6 +231,8 @@ async fn handle_socket(socket: WebSocket, user_id: Uuid, state: AppState) {
         broadcast_presence(user_id, "offline", &state).await;
         // Clean up voice state — remove from any voice channel
         crate::api::voice::cleanup_voice_state(&state, user_id).await;
+        // Clean up any active calls this user initiated
+        cleanup_call_state(&state, user_id).await;
         // Unsubscribe from Redis user channel
         pubsub::unsubscribe_redis_user(&state, user_id).await;
     }
@@ -248,6 +251,7 @@ fn should_buffer_event(msg: &WsServerMessage) -> bool {
             | WsServerMessage::InvalidSession
             | WsServerMessage::Subscribed { .. }
             | WsServerMessage::Error { .. }
+            | WsServerMessage::CallRinging { .. }
     )
 }
 
@@ -351,6 +355,22 @@ async fn handle_client_message(
 
         WsClientMessage::MarkRead { channel_id } => {
             handle_mark_read(user_id, channel_id, state, reply_tx).await;
+        }
+
+        WsClientMessage::CallInvite { channel_id } => {
+            handle_call_invite(user_id, channel_id, state, reply_tx).await;
+        }
+
+        WsClientMessage::CallAccept { channel_id } => {
+            handle_call_accept(user_id, channel_id, state, reply_tx).await;
+        }
+
+        WsClientMessage::CallReject { channel_id } => {
+            handle_call_reject(user_id, channel_id, state, reply_tx).await;
+        }
+
+        WsClientMessage::CallEnd { channel_id } => {
+            handle_call_end(user_id, channel_id, state).await;
         }
 
         WsClientMessage::Resume { session_id } => {
@@ -1230,5 +1250,252 @@ pub async fn broadcast_to_server(state: &AppState, server_id: Uuid, msg: WsServe
                 let _ = broadcaster.send(msg.clone());
             }
         }
+    }
+}
+
+// ─── DM/Group Call Signaling ────────────────────────────
+
+/// Send a WS message to all members of a channel (direct connections + Redis pubsub).
+async fn send_to_channel_members(
+    state: &AppState,
+    channel_id: Uuid,
+    exclude_user_id: Option<Uuid>,
+    msg: WsServerMessage,
+) {
+    if let Ok(member_ids) = queries::get_channel_member_ids(state.db.read(), channel_id).await {
+        for mid in member_ids {
+            if Some(mid) == exclude_user_id {
+                continue;
+            }
+            if let Some(conns) = state.connections.get(&mid) {
+                for tx in conns.iter() {
+                    let _ = tx.send(msg.clone());
+                }
+            }
+            pubsub::publish_user_event(state.redis.clone().as_mut(), mid, &msg).await;
+        }
+    }
+}
+
+/// Handle CallInvite: start ringing for a DM/group call.
+async fn handle_call_invite(
+    user_id: Uuid,
+    channel_id: Uuid,
+    state: &AppState,
+    reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
+) {
+    // Verify channel exists and is DM or group
+    let channel = match queries::find_channel_by_id(state.db.read(), channel_id).await {
+        Ok(Some(ch)) => ch,
+        _ => {
+            let _ = reply_tx.send(WsServerMessage::Error {
+                message: "Channel not found".into(),
+            });
+            return;
+        }
+    };
+
+    if !matches!(channel.channel_type.as_str(), "dm" | "group") {
+        let _ = reply_tx.send(WsServerMessage::Error {
+            message: "Calls are only supported in DMs and group DMs".into(),
+        });
+        return;
+    }
+
+    // Verify caller is a member
+    match queries::can_access_channel(state.db.read(), channel_id, user_id).await {
+        Ok(true) => {}
+        _ => {
+            let _ = reply_tx.send(WsServerMessage::Error {
+                message: "Not a member of this channel".into(),
+            });
+            return;
+        }
+    }
+
+    // Check no active call already exists for this channel
+    if state.memory.active_calls.contains_key(&channel_id) {
+        let _ = reply_tx.send(WsServerMessage::Error {
+            message: "A call is already active in this channel".into(),
+        });
+        return;
+    }
+
+    // Look up caller name
+    let caller_name = match queries::find_user_by_id(state.db.read(), user_id).await {
+        Ok(Some(u)) => u.display_name.unwrap_or(u.username),
+        _ => return,
+    };
+
+    // Register the active call
+    state.memory.active_calls.insert(channel_id, ActiveCall {
+        caller_id: user_id,
+        started_at: Instant::now(),
+    });
+
+    // Send CallRinging to all other channel members
+    let msg = WsServerMessage::CallRinging {
+        channel_id,
+        caller_id: user_id,
+        caller_name,
+    };
+    send_to_channel_members(state, channel_id, Some(user_id), msg).await;
+
+    // Spawn a 30-second ring timeout
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+
+        // If the call is still ringing (not accepted/rejected/ended), end it
+        if state_clone.memory.active_calls.remove(&channel_id).is_some() {
+            let end_msg = WsServerMessage::CallEnded {
+                channel_id,
+                ended_by: user_id,
+            };
+            send_to_channel_members(&state_clone, channel_id, None, end_msg).await;
+        }
+    });
+}
+
+/// Handle CallAccept: callee accepts an incoming call.
+async fn handle_call_accept(
+    user_id: Uuid,
+    channel_id: Uuid,
+    state: &AppState,
+    reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
+) {
+    // Remove from active_calls (prevents timeout from firing)
+    if state.memory.active_calls.remove(&channel_id).is_none() {
+        let _ = reply_tx.send(WsServerMessage::Error {
+            message: "No active call in this channel".into(),
+        });
+        return;
+    }
+
+    // Track the connected call start time for duration calculation
+    state.memory.connected_calls.insert(channel_id, ConnectedCall {
+        started_at: Instant::now(),
+    });
+
+    // Notify all channel members
+    let msg = WsServerMessage::CallAccepted {
+        channel_id,
+        user_id,
+    };
+    send_to_channel_members(state, channel_id, None, msg).await;
+}
+
+/// Handle CallReject: callee rejects an incoming call.
+async fn handle_call_reject(
+    user_id: Uuid,
+    channel_id: Uuid,
+    state: &AppState,
+    reply_tx: &mpsc::UnboundedSender<WsServerMessage>,
+) {
+    // Remove the call (any reject ends the ringing)
+    if state.memory.active_calls.remove(&channel_id).is_none() {
+        let _ = reply_tx.send(WsServerMessage::Error {
+            message: "No active call in this channel".into(),
+        });
+        return;
+    }
+
+    // Notify all channel members
+    let msg = WsServerMessage::CallRejected {
+        channel_id,
+        user_id,
+    };
+    send_to_channel_members(state, channel_id, None, msg).await;
+}
+
+/// Handle CallEnd: either party ends an active call.
+async fn handle_call_end(
+    user_id: Uuid,
+    channel_id: Uuid,
+    state: &AppState,
+) {
+    // Remove from active_calls if still ringing
+    state.memory.active_calls.remove(&channel_id);
+
+    // Remove connected call and calculate duration
+    let duration_secs = state.memory.connected_calls.remove(&channel_id)
+        .map(|(_, cc)| cc.started_at.elapsed().as_secs());
+
+    // Insert a system message with call duration (only if the call was connected)
+    if let Some(secs) = duration_secs {
+        let caller_name = match queries::find_user_by_id(state.db.read(), user_id).await {
+            Ok(Some(u)) => u.display_name.unwrap_or(u.username),
+            _ => "Someone".to_string(),
+        };
+        let body = serde_json::json!({
+            "event": "call_ended",
+            "username": caller_name,
+            "user_id": user_id.to_string(),
+            "duration_secs": secs,
+        });
+        if let Ok(sys_msg) = queries::insert_system_message(
+            state.db.write(), channel_id, &body.to_string(),
+        ).await {
+            let response: MessageResponse = sys_msg.into();
+            let sys_ws_msg = WsServerMessage::NewMessage(response);
+            // Broadcast via channel + direct delivery for DMs
+            if let Some(broadcaster) = state.channel_broadcasts.get(&channel_id) {
+                let _ = broadcaster.send(sys_ws_msg.clone());
+            }
+            if let Ok(member_ids) = queries::get_channel_member_ids(state.db.read(), channel_id).await {
+                for mid in member_ids {
+                    if let Some(conns) = state.connections.get(&mid) {
+                        for tx in conns.iter() {
+                            let _ = tx.send(sys_ws_msg.clone());
+                        }
+                    }
+                }
+            }
+            pubsub::publish_channel_event(state.redis.clone().as_mut(), channel_id, &sys_ws_msg).await;
+        }
+    }
+
+    // Notify all channel members
+    let msg = WsServerMessage::CallEnded {
+        channel_id,
+        ended_by: user_id,
+    };
+    send_to_channel_members(state, channel_id, None, msg).await;
+}
+
+/// Clean up any active calls when a user disconnects.
+/// Called alongside voice cleanup on WebSocket disconnect.
+pub async fn cleanup_call_state(state: &AppState, user_id: Uuid) {
+    // Find calls where this user is the caller and still ringing
+    let mut to_end = Vec::new();
+    for entry in state.memory.active_calls.iter() {
+        if entry.value().caller_id == user_id {
+            to_end.push(*entry.key());
+        }
+    }
+    for channel_id in to_end {
+        if state.memory.active_calls.remove(&channel_id).is_some() {
+            let msg = WsServerMessage::CallEnded {
+                channel_id,
+                ended_by: user_id,
+            };
+            send_to_channel_members(state, channel_id, None, msg).await;
+        }
+    }
+
+    // Also end any connected calls this user is part of
+    // Check voice participants to find connected calls the user was in
+    let mut connected_channels = Vec::new();
+    for entry in state.memory.connected_calls.iter() {
+        let ch_id = *entry.key();
+        // Check if this user was a voice participant in this channel
+        if let Some(participants) = state.memory.voice_participants.get(&ch_id) {
+            if participants.contains(&user_id) {
+                connected_channels.push(ch_id);
+            }
+        }
+    }
+    for channel_id in connected_channels {
+        handle_call_end(user_id, channel_id, state).await;
     }
 }

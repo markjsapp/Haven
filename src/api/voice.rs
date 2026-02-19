@@ -11,7 +11,7 @@ use crate::db::queries;
 use crate::errors::{AppError, AppResult};
 use crate::middleware::AuthUser;
 use crate::models::{VoiceDeafenRequest, VoiceMuteRequest, VoiceParticipantResponse, VoiceTokenResponse, WsServerMessage};
-use crate::AppState;
+use crate::{pubsub, AppState};
 
 /// POST /api/v1/voice/:channel_id/join
 ///
@@ -32,8 +32,8 @@ pub async fn join_voice(
         .await?
         .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
-    if channel.channel_type != "voice" {
-        return Err(AppError::BadRequest("Channel is not a voice channel".into()));
+    if !matches!(channel.channel_type.as_str(), "voice" | "dm" | "group") {
+        return Err(AppError::BadRequest("Channel does not support voice".into()));
     }
 
     // Verify user can access this channel
@@ -72,12 +72,19 @@ pub async fn join_voice(
         .or_insert_with(HashSet::new)
         .insert(user_id);
 
+    // Look up display name for LiveKit participant metadata
+    let participant_name = match queries::find_user_by_id(state.db.read(), user_id).await {
+        Ok(Some(u)) => u.display_name.unwrap_or(u.username),
+        _ => user_id.to_string(),
+    };
+
     // Generate LiveKit token
     let token = AccessToken::with_api_key(
         &state.config.livekit_api_key,
         &state.config.livekit_api_secret,
     )
     .with_identity(&user_id.to_string())
+    .with_name(&participant_name)
     .with_ttl(Duration::from_secs(6 * 3600)) // 6 hours
     .with_grants(VideoGrants {
         room_join: true,
@@ -324,6 +331,19 @@ async fn broadcast_voice_state(
                             let _ = broadcaster.send(msg.clone());
                         }
                     }
+                }
+            }
+        } else {
+            // DM/group channels: deliver directly to channel members (no server siblings)
+            if let Ok(member_ids) = queries::get_channel_member_ids(state.db.read(), channel_id).await {
+                for mid in member_ids {
+                    if mid == user_id { continue; }
+                    if let Some(conns) = state.connections.get(&mid) {
+                        for tx in conns.iter() {
+                            let _ = tx.send(msg.clone());
+                        }
+                    }
+                    pubsub::publish_user_event(state.redis.clone().as_mut(), mid, &msg).await;
                 }
             }
         }

@@ -9020,6 +9020,247 @@ em-emoji-picker {
   flex-shrink: 0;
 }
 
+/* ─── DM Call Bar & Overlays ─────────────────────────── */
+
+.dm-call-bar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.dm-call-bar-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dm-call-bar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.dm-call-bar-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+  font-weight: 500;
+  font-size: 0.8125rem;
+}
+
+.dm-call-screenshare {
+  flex: 1;
+  min-height: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+}
+
+.dm-call-screenshare video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.dm-call-resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: row-resize;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 2;
+}
+
+.dm-call-resize-handle:hover,
+.dm-call-resize-handle:active {
+  background: var(--blurple);
+}
+
+.dm-call-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+}
+
+.dm-call-participants {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 4px 0;
+  justify-content: center;
+  align-items: center;
+}
+
+.dm-call-participant {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dm-call-participant-name {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.dm-call-controls {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+  padding: 4px 0;
+  flex-shrink: 0;
+}
+
+.incoming-call-overlay,
+.outgoing-call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  animation: overlay-fade-in 0.2s ease-out;
+}
+
+.incoming-call-dialog,
+.outgoing-call-dialog {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: dialog-slide-up 0.3s ease-out;
+  min-width: 280px;
+}
+
+.incoming-call-dialog p,
+.outgoing-call-dialog p {
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.incoming-call-icon,
+.outgoing-call-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(35, 165, 90, 0.15);
+  animation: call-ring-pulse 1.5s ease-in-out infinite;
+}
+
+.incoming-call-caller {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.incoming-call-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.call-accept-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  border-radius: 24px;
+  border: none;
+  background: var(--green);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.call-accept-btn:hover {
+  filter: brightness(1.1);
+}
+
+.call-reject-btn,
+.call-cancel-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  border-radius: 24px;
+  border: none;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.call-reject-btn:hover,
+.call-cancel-btn:hover {
+  filter: brightness(1.1);
+}
+
+@keyframes call-ring-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(35, 165, 90, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 16px rgba(35, 165, 90, 0);
+  }
+}
+
+@keyframes call-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dialog-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ─── Voice: Channel Preview (Sidebar) ─────────────── */
 
 .voice-participants-preview {

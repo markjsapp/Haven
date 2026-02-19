@@ -376,6 +376,10 @@ export type WsClientMessage =
   | { type: "SetStatus"; payload: { status: string } }
   | { type: "PinMessage"; payload: { channel_id: string; message_id: string } }
   | { type: "UnpinMessage"; payload: { channel_id: string; message_id: string } }
+  | { type: "CallInvite"; payload: { channel_id: string } }
+  | { type: "CallAccept"; payload: { channel_id: string } }
+  | { type: "CallReject"; payload: { channel_id: string } }
+  | { type: "CallEnd"; payload: { channel_id: string } }
   | { type: "Ping" }
   | { type: "MarkRead"; payload: { channel_id: string } }
   | { type: "Resume"; payload: { session_id: string } };
@@ -403,6 +407,10 @@ export type WsServerMessage =
   | { type: "EmojiCreated"; payload: { server_id: string; emoji: CustomEmojiResponse } }
   | { type: "EmojiDeleted"; payload: { server_id: string; emoji_id: string } }
   | { type: "VoiceMuteUpdate"; payload: { channel_id: string; user_id: string; server_muted: boolean; server_deafened: boolean } }
+  | { type: "CallRinging"; payload: { channel_id: string; caller_id: string; caller_name: string } }
+  | { type: "CallAccepted"; payload: { channel_id: string; user_id: string } }
+  | { type: "CallRejected"; payload: { channel_id: string; user_id: string } }
+  | { type: "CallEnded"; payload: { channel_id: string; ended_by: string } }
   | { type: "BulkMessagesDeleted"; payload: { channel_id: string; message_ids: string[] } }
   | { type: "MemberTimedOut"; payload: { server_id: string; user_id: string; timed_out_until: string | null } }
   | { type: "ReadStateUpdated"; payload: { channel_id: string; last_read_at: string } }

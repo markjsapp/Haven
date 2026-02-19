@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { VoiceParticipant } from "@haven/core";
 import { useAuthStore } from "./auth.js";
+import { useChatStore } from "./chat.js";
+import { useUiStore } from "./ui.js";
 
 export type VoiceConnectionState = "disconnected" | "connecting" | "connected";
 export type ScreenShareQuality = "360p" | "720p" | "720p60" | "1080p" | "1080p60" | "1440p" | "1440p60" | "4k" | "4k60";
@@ -74,6 +76,23 @@ interface VoiceState extends VoiceSettings {
 
   // Load initial participants for a channel
   loadParticipants(channelId: string): Promise<void>;
+
+  // DM/group call state
+  incomingCall: { channelId: string; callerId: string; callerName: string } | null;
+  outgoingCall: { channelId: string } | null;
+  activeCallChannelId: string | null;
+
+  // Call actions
+  startCall(channelId: string): void;
+  acceptCall(channelId: string): void;
+  rejectCall(channelId: string): void;
+  endCall(channelId: string): void;
+
+  // Call WS event handlers
+  handleCallRinging(channelId: string, callerId: string, callerName: string): void;
+  handleCallAccepted(channelId: string, userId: string): void;
+  handleCallRejected(channelId: string, userId: string): void;
+  handleCallEnded(channelId: string, endedBy: string): void;
 }
 
 export const useVoiceStore = create<VoiceState>()(
@@ -249,6 +268,84 @@ export const useVoiceStore = create<VoiceState>()(
         } catch {
           // Non-fatal
         }
+      },
+
+      // ─── DM/Group Call State ────────────────────────
+      incomingCall: null,
+      outgoingCall: null,
+      activeCallChannelId: null,
+
+      startCall(channelId: string) {
+        const ws = useChatStore.getState().ws;
+        if (!ws) return;
+        set({ outgoingCall: { channelId } });
+        ws.send({ type: "CallInvite", payload: { channel_id: channelId } });
+      },
+
+      acceptCall(channelId: string) {
+        const ws = useChatStore.getState().ws;
+        if (!ws) return;
+        ws.send({ type: "CallAccept", payload: { channel_id: channelId } });
+        set({ incomingCall: null, activeCallChannelId: channelId });
+        // Navigate to the DM channel
+        useUiStore.getState().selectServer(null);
+        useChatStore.getState().selectChannel(channelId);
+        // Join the LiveKit room
+        get().joinVoice(channelId);
+      },
+
+      rejectCall(channelId: string) {
+        const ws = useChatStore.getState().ws;
+        if (!ws) return;
+        ws.send({ type: "CallReject", payload: { channel_id: channelId } });
+        set({ incomingCall: null });
+      },
+
+      endCall(channelId: string) {
+        const ws = useChatStore.getState().ws;
+        if (!ws) return;
+        ws.send({ type: "CallEnd", payload: { channel_id: channelId } });
+        get().leaveVoice();
+        set({ activeCallChannelId: null, outgoingCall: null });
+      },
+
+      handleCallRinging(channelId, callerId, callerName) {
+        set({ incomingCall: { channelId, callerId, callerName } });
+      },
+
+      handleCallAccepted(channelId, _userId) {
+        const { outgoingCall } = get();
+        if (outgoingCall?.channelId === channelId) {
+          // Caller side: the callee accepted — join the LiveKit room
+          set({ outgoingCall: null, activeCallChannelId: channelId });
+          // Navigate to the DM channel
+          useUiStore.getState().selectServer(null);
+          useChatStore.getState().selectChannel(channelId);
+          get().joinVoice(channelId);
+        }
+      },
+
+      handleCallRejected(channelId, _userId) {
+        const { outgoingCall } = get();
+        if (outgoingCall?.channelId === channelId) {
+          set({ outgoingCall: null });
+        }
+      },
+
+      handleCallEnded(channelId, _endedBy) {
+        const { activeCallChannelId, currentChannelId, incomingCall, outgoingCall } = get();
+        // Clear incoming/outgoing if it matches
+        if (incomingCall?.channelId === channelId) {
+          set({ incomingCall: null });
+        }
+        if (outgoingCall?.channelId === channelId) {
+          set({ outgoingCall: null });
+        }
+        // Disconnect from LiveKit if we're in this call
+        if (activeCallChannelId === channelId && currentChannelId === channelId) {
+          get().leaveVoice();
+        }
+        set({ activeCallChannelId: null });
       },
     }),
     {

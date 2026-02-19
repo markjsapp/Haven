@@ -649,6 +649,14 @@ pub enum WsClientMessage {
     PinMessage { channel_id: Uuid, message_id: Uuid },
     /// Unpin a message from a channel
     UnpinMessage { channel_id: Uuid, message_id: Uuid },
+    /// Initiate a call in a DM/group channel
+    CallInvite { channel_id: Uuid },
+    /// Accept an incoming call
+    CallAccept { channel_id: Uuid },
+    /// Reject an incoming call
+    CallReject { channel_id: Uuid },
+    /// End an active call
+    CallEnd { channel_id: Uuid },
     /// Ping (keepalive)
     Ping,
     /// Mark a channel as read (up to latest message)
@@ -730,6 +738,27 @@ pub enum WsServerMessage {
         user_id: Uuid,
         server_muted: bool,
         server_deafened: bool,
+    },
+    /// Incoming call ring event (sent to callee(s))
+    CallRinging {
+        channel_id: Uuid,
+        caller_id: Uuid,
+        caller_name: String,
+    },
+    /// Call was accepted
+    CallAccepted {
+        channel_id: Uuid,
+        user_id: Uuid,
+    },
+    /// Call was rejected
+    CallRejected {
+        channel_id: Uuid,
+        user_id: Uuid,
+    },
+    /// Call ended
+    CallEnded {
+        channel_id: Uuid,
+        ended_by: Uuid,
     },
     /// A custom emoji was created in a server
     EmojiCreated {

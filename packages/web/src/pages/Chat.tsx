@@ -21,6 +21,10 @@ import PinnedMessagesPanel from "../components/PinnedMessagesPanel.js";
 const SearchPanel = lazy(() => import("../components/SearchPanel.js"));
 const VoiceRoom = lazy(() => import("../components/VoiceRoom.js"));
 const VoiceConnection = lazy(() => import("../components/VoiceConnection.js"));
+const DmCallBar = lazy(() => import("../components/DmCallBar.js"));
+const IncomingCallOverlay = lazy(() => import("../components/IncomingCallOverlay.js"));
+const OutgoingCallOverlay = lazy(() => import("../components/OutgoingCallOverlay.js"));
+import { useVoiceStore } from "../store/voice.js";
 import { parseChannelDisplay } from "../lib/channel-utils.js";
 import SecurityPhraseSetup from "../components/SecurityPhraseSetup.js";
 import SecurityPhraseRestore from "../components/SecurityPhraseRestore.js";
@@ -412,6 +416,18 @@ export default function Chat() {
                     <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
                   </svg>
                 </button>
+                {isDmOrGroupChannel && (
+                  <button
+                    className="chat-header-btn"
+                    onClick={() => useVoiceStore.getState().startCall(currentChannelId!)}
+                    title={t("dmCall.startCall")}
+                    aria-label={t("dmCall.startCall")}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 00-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z" />
+                    </svg>
+                  </button>
+                )}
                 {!is1on1Dm && (
                   <button
                     className={`chat-header-btn ${memberSidebarOpen ? "active" : ""}`}
@@ -453,6 +469,9 @@ export default function Chat() {
             <Suspense fallback={null}><VoiceRoom channelId={currentChannelId} channelName={channelDisplay?.name ?? t("chat.voiceDefaultName")} serverId={selectedServerId!} /></Suspense>
           ) : currentChannelId ? (
             <>
+              {isDmOrGroupChannel && (
+                <Suspense fallback={null}><DmCallBar channelId={currentChannelId} channelName={channelDisplay?.name ?? ""} /></Suspense>
+              )}
               <MessageList />
               {typingNames.length > 0 && (
                 <div className="typing-indicator" aria-live="polite">
@@ -513,6 +532,9 @@ export default function Chat() {
       {showAdminPanel && <Suspense fallback={null}><AdminPanel onClose={() => setShowAdminPanel(false)} /></Suspense>}
       {showCommandPalette && <Suspense fallback={null}><CommandPalette onClose={() => setShowCommandPalette(false)} /></Suspense>}
       {showKeyboardHelp && <Suspense fallback={null}><KeyboardShortcutsModal onClose={() => setShowKeyboardHelp(false)} /></Suspense>}
+
+      <Suspense fallback={null}><IncomingCallOverlay /></Suspense>
+      <Suspense fallback={null}><OutgoingCallOverlay /></Suspense>
 
       {backupPending && backupAvailable && <SecurityPhraseRestore />}
       {backupPending && !backupAvailable && <SecurityPhraseSetup />}

@@ -236,6 +236,14 @@ export default function MessageList() {
               systemContent = <>{name} {t("messageList.system.pinnedMessage")} {data.message_id ? <button className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>{t("messageList.system.aMessage")}</button> : t("messageList.system.aMessage")}</>;
             } else if (data.event === "message_unpinned") {
               systemContent = <>{name} {t("messageList.system.unpinnedMessage")} {data.message_id ? <button className="system-message-link" onClick={() => scrollToMessage(data.message_id)}>{t("messageList.system.aMessage")}</button> : t("messageList.system.aMessage")}</>;
+            } else if (data.event === "call_ended") {
+              const secs = data.duration_secs ?? 0;
+              const mins = Math.floor(secs / 60);
+              const remSecs = secs % 60;
+              const duration = mins > 0
+                ? `${mins}m ${remSecs}s`
+                : `${remSecs}s`;
+              systemContent = t("messageList.system.callEnded", { duration });
             } else systemContent = `${name} — ${data.event}`;
           } catch { /* use raw text */ }
 
