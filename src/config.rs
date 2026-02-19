@@ -112,6 +112,12 @@ pub struct ConfigFile {
     // External APIs
     #[serde(default)]
     pub giphy_api_key: String,
+
+    // Cloudflare Turnstile (CAPTCHA) — disabled when empty
+    #[serde(default)]
+    pub turnstile_site_key: String,
+    #[serde(default)]
+    pub turnstile_secret_key: String,
 }
 
 // ─── TLS Config ───────────────────────────────────────
@@ -251,9 +257,18 @@ pub struct AppConfig {
 
     // External APIs
     pub giphy_api_key: String,
+
+    // Cloudflare Turnstile (CAPTCHA) — disabled when empty
+    pub turnstile_site_key: String,
+    pub turnstile_secret_key: String,
 }
 
 impl AppConfig {
+    /// Returns true if Cloudflare Turnstile CAPTCHA is configured.
+    pub fn turnstile_enabled(&self) -> bool {
+        !self.turnstile_site_key.is_empty() && !self.turnstile_secret_key.is_empty()
+    }
+
     /// Returns true if LiveKit voice is configured.
     pub fn livekit_enabled(&self) -> bool {
         !self.livekit_url.is_empty()
@@ -323,6 +338,9 @@ impl AppConfig {
             registration_invites_per_user: 3,
 
             giphy_api_key: String::new(),
+
+            turnstile_site_key: String::new(),
+            turnstile_secret_key: String::new(),
         }
     }
 
@@ -458,6 +476,9 @@ impl AppConfig {
                 .unwrap_or(3),
 
             giphy_api_key: env::var("GIPHY_API_KEY").unwrap_or_default(),
+
+            turnstile_site_key: env::var("TURNSTILE_SITE_KEY").unwrap_or_default(),
+            turnstile_secret_key: env::var("TURNSTILE_SECRET_KEY").unwrap_or_default(),
         }
     }
 
@@ -530,6 +551,9 @@ impl AppConfig {
             registration_invites_per_user: file.registration_invites_per_user,
 
             giphy_api_key: file.giphy_api_key,
+
+            turnstile_site_key: file.turnstile_site_key,
+            turnstile_secret_key: file.turnstile_secret_key,
         }
     }
 
@@ -594,6 +618,9 @@ impl AppConfig {
             registration_invites_per_user: default_registration_invites_per_user(),
 
             giphy_api_key: String::new(),
+
+            turnstile_site_key: String::new(),
+            turnstile_secret_key: String::new(),
         };
 
         // Write the TOML file
@@ -655,6 +682,9 @@ impl AppConfig {
             registration_invites_per_user: file.registration_invites_per_user,
 
             giphy_api_key: file.giphy_api_key,
+
+            turnstile_site_key: file.turnstile_site_key,
+            turnstile_secret_key: file.turnstile_secret_key,
         }
     }
 }

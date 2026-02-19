@@ -97,7 +97,7 @@ interface AuthState {
   backupAvailable: boolean;
 
   init(): Promise<void>;
-  register(username: string, password: string, displayName?: string, inviteCode?: string): Promise<void>;
+  register(username: string, password: string, displayName?: string, inviteCode?: string, turnstileToken?: string): Promise<void>;
   login(username: string, password: string, totpCode?: string): Promise<void>;
   logout(): void;
   completeBackupSetup(): void;
@@ -120,7 +120,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ initialized: true });
   },
 
-  async register(username, password, displayName, inviteCode) {
+  async register(username, password, displayName, inviteCode, turnstileToken) {
     await get().init();
 
     // Clear any stale crypto state from a previous session
@@ -142,6 +142,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       signed_prekey_signature: keys.signed_prekey_signature,
       one_time_prekeys: keys.one_time_prekeys,
       invite_code: inviteCode,
+      turnstile_token: turnstileToken,
     });
 
     // Persist keys to localStorage so they survive page reloads

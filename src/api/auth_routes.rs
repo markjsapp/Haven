@@ -56,6 +56,31 @@ fn extract_ip_from_headers(headers: &HeaderMap) -> Option<String> {
         })
 }
 
+/// Cloudflare Turnstile siteverify endpoint.
+const TURNSTILE_VERIFY_URL: &str = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+/// Verify a Cloudflare Turnstile token. Returns Ok(()) on success.
+async fn verify_turnstile(secret: &str, token: &str) -> AppResult<()> {
+    let client = reqwest::Client::new();
+    let res = client
+        .post(TURNSTILE_VERIFY_URL)
+        .form(&[("secret", secret), ("response", token)])
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Turnstile verification request failed: {}", e)))?;
+
+    let body: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Turnstile response parse failed: {}", e)))?;
+
+    if body.get("success").and_then(|v| v.as_bool()) == Some(true) {
+        Ok(())
+    } else {
+        Err(AppError::Validation("CAPTCHA verification failed — please try again".into()))
+    }
+}
+
 /// Number of leading zero bits required for PoW (20 ≈ ~1M hashes, sub-second on modern hardware)
 const POW_DIFFICULTY: u32 = 20;
 /// TTL for PoW challenges in Redis (seconds)
@@ -83,9 +108,16 @@ pub async fn pow_challenge(
         state.memory.pow_challenges.insert(challenge.clone(), expiry);
     }
 
+    let turnstile_site_key = if state.config.turnstile_enabled() {
+        Some(state.config.turnstile_site_key.clone())
+    } else {
+        None
+    };
+
     Ok(Json(PowChallengeResponse {
         challenge,
         difficulty: POW_DIFFICULTY,
+        turnstile_site_key,
     }))
 }
 
@@ -154,6 +186,13 @@ pub async fn register(
 
     if !verify_pow(&req.pow_challenge, &req.pow_nonce, POW_DIFFICULTY) {
         return Err(AppError::Validation("Invalid Proof-of-Work solution".into()));
+    }
+
+    // Verify Cloudflare Turnstile CAPTCHA (if enabled)
+    if state.config.turnstile_enabled() {
+        let token = req.turnstile_token.as_deref()
+            .ok_or(AppError::Validation("CAPTCHA token required".into()))?;
+        verify_turnstile(&state.config.turnstile_secret_key, token).await?;
     }
 
     // Validate registration invite code (if invite-only mode is enabled)

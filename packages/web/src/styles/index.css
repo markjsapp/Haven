@@ -619,6 +619,12 @@ body {
   cursor: not-allowed;
 }
 
+.turnstile-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
 .auth-note {
   text-align: center;
   font-size: 0.75rem;

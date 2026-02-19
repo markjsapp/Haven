@@ -591,6 +591,7 @@
   "register.passwordLabel": "Password",
   "register.passwordTooShort": "Password must be at least 8 characters",
   "register.passwordsMismatch": "Passwords do not match",
+  "register.turnstileError": "Please complete the verification challenge",
   "register.signIn": "Sign in",
   "register.submit": "Create Account",
   "register.submitLoading": "Generating keys...",

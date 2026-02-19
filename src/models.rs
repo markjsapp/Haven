@@ -111,6 +111,9 @@ pub struct RegisterRequest {
 
     /// Registration invite code (required when REGISTRATION_INVITE_ONLY=true)
     pub invite_code: Option<String>,
+
+    /// Cloudflare Turnstile token (required when TURNSTILE_SECRET_KEY is set)
+    pub turnstile_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,6 +142,9 @@ pub struct PowChallengeResponse {
     pub challenge: String,
     /// Number of leading zero bits required in SHA-256(challenge + nonce)
     pub difficulty: u32,
+    /// Cloudflare Turnstile site key (present when Turnstile is enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turnstile_site_key: Option<String>,
 }
 
 // ─── TOTP ──────────────────────────────────────────────

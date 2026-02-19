@@ -12,6 +12,7 @@ export interface RegisterRequest {
   pow_challenge: string;
   pow_nonce: string;
   invite_code?: string;
+  turnstile_token?: string;
 }
 
 /** Fields the caller provides — PoW fields are auto-filled by the API client */
@@ -20,6 +21,7 @@ export type RegisterInput = Omit<RegisterRequest, "pow_challenge" | "pow_nonce">
 export interface PowChallengeResponse {
   challenge: string;
   difficulty: number;
+  turnstile_site_key?: string;
 }
 
 export interface LoginRequest {
