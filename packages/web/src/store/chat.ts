@@ -1267,6 +1267,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     });
 
+    // Switch UI to DM view (hide friends list)
+    const ui = useUiStore.getState();
+    if (ui.selectedServerId !== null) ui.selectServer(null);
+    ui.setShowFriends(false);
+
     return channel;
   },
 

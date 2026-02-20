@@ -302,7 +302,7 @@ function FriendRow({
         {friend.status === "accepted" && (
           <>
             <button
-              className="friend-action-btn message"
+              className="friend-action-btn msg"
               onClick={() => startDm(friend.username).catch(() => {})}
               title={t("friendsList.messageTitle")}
               aria-label={t("friendsList.messageAriaLabel")}

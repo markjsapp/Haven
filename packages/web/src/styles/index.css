@@ -5210,16 +5210,17 @@ em-emoji-picker {
   height: 36px;
   border-radius: 50%;
   border: none;
-  background: var(--bg-tertiary);
+  background: transparent;
   color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .friend-action-btn:hover {
+  background: var(--bg-tertiary);
   color: var(--text-normal);
 }
 
@@ -5235,7 +5236,7 @@ em-emoji-picker {
   color: var(--status-danger);
 }
 
-.friend-action-btn.message:hover {
+.friend-action-btn.msg:hover {
   color: var(--text-normal);
 }
 
@@ -6079,8 +6080,8 @@ em-emoji-picker {
 
 /* ─── DM Member Sidebar ──────────────────────────── */
 .dm-member-sidebar {
-  width: 240px;
-  min-width: 240px;
+  width: var(--member-sidebar-width);
+  min-width: var(--member-sidebar-width);
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
@@ -6186,7 +6187,7 @@ em-emoji-picker {
 }
 
 .dm-profile-banner {
-  height: 60px;
+  height: 120px;
   background: linear-gradient(135deg, var(--blurple) 0%, #7b68ee 100%);
   border-radius: 0;
   flex-shrink: 0;
@@ -6200,7 +6201,7 @@ em-emoji-picker {
 .dm-profile-avatar-section {
   display: flex;
   justify-content: center;
-  margin-top: -40px;
+  margin-top: -44px;
   position: relative;
   z-index: 1;
 }
