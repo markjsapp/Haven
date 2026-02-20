@@ -22,6 +22,7 @@ import { createMentionExtension, suggestionActiveRef, type MemberItem } from "..
 import { createChannelMentionExtension, type ChannelItem } from "../lib/tiptap-channel-mention.js";
 import { createEmojiSuggestExtension } from "../lib/tiptap-emoji-suggest.js";
 import { useUiStore } from "../store/ui.js";
+import { useContextMenuPosition } from "../hooks/useContextMenuPosition.js";
 import { parseChannelName } from "../lib/channel-utils.js";
 import { usePermissions } from "../hooks/usePermissions.js";
 import { Permission } from "@haven/core";
@@ -76,6 +77,7 @@ export default function MessageInput({ placeholder }: MessageInputProps) {
   const [inputCtx, setInputCtx] = useState<{ x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputCtxRef = useRef<HTMLDivElement>(null);
+  const inputCtxStyle = useContextMenuPosition(inputCtxRef, inputCtx?.x ?? 0, inputCtx?.y ?? 0);
 
   const sendMessage = useChatStore((s) => s.sendMessage);
   const sendTyping = useChatStore((s) => s.sendTyping);
@@ -661,7 +663,7 @@ export default function MessageInput({ placeholder }: MessageInputProps) {
         <div
           ref={inputCtxRef}
           className="message-context-menu input-context-menu"
-          style={{ position: "fixed", top: Math.min(inputCtx.y, window.innerHeight - 220), left: Math.min(inputCtx.x, window.innerWidth - 200), zIndex: 1000 }}
+          style={inputCtxStyle}
           role="menu"
           aria-label={t("messageInput.contextMenu.ariaLabel")}
         >

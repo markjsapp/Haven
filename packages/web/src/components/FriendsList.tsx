@@ -7,6 +7,7 @@ import ConfirmDialog from "./ConfirmDialog.js";
 import Avatar from "./Avatar.js";
 import InviteToServerModal from "./InviteToServerModal.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
+import { useContextMenuPosition } from "../hooks/useContextMenuPosition.js";
 import type { FriendResponse } from "@haven/core";
 
 type Tab = "online" | "all" | "pending" | "blocked";
@@ -354,6 +355,7 @@ function FriendContextMenu({
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
+  const menuStyle = useContextMenuPosition(menuRef, x, y);
 
   useEffect(() => {
     menuRef.current?.focus();
@@ -373,7 +375,7 @@ function FriendContextMenu({
     <div
       ref={menuRef}
       className="channel-context-menu"
-      style={{ top: Math.min(y, window.innerHeight - 200), left: Math.min(x, window.innerWidth - 200) }}
+      style={menuStyle}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={handleKeyDown}
       role="menu"

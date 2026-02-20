@@ -9,6 +9,7 @@ import { Permission, type ChannelResponse, type CategoryResponse } from "@haven/
 import { usePermissions } from "../hooks/usePermissions.js";
 import { unicodeBtoa } from "../lib/base64.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
+import { useContextMenuPosition } from "../hooks/useContextMenuPosition.js";
 import { useRovingTabindex } from "../hooks/useRovingTabindex.js";
 import {
   parseChannelName,
@@ -364,12 +365,7 @@ function DmContextMenu({ channelId, channelType, x, y, onClose }: {
     };
   }, [onClose]);
 
-  const style: React.CSSProperties = {
-    position: "fixed",
-    top: Math.min(y, window.innerHeight - 120),
-    left: Math.min(x, window.innerWidth - 180),
-    zIndex: 1000,
-  };
+  const style = useContextMenuPosition(ref, x, y);
 
   return (
     <div className="message-context-menu" style={style} ref={ref} role="menu" aria-label={t("channelSidebar.dm.contextMenu.ariaLabel")} tabIndex={-1} onKeyDown={handleKeyDown}>
@@ -460,6 +456,7 @@ function ChannelContextMenu({
   const channelNotifications = useUiStore((s) => s.channelNotifications);
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
+  const menuStyle = useContextMenuPosition(menuRef, x, y);
 
   const muted = isChannelMuted(channelId);
   const currentNotify = channelNotifications[channelId] ?? "default";
@@ -471,7 +468,7 @@ function ChannelContextMenu({
     <div
       ref={menuRef}
       className="channel-context-menu"
-      style={{ top: y, left: x }}
+      style={menuStyle}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={handleKeyDown}
       role="menu"
@@ -580,12 +577,13 @@ function CategoryContextMenuPopup({
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
+  const menuStyle = useContextMenuPosition(menuRef, x, y);
 
   return (
     <div
       ref={menuRef}
       className="channel-context-menu"
-      style={{ top: y, left: x }}
+      style={menuStyle}
       role="menu"
       aria-label={t("channelSidebar.category.contextMenu.ariaLabel")}
       tabIndex={-1}
@@ -632,12 +630,13 @@ function ServerHeaderContextMenu({
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
+  const menuStyle = useContextMenuPosition(menuRef, x, y);
 
   return (
     <div
       ref={menuRef}
       className="channel-context-menu"
-      style={{ top: y, left: x }}
+      style={menuStyle}
       role="menu"
       aria-label={t("channelSidebar.server.contextMenu.ariaLabel")}
       tabIndex={-1}
@@ -699,6 +698,7 @@ function ServerDropdownMenu({
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const { handleKeyDown } = useMenuKeyboard(menuRef);
+  const menuStyle = useContextMenuPosition(menuRef, anchorRect.left, anchorRect.bottom + 4);
 
   useEffect(() => {
     menuRef.current?.focus();
@@ -726,7 +726,7 @@ function ServerDropdownMenu({
     <div
       ref={menuRef}
       className="channel-context-menu"
-      style={{ top: anchorRect.bottom + 4, left: anchorRect.left }}
+      style={menuStyle}
       role="menu"
       aria-label={t("channelSidebar.server.contextMenu.ariaLabel")}
       tabIndex={-1}

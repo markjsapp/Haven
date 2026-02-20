@@ -5,6 +5,7 @@ import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { usePermissions } from "../hooks/usePermissions.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
+import { useContextMenuPosition } from "../hooks/useContextMenuPosition.js";
 import { Permission } from "@haven/core";
 
 interface Props {
@@ -72,12 +73,7 @@ export default function VoiceContextMenu({
     };
   }, [onClose, noteOpen, noteText, existingNote, userId, setUserNote]);
 
-  const style: React.CSSProperties = {
-    position: "fixed",
-    top: Math.min(position.y, window.innerHeight - 400),
-    left: Math.min(position.x, window.innerWidth - 220),
-    zIndex: 400,
-  };
+  const style = useContextMenuPosition(ref, position.x, position.y);
 
   async function handleServerMute() {
     try {

@@ -5,6 +5,7 @@ import { useAuthStore } from "../store/auth.js";
 import { Permission } from "@haven/core";
 import { usePermissions } from "../hooks/usePermissions.js";
 import { useMenuKeyboard } from "../hooks/useMenuKeyboard.js";
+import { useContextMenuPosition } from "../hooks/useContextMenuPosition.js";
 
 interface MessageContextMenuProps {
   message: DecryptedMessage;
@@ -63,13 +64,7 @@ export default function MessageContextMenu({
     };
   }, [onClose]);
 
-  // Clamp position to viewport
-  const style: React.CSSProperties = {
-    position: "fixed",
-    top: Math.min(y, window.innerHeight - 250),
-    left: Math.min(x, window.innerWidth - 180),
-    zIndex: 1000,
-  };
+  const style = useContextMenuPosition(ref, x, y);
 
   return (
     <div className="message-context-menu" style={style} ref={ref} role="menu" aria-label={t("messageContext.ariaLabel")} tabIndex={-1} onKeyDown={handleKeyDown}>

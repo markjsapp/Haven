@@ -5,8 +5,9 @@ import {
   useLocalParticipant,
   useRemoteParticipants,
   useTracks,
+  useIsSpeaking,
 } from "@livekit/components-react";
-import { Track, ScreenSharePresets, VideoPreset } from "livekit-client";
+import { Track, ScreenSharePresets, VideoPreset, type Participant } from "livekit-client";
 import type { TrackReference } from "@livekit/components-core";
 import { useVoiceStore, type ScreenShareQuality } from "../store/voice.js";
 import { useAuthStore } from "../store/auth.js";
@@ -228,7 +229,7 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
   const participantTiles = (
     <>
       <ParticipantTile
-        identity={localParticipant.identity}
+        participant={localParticipant}
         userId={user?.id ?? ""}
         name={user?.display_name || user?.username || "You"}
         avatarUrl={user?.avatar_url ?? null}
@@ -247,7 +248,7 @@ function RoomContent({ channelName, channelId, serverId, isMuted, isDeafened }: 
         return (
           <ParticipantTile
             key={p.identity}
-            identity={p.identity}
+            participant={p}
             userId={p.identity}
             name={p.name || p.identity}
             avatarUrl={pData?.avatar_url ?? null}
@@ -424,7 +425,7 @@ function ScreenShareView({ tracks, focusedIndex, onFocusChange }: ScreenShareVie
 // ─── Participant Tile ───
 
 interface ParticipantTileProps {
-  identity: string;
+  participant: Participant;
   userId: string;
   name: string;
   avatarUrl: string | null;
@@ -442,7 +443,7 @@ interface ParticipantTileProps {
 }
 
 function ParticipantTile({
-  identity,
+  participant,
   userId,
   name,
   avatarUrl,
@@ -454,9 +455,10 @@ function ParticipantTile({
   onContextMenu,
 }: ParticipantTileProps) {
   const { t } = useTranslation();
+  const isSpeaking = useIsSpeaking(participant);
   return (
     <div
-      className={`voice-participant ${isMuted ? "muted" : ""} ${serverMuted ? "server-muted" : ""} ${serverDeafened ? "server-deafened" : ""}`}
+      className={`voice-participant ${isSpeaking ? "speaking" : ""} ${isMuted ? "muted" : ""} ${serverMuted ? "server-muted" : ""} ${serverDeafened ? "server-deafened" : ""}`}
       onContextMenu={(e) => onContextMenu(e, userId, serverMuted, serverDeafened)}
     >
       <div className="voice-participant-avatar">

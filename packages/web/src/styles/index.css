@@ -3436,8 +3436,7 @@ body {
 .message-actions {
   position: absolute;
   right: 16px;
-  top: 0;
-  transform: translateY(-100%);
+  top: -16px;
   display: none;
   align-items: center;
   gap: 2px;
@@ -3449,7 +3448,8 @@ body {
   z-index: 10;
 }
 
-.message:hover .message-actions {
+.message:hover .message-actions,
+.message.message-picker-open .message-actions {
   display: flex;
 }
 
@@ -8794,6 +8794,13 @@ em-emoji-picker {
 
 .voice-participant-avatar {
   position: relative;
+  border-radius: 50%;
+  padding: 3px;
+  transition: box-shadow 0.15s ease;
+}
+
+.voice-participant.speaking .voice-participant-avatar {
+  box-shadow: 0 0 0 3px var(--green);
 }
 
 .voice-participant-info {

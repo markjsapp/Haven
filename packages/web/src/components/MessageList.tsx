@@ -298,7 +298,7 @@ export default function MessageList() {
             {newDividerEl}
             <div
               id={`msg-${msg.id}`}
-              className={`message ${isGrouped ? "message-grouped" : "message-first"} ${highlightedMsgId === msg.id ? "message-highlight" : ""}`}
+              className={`message ${isGrouped ? "message-grouped" : "message-first"} ${highlightedMsgId === msg.id ? "message-highlight" : ""} ${reactionPickerMsgId === msg.id ? "message-picker-open" : ""}`}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setContextMenu({ message: msg, x: e.clientX, y: e.clientY });

@@ -128,9 +128,23 @@ export const useVoiceStore = create<VoiceState>()(
 
       async joinVoice(channelId: string) {
         const api = useAuthStore.getState().api;
+        const { currentChannelId: oldChannel, livekitToken: oldToken } = get();
+
+        // If already in a channel, tear down the old LiveKit connection first.
+        // Clearing the token unmounts <LiveKitRoom>, preventing cross-channel audio.
+        if (oldChannel && oldToken) {
+          set({ livekitToken: null, livekitUrl: null });
+          // Yield to React so <LiveKitRoom> unmounts before we mount a new one
+          await new Promise((r) => setTimeout(r, 50));
+        }
+
         try {
           set({ connectionState: "connecting", currentChannelId: channelId });
           const res = await api.joinVoice(channelId);
+
+          // Guard: user may have left voice while the API call was in-flight
+          if (get().connectionState !== "connecting" || get().currentChannelId !== channelId) return;
+
           set({
             livekitToken: res.token,
             livekitUrl: res.url,

@@ -6,6 +6,7 @@ import { useFriendsStore } from "../store/friends.js";
 import { usePresenceStore, STATUS_CONFIG } from "../store/presence.js";
 import { getSessionAD } from "../lib/crypto.js";
 import { computeSafetyNumber } from "../lib/safety-number.js";
+import { useContextMenuPosition } from "../hooks/useContextMenuPosition.js";
 import Avatar from "./Avatar.js";
 import EmojiPicker from "./EmojiPicker.js";
 import ConfirmDialog from "./ConfirmDialog.js";
@@ -116,13 +117,7 @@ export default function ProfilePopup({ userId, serverId, position, onClose }: Pr
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showMoreMenu]);
 
-  // Clamp position to viewport
-  const style: React.CSSProperties = {
-    position: "fixed",
-    top: Math.min(position.top, window.innerHeight - 600),
-    left: Math.min(position.left + 8, window.innerWidth - 350),
-    zIndex: 1000,
-  };
+  const style = useContextMenuPosition(popupRef, position.left + 8, position.top);
 
   // --- Actions ---
 
