@@ -5,7 +5,7 @@
 <h1 align="center">Haven</h1>
 
 <p align="center">
-  <img src="assets/haven.jpg" alt="Haven" width="600" />
+  <img src="assets/haven.jpg" alt="Haven" width="800" />
 </p>
 
 <p align="center">A privacy-first, end-to-end encrypted chat platform.</p>
@@ -44,7 +44,7 @@ Most chat platforms choose between features and privacy. Haven doesn't.
 | Accessibility (a11y) | Yes | Partial | Limited | Limited |
 | No tracking / telemetry | Yes | No | Varies | Yes |
 
-<video src="https://github.com/user-attachments/assets/2f7b2c27-3318-4f1b-bb65-f1fd57deb72c" width="600" controls></video>
+<video src="https://github.com/user-attachments/assets/2f7b2c27-3318-4f1b-bb65-f1fd57deb72c" width="400" controls></video>
 
 **Haven gives you Discord-level features with Signal-level privacy.** Your server, your data, your keys. The backend never sees plaintext not messages, not filenames, not even channel names. Features that are normally paywalled like animated emojis, higher quality video and voice calls, are uncompromised.
 
@@ -69,13 +69,13 @@ Most chat platforms choose between features and privacy. Haven doesn't.
 
 ## Features
 
-<video src="https://github.com/user-attachments/assets/d66e851f-1e5b-4c2e-b6e1-bdf04087daa2" width="600" controls></video>
+<video src="https://github.com/user-attachments/assets/d66e851f-1e5b-4c2e-b6e1-bdf04087daa2" width="400" controls></video>
 
 **Communication** — Servers with text and voice channels, 1-on-1 and group DMs, friend requests, typing indicators, online presence, link previews, @mentions, message pinning, emoji reactions, animated emojis, and supports gifs
 
-<video src="https://github.com/user-attachments/assets/2f7b2c27-3318-4f1b-bb65-f1fd57deb72c" width="600" controls></video>
+<video src="https://github.com/user-attachments/assets/2f7b2c27-3318-4f1b-bb65-f1fd57deb72c" width="400" controls></video>
 
-<video src="https://github.com/user-attachments/assets/cd6a520f-29dc-4fb8-9ac6-07a3ba111aef" width="600" controls></video>
+<video src="https://github.com/user-attachments/assets/cd6a520f-29dc-4fb8-9ac6-07a3ba111aef" width="400" controls></video>
 
 **Media** — Encrypted file attachments with inline image/video/audio previews, image lightbox viewer, embedded audio player with seek and volume controls, video playback with MIME normalization, spoiler overlays for sensitive content, drag-and-drop uploads with progress tracking, thumbnail previews during loading
 
@@ -83,7 +83,7 @@ Most chat platforms choose between features and privacy. Haven doesn't.
 
 **Security** — X3DH + Double Ratchet for DMs (Signal Protocol), Sender Keys for group channels, encrypted file attachments, encrypted key backup (Argon2id KDF), Argon2id password hashing, JWT + rotating refresh tokens, optional TOTP 2FA with two-step login, proof-of-work registration gate, Cloudflare Turnstile CAPTCHA
 
-<video src="https://github.com/user-attachments/assets/ae59f1bc-1d20-43ba-bcb2-4ec8e350ec82" width="600" controls></video>
+<video src="https://github.com/user-attachments/assets/ae59f1bc-1d20-43ba-bcb2-4ec8e350ec82" width="400" controls></video>
 
 **Voice** — self hosted LiveKit-powered voice channels with screen sharing (360p–4K quality presets), per-user volume control (0–200%), server mute/deafen, right-click context menu on participants
 
@@ -91,11 +91,16 @@ Most chat platforms choose between features and privacy. Haven doesn't.
 
 **Accessibility** — ARIA labels and roles throughout, keyboard navigation, focus traps in modals and dialogs, screen reader support, configurable reduced motion, high-contrast mode, dyslexia-friendly font option
 
-<video src="https://github.com/user-attachments/assets/798d29f2-7bb0-4729-9537-4533bab1783c" width="600" controls></video>
+<video src="https://github.com/user-attachments/assets/798d29f2-7bb0-4729-9537-4533bab1783c" width="400" controls></video>
 
-<video src="https://github.com/user-attachments/assets/7ad265b9-cecd-4539-8178-2960a2569549" width="600" controls></video>
+<video src="https://github.com/user-attachments/assets/7ad265b9-cecd-4539-8178-2960a2569549" width="400" controls></video>
 
 **Customization** - 7 themes to start with plenty more options on the way, customize your profile card, avatar, bio, status, add custom emojis and more.
+
+| | | |
+|:---:|:---:|:---:|
+| ![Bluebird](assets/bluebird.png) | ![Cosmos](assets/cosmos.png) | ![Forest](assets/forest.png) |
+| ![Light Mode](assets/lightmode.png) | ![Night Mode](assets/night-mode.png) | ![Sage](assets/sage.png) |
 
 ## Tech Stack
 
