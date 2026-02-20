@@ -5,7 +5,7 @@
 <h1 align="center">Haven</h1>
 
 <p align="center">
-  <img src="assets/haven.png" alt="Haven" width="600" />
+  <img src="assets/haven.jpg" alt="Haven" width="600" />
 </p>
 
 <p align="center">A privacy-first, end-to-end encrypted chat platform.</p>
