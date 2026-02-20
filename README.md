@@ -12,7 +12,7 @@
 
 ## What is Haven?
 
-Haven is a full-featured chat application servers, channels, DMs, friends, roles, voice, screen and file sharing with one fundamental difference: **all message content is encrypted client-side before it ever touches the server**. The backend is an intentional "dumb relay" for encrypted blobs. It handles routing, auth, and access control, and has zero knowledge of what you're saying or sending. Current beta build is hosted in EU/Germany.
+Haven is a full-featured chat application servers, channels, DMs, friends, roles, voice, screen and file sharing with one fundamental difference: **all message content are encrypted client-side before it ever touches the server**. The backend is an intentional "dumb relay" for encrypted blobs. It handles routing, auth, and access control, and has zero knowledge of what you're saying or sending. Current beta build is hosted in EU/Germany.
 
 ### What the server can see
 - Encrypted blobs (messages, metadata, attachments)
