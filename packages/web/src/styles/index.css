@@ -2413,6 +2413,16 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* Invisible bridge between volume button and slider popup to prevent hover gap */
+.audio-volume-slider-wrap::before {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 12px;
+}
+
 .audio-volume-wrap:hover .audio-volume-slider-wrap,
 .audio-volume-wrap.open .audio-volume-slider-wrap {
   opacity: 1;
