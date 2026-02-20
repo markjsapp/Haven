@@ -17,6 +17,7 @@ import {
   type DHKeyPair,
 } from "@haven/core";
 import { clearCryptoState } from "../lib/crypto.js";
+import { clearMessageCache } from "../lib/message-cache.js";
 import { checkBackupStatus, clearCachedPhrase } from "../lib/backup.js";
 import { initNotifications } from "../lib/notifications.js";
 
@@ -273,6 +274,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Clear in-memory E2EE state (sessions, sender keys, etc.)
     clearCryptoState();
     clearCachedPhrase();
+    // Clear decrypted message caches (localStorage + IndexedDB)
+    clearMessageCache();
     set({
       user: null,
       identityKeyPair: null,

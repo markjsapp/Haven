@@ -223,6 +223,17 @@ export async function migrateFromLocalStorage(): Promise<void> {
   }
 }
 
+/** Clear all cached messages (used on logout). */
+export async function idbClearAll(): Promise<void> {
+  try {
+    const db = await openDb();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).clear();
+  } catch {
+    // Silently fail
+  }
+}
+
 /** Get total message count (for diagnostics). */
 export async function idbMessageCount(): Promise<number> {
   try {

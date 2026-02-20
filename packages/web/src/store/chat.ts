@@ -568,7 +568,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   disconnect() {
     get().ws?.disconnect();
-    set({ ws: null, wsState: "disconnected" });
+    set({
+      ws: null,
+      wsState: "disconnected",
+      channels: [],
+      messages: {},
+      currentChannelId: null,
+      servers: [],
+      roles: {},
+      userNames: {},
+      typingUsers: {},
+      unreadCounts: {},
+      dataLoaded: false,
+    });
   },
 
   sendTyping() {

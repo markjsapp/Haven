@@ -8,7 +8,7 @@
  */
 
 import type { DecryptedMessage } from "../store/chat.js";
-import { idbCacheMessage, idbUncacheMessage, idbGetMessage, migrateFromLocalStorage, idbEvict } from "./indexed-message-store.js";
+import { idbCacheMessage, idbUncacheMessage, idbGetMessage, idbClearAll, migrateFromLocalStorage, idbEvict } from "./indexed-message-store.js";
 
 const CACHE_KEY = "haven:msg-cache";
 const MAX_CACHED_MESSAGES = 2000;
@@ -16,6 +16,7 @@ const MAX_CACHED_MESSAGES = 2000;
 interface CachedMsg {
   sid: string; // senderId
   txt: string; // text
+  ch?: string; // channelId
   att?: unknown[]; // attachments
   lp?: unknown[]; // linkPreviews
   ct?: string; // contentType
@@ -71,6 +72,7 @@ export function cacheMessage(msg: DecryptedMessage): void {
   cache[msg.id] = {
     sid: msg.senderId,
     txt: msg.text,
+    ch: msg.channelId,
     ...(msg.attachments?.length ? { att: msg.attachments } : {}),
     ...(msg.linkPreviews?.length ? { lp: msg.linkPreviews } : {}),
     ...(msg.contentType ? { ct: msg.contentType } : {}),
@@ -93,6 +95,8 @@ export function getCachedMessage(
   const cache = loadCache();
   const cached = cache[messageId];
   if (!cached) return null;
+  // Reject if the cached message belongs to a different channel
+  if (cached.ch && cached.ch !== channelId) return null;
 
   return {
     id: messageId,
@@ -136,6 +140,13 @@ export async function getCachedMessageAsync(
     edited,
     raw: raw as DecryptedMessage["raw"],
   };
+}
+
+/** Clear all cached messages (used on logout). */
+export function clearMessageCache(): void {
+  memCache = {};
+  try { localStorage.removeItem(CACHE_KEY); } catch { /* ignore */ }
+  idbClearAll().catch(() => {});
 }
 
 /** Remove a message from cache (e.g. on delete). */
