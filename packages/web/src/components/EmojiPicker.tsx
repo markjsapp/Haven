@@ -31,8 +31,14 @@ export default function EmojiPicker({ onSelect, onClose, serverId, position = "a
         onClose();
       }
     }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    // Delay listener so the opening click doesn't immediately close the picker
+    const id = requestAnimationFrame(() => {
+      document.addEventListener("mousedown", handleClick);
+    });
+    return () => {
+      cancelAnimationFrame(id);
+      document.removeEventListener("mousedown", handleClick);
+    };
   }, [onClose]);
 
   useEffect(() => {

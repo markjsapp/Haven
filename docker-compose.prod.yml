@@ -86,7 +86,7 @@ services:
 
   # ─── LiveKit (voice/video) ────────────────────────────
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.9.11
     restart: unless-stopped
     ports:
       - "7881:7881"       # WebRTC TCP

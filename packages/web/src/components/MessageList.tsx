@@ -134,18 +134,7 @@ export default function MessageList() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [channelMessages.length]);
 
-  // Close reaction picker on outside click
   const reactionPickerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!reactionPickerMsgId) return;
-    function handleClick(e: MouseEvent) {
-      if (reactionPickerRef.current && !reactionPickerRef.current.contains(e.target as Node)) {
-        setReactionPickerMsgId(null);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [reactionPickerMsgId]);
 
   const handleReactionSelect = useCallback((messageId: string, emoji: string) => {
     toggleReaction(messageId, emoji);
